@@ -1,0 +1,324 @@
+{
+  "meta": {
+    "specFile": "importer/specs/appveyor-swagger.json",
+    "sandboxSeed": "parity-seed-1",
+    "virtualClockMs": 1735689600000,
+    "credential": "pikopod_sbx_test_d379d059bd91179fb417d581290c3dfbfd5bb1ad64c7b2d1",
+    "normalizedPaths": [
+      "steps[*].reqHeaders.* == meta.credential -> \"$CREDENTIAL\" (TS mints issued tokens via randomBytes; the replayer substitutes the engine credential)"
+    ]
+  },
+  "steps": [
+    {
+      "name": "create-role",
+      "method": "POST",
+      "path": "/roles",
+      "reqHeaders": {
+        "authorization": "$CREDENTIAL"
+      },
+      "reqBody": {
+        "name": "parity-role-1"
+      },
+      "status": 200,
+      "respHeaders": {
+        "content-type": "application/json; charset=utf-8",
+        "etag": "\"0\""
+      },
+      "respBody": {}
+    },
+    {
+      "name": "read-created",
+      "method": "GET",
+      "path": "/roles/roles_1",
+      "reqHeaders": {
+        "authorization": "$CREDENTIAL"
+      },
+      "reqBody": null,
+      "status": 200,
+      "respHeaders": {
+        "content-type": "application/json; charset=utf-8",
+        "etag": "\"0\""
+      },
+      "respBody": {}
+    },
+    {
+      "name": "list-read-your-write",
+      "method": "GET",
+      "path": "/roles",
+      "reqHeaders": {
+        "authorization": "$CREDENTIAL"
+      },
+      "reqBody": null,
+      "status": 200,
+      "respHeaders": {
+        "content-type": "application/json; charset=utf-8"
+      },
+      "respBody": [
+        {}
+      ]
+    },
+    {
+      "name": "update-collection-put-passthrough",
+      "method": "PUT",
+      "path": "/roles",
+      "reqHeaders": {
+        "authorization": "$CREDENTIAL"
+      },
+      "reqBody": {
+        "roleId": 1,
+        "name": "renamed"
+      },
+      "status": 200,
+      "respHeaders": {
+        "content-type": "application/json; charset=utf-8"
+      },
+      "respBody": {}
+    },
+    {
+      "name": "delete-role",
+      "method": "DELETE",
+      "path": "/roles/roles_1",
+      "reqHeaders": {
+        "authorization": "$CREDENTIAL"
+      },
+      "reqBody": null,
+      "status": 204,
+      "respHeaders": {},
+      "respBody": null
+    },
+    {
+      "name": "read-after-delete-404",
+      "method": "GET",
+      "path": "/roles/roles_1",
+      "reqHeaders": {
+        "authorization": "$CREDENTIAL"
+      },
+      "reqBody": null,
+      "status": 404,
+      "respHeaders": {
+        "content-type": "application/json; charset=utf-8"
+      },
+      "respBody": {
+        "message": "hnlzxdxnn",
+        "modelState": {}
+      }
+    },
+    {
+      "name": "unauthenticated",
+      "method": "GET",
+      "path": "/roles",
+      "reqHeaders": {},
+      "reqBody": null,
+      "status": 401,
+      "respHeaders": {
+        "content-type": "application/json; charset=utf-8"
+      },
+      "respBody": {
+        "message": "Authentication required"
+      }
+    },
+    {
+      "name": "wrong-credential",
+      "method": "GET",
+      "path": "/roles",
+      "reqHeaders": {
+        "authorization": "pikopod_sbx_test_deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
+      },
+      "reqBody": null,
+      "status": 401,
+      "respHeaders": {
+        "content-type": "application/json; charset=utf-8"
+      },
+      "respBody": {
+        "message": "Unauthorized"
+      }
+    },
+    {
+      "name": "unknown-path-404",
+      "method": "GET",
+      "path": "/does-not-exist",
+      "reqHeaders": {
+        "authorization": "$CREDENTIAL"
+      },
+      "reqBody": null,
+      "status": 404,
+      "respHeaders": {
+        "content-type": "application/json; charset=utf-8"
+      },
+      "respBody": {
+        "message": "Not Found"
+      }
+    },
+    {
+      "name": "wrong-method-405",
+      "method": "DELETE",
+      "path": "/roles",
+      "reqHeaders": {
+        "authorization": "$CREDENTIAL"
+      },
+      "reqBody": null,
+      "status": 405,
+      "respHeaders": {
+        "content-type": "application/json; charset=utf-8",
+        "allow": "GET, POST, PUT"
+      },
+      "respBody": {
+        "message": "Method Not Allowed"
+      }
+    },
+    {
+      "name": "pure-synthesis-empty-list",
+      "method": "GET",
+      "path": "/users",
+      "reqHeaders": {
+        "authorization": "$CREDENTIAL"
+      },
+      "reqBody": null,
+      "status": 200,
+      "respHeaders": {
+        "content-type": "application/json; charset=utf-8"
+      },
+      "respBody": []
+    },
+    {
+      "name": "page-seed-1",
+      "method": "POST",
+      "path": "/roles",
+      "reqHeaders": {
+        "authorization": "$CREDENTIAL"
+      },
+      "reqBody": {
+        "name": "page-a"
+      },
+      "status": 200,
+      "respHeaders": {
+        "content-type": "application/json; charset=utf-8",
+        "etag": "\"0\""
+      },
+      "respBody": {}
+    },
+    {
+      "name": "page-seed-2",
+      "method": "POST",
+      "path": "/roles",
+      "reqHeaders": {
+        "authorization": "$CREDENTIAL"
+      },
+      "reqBody": {
+        "name": "page-b"
+      },
+      "status": 200,
+      "respHeaders": {
+        "content-type": "application/json; charset=utf-8",
+        "etag": "\"0\""
+      },
+      "respBody": {}
+    },
+    {
+      "name": "page-seed-3",
+      "method": "POST",
+      "path": "/roles",
+      "reqHeaders": {
+        "authorization": "$CREDENTIAL"
+      },
+      "reqBody": {
+        "name": "page-c"
+      },
+      "status": 200,
+      "respHeaders": {
+        "content-type": "application/json; charset=utf-8",
+        "etag": "\"0\""
+      },
+      "respBody": {}
+    },
+    {
+      "name": "list-page-1",
+      "method": "GET",
+      "path": "/roles?limit=2",
+      "reqHeaders": {
+        "authorization": "$CREDENTIAL"
+      },
+      "reqBody": null,
+      "status": 200,
+      "respHeaders": {
+        "content-type": "application/json; charset=utf-8",
+        "link": "</roles?limit=2&cursor=cm9sZXNfMw>; rel=\"next\""
+      },
+      "respBody": [
+        {},
+        {}
+      ]
+    },
+    {
+      "name": "list-page-2",
+      "method": "GET",
+      "path": "/roles?limit=2&cursor=cm9sZXNfMw",
+      "reqHeaders": {
+        "authorization": "$CREDENTIAL"
+      },
+      "reqBody": null,
+      "status": 200,
+      "respHeaders": {
+        "content-type": "application/json; charset=utf-8"
+      },
+      "respBody": [
+        {}
+      ]
+    },
+    {
+      "name": "idempotent-create",
+      "method": "POST",
+      "path": "/roles",
+      "reqHeaders": {
+        "authorization": "$CREDENTIAL",
+        "idempotency-key": "parity-idem-1"
+      },
+      "reqBody": {
+        "name": "idem-role"
+      },
+      "status": 200,
+      "respHeaders": {
+        "content-type": "application/json; charset=utf-8",
+        "etag": "\"0\""
+      },
+      "respBody": {}
+    },
+    {
+      "name": "idempotent-replay",
+      "method": "POST",
+      "path": "/roles",
+      "reqHeaders": {
+        "authorization": "$CREDENTIAL",
+        "idempotency-key": "parity-idem-1"
+      },
+      "reqBody": {
+        "name": "idem-role"
+      },
+      "status": 200,
+      "respHeaders": {
+        "content-type": "application/json; charset=utf-8",
+        "idempotent-replayed": "true"
+      },
+      "respBody": {}
+    },
+    {
+      "name": "idempotent-conflict-422",
+      "method": "POST",
+      "path": "/roles",
+      "reqHeaders": {
+        "authorization": "$CREDENTIAL",
+        "idempotency-key": "parity-idem-1"
+      },
+      "reqBody": {
+        "name": "DIFFERENT"
+      },
+      "status": 422,
+      "respHeaders": {
+        "content-type": "application/json; charset=utf-8"
+      },
+      "respBody": {
+        "message": "Idempotency-Key was reused with a different request"
+      }
+    }
+  ]
+}

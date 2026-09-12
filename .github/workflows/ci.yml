@@ -1,0 +1,53 @@
+name: ci
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Unit tests (race)
+        run: go test -race ./...
+      - name: gofmt gate
+        run: |
+          UNFORMATTED=$(gofmt -l cmd internal e2e)
+          if [ -n "$UNFORMATTED" ]; then echo "gofmt needed on:"; echo "$UNFORMATTED"; exit 1; fi
+      - name: Fixture licensing guard
+        run: ./tools/check-fixture-licenses.sh
+      - name: Vet
+        run: go vet ./...
+      - name: Parity suites
+        run: go test ./... -run 'TestParity' -count=1
+
+  zero-cgo-matrix:
+    # The trust artifact is a static binary on every platform. A cgo dep
+    # sneaking in breaks cross-compilation — fail here, not at release.
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        goos: [linux, darwin, windows]
+        goarch: [amd64, arm64]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Build (CGO_ENABLED=0)
+        env:
+          CGO_ENABLED: "0"
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+        run: go build ./...

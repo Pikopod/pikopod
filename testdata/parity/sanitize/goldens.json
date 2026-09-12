@@ -1,0 +1,444 @@
+{
+  "classify": [
+    {
+      "isHeader": false,
+      "key": "status",
+      "mode": "ALLOW",
+      "value": "success"
+    },
+    {
+      "isHeader": false,
+      "key": "customer_id",
+      "mode": "TOKENIZE",
+      "value": "plainword"
+    },
+    {
+      "isHeader": false,
+      "key": "note",
+      "mode": "DROP",
+      "value": "hello world this is free text"
+    },
+    {
+      "isHeader": true,
+      "key": "authorization",
+      "mode": "SUBSTITUTE",
+      "value": "Bearer x"
+    },
+    {
+      "isHeader": true,
+      "key": "content-type",
+      "mode": "ALLOW",
+      "value": "application/json"
+    },
+    {
+      "isHeader": false,
+      "key": "amount",
+      "mode": "ALLOW",
+      "value": 245000
+    },
+    {
+      "isHeader": false,
+      "key": "x",
+      "mode": "ALLOW",
+      "value": "GET"
+    },
+    {
+      "isHeader": false,
+      "key": "x",
+      "mode": "TOKENIZE",
+      "value": "k9J2mQ4p"
+    },
+    {
+      "isHeader": false,
+      "key": "x",
+      "mode": "SUBSTITUTE",
+      "value": "abcdefghijklmnopqrstuvwxyz1234"
+    }
+  ],
+  "keyVersion": 1,
+  "masterKey": "parity-master-key-0123456789abcdef0123456789abcdef",
+  "sanitize": [
+    {
+      "input": {
+        "amount": 245000,
+        "currency": "ngn",
+        "customer": "cus_9s6XKzkNRiz8i3",
+        "customer_email": "jane.doe+test@synthetic-pay.test",
+        "description": "Order #4521 — two widgets and a gift note for mom",
+        "id": "ch_3MtwBwLkdIwHu7ix0snN0B15",
+        "metadata": {
+          "internal_note": "flagged by risk team for manual review",
+          "order_id": "984512"
+        },
+        "object": "charge",
+        "paid": true,
+        "payment_method_details": {
+          "card": {
+            "exp_month": 12,
+            "exp_year": 2027,
+            "last4": "4242",
+            "network": "visa"
+          }
+        },
+        "reference": "ref_8f3a91b2c4d5",
+        "refunds": [
+          {
+            "amount": 45000,
+            "id": "re_5MtwBwLkdIwHu7ix",
+            "reason": null,
+            "status": "pending"
+          }
+        ],
+        "status": "succeeded"
+      },
+      "isHeaderRoot": false,
+      "name": "charge-response",
+      "redactions": [
+        {
+          "mode": "TOKENIZE",
+          "pointer": "/id"
+        },
+        {
+          "mode": "TOKENIZE",
+          "pointer": "/customer"
+        },
+        {
+          "mode": "TOKENIZE",
+          "pointer": "/customer_email"
+        },
+        {
+          "mode": "DROP",
+          "pointer": "/description"
+        },
+        {
+          "mode": "TOKENIZE",
+          "pointer": "/reference"
+        },
+        {
+          "mode": "TOKENIZE",
+          "pointer": "/metadata/order_id"
+        },
+        {
+          "mode": "DROP",
+          "pointer": "/metadata/internal_note"
+        },
+        {
+          "mode": "DROP",
+          "pointer": "/payment_method_details/card/last4"
+        },
+        {
+          "mode": "TOKENIZE",
+          "pointer": "/refunds/0/id"
+        }
+      ],
+      "sanitized": {
+        "amount": 245000,
+        "currency": "ngn",
+        "customer": "cus_05htcj94y3475o",
+        "customer_email": "ggeblqln@tznelt.test",
+        "id": "ch_e0lnjy13trbmzp2gldvmv7k6",
+        "metadata": {
+          "order_id": "038431"
+        },
+        "object": "charge",
+        "paid": true,
+        "payment_method_details": {
+          "card": {
+            "exp_month": 12,
+            "exp_year": 2027,
+            "network": "visa"
+          }
+        },
+        "reference": "ref_1we8njsqkuvr",
+        "refunds": [
+          {
+            "amount": 45000,
+            "id": "re_1humd4u5p46a7jvj",
+            "reason": null,
+            "status": "pending"
+          }
+        ],
+        "status": "succeeded"
+      }
+    },
+    {
+      "input": {
+        "data": {
+          "amount": 500000,
+          "api_key_used": "xpay_secret_abcdefghijklmnopqrstuvwx",
+          "recipient": {
+            "account_number": "0690000031",
+            "bank_code": "044",
+            "name": "JANE DOE",
+            "phone": "2348012345678"
+          },
+          "reference": "trf_NSNlqAmwiubZOj4S6EJT4M0k",
+          "session_id": "a1b2c3d4e5f60718",
+          "status": "success"
+        },
+        "event": "transfer.success"
+      },
+      "isHeaderRoot": false,
+      "name": "webhook-payout",
+      "redactions": [
+        {
+          "mode": "TOKENIZE",
+          "pointer": "/data/reference"
+        },
+        {
+          "mode": "DROP",
+          "pointer": "/data/recipient/name"
+        },
+        {
+          "mode": "TOKENIZE",
+          "pointer": "/data/recipient/phone"
+        },
+        {
+          "mode": "TOKENIZE",
+          "pointer": "/data/recipient/account_number"
+        },
+        {
+          "mode": "DROP",
+          "pointer": "/data/recipient/bank_code"
+        },
+        {
+          "mode": "TOKENIZE",
+          "pointer": "/data/session_id"
+        },
+        {
+          "mode": "SUBSTITUTE",
+          "pointer": "/data/api_key_used"
+        }
+      ],
+      "sanitized": {
+        "data": {
+          "amount": 500000,
+          "api_key_used": "\u003c\u003cSUBSTITUTE:api_key_used\u003e\u003e",
+          "recipient": {
+            "account_number": "7030839879",
+            "phone": "1952930155493"
+          },
+          "reference": "trf_wl17o0e5pbwah0hpve7fo779",
+          "session_id": "9rb9lbs1bie2smo9",
+          "status": "success"
+        },
+        "event": "transfer.success"
+      }
+    },
+    {
+      "input": {
+        "accept": "application/json",
+        "authorization": "Bearer xpay_secret_abcdefghijklmnopqrstuvwx",
+        "content-type": "application/json",
+        "cookie": "session=abc123; theme=dark",
+        "traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
+        "user-agent": "synthetic-pay-integrations/2.1",
+        "x-api-key": "pk_test_TYooMQauvdEDq54NiTphI7jx",
+        "x-request-id": "req_9f8e7d6c5b4a",
+        "x-signature": "t=1712000000,v1=5257a869e7ecebeda32affa62cdca3fa51cad7e77a0e56ff536d0ce8e108d8bd"
+      },
+      "isHeaderRoot": true,
+      "name": "request-headers",
+      "redactions": [
+        {
+          "mode": "SUBSTITUTE",
+          "pointer": "/x-signature"
+        },
+        {
+          "mode": "DROP",
+          "pointer": "/cookie"
+        },
+        {
+          "mode": "SUBSTITUTE",
+          "pointer": "/authorization"
+        },
+        {
+          "mode": "SUBSTITUTE",
+          "pointer": "/x-api-key"
+        }
+      ],
+      "sanitized": {
+        "accept": "application/json",
+        "authorization": "\u003c\u003cSUBSTITUTE:authorization\u003e\u003e",
+        "content-type": "application/json",
+        "traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
+        "user-agent": "synthetic-pay-integrations/2.1",
+        "x-api-key": "\u003c\u003cSUBSTITUTE:x-api-key\u003e\u003e",
+        "x-request-id": "req_9f8e7d6c5b4a",
+        "x-signature": "\u003c\u003cSUBSTITUTE:x-signature\u003e\u003e"
+      }
+    },
+    {
+      "input": {
+        "count": 3,
+        "flags": {
+          "disputed": null,
+          "retried": false
+        },
+        "note": "client asked to retry after fixing their webhook endpoint — très urgent ✓",
+        "ratio": 0.25,
+        "status_history": [
+          "created",
+          "processing",
+          "succeeded"
+        ],
+        "uuid_field": "550E8400-E29B-41D4-A716-446655440000"
+      },
+      "isHeaderRoot": false,
+      "name": "mixed-and-unicode",
+      "redactions": [
+        {
+          "mode": "DROP",
+          "pointer": "/note"
+        },
+        {
+          "mode": "TOKENIZE",
+          "pointer": "/uuid_field"
+        }
+      ],
+      "sanitized": {
+        "count": 3,
+        "flags": {
+          "disputed": null,
+          "retried": false
+        },
+        "ratio": 0.25,
+        "status_history": [
+          "created",
+          "processing",
+          "succeeded"
+        ],
+        "uuid_field": "fadc9227-836b-46ea-ae9e-a2ea28cf0dfb"
+      }
+    }
+  ],
+  "scope": "local",
+  "tokenize": [
+    {
+      "format": "email",
+      "hash": "daa3a486ea0b5693b0479b942c0a2e09f2920570206f2b5e760c47148bb3bc41",
+      "input": "jane.doe+test@synthetic-pay.test",
+      "token": "ggeblqln@tznelt.test"
+    },
+    {
+      "format": "email",
+      "hash": "5cca464d4a13e0a070b2df3e68a32c8af6b7175ed078ae5142e853eed20487e1",
+      "input": "ops@wise.com",
+      "token": "chlqujvf@sofslu.test"
+    },
+    {
+      "format": "uuid",
+      "hash": "736e9994e832af2241357020612a0973d66bb32b524e171e3d1f7c4e6648f53f",
+      "input": "550e8400-e29b-41d4-a716-446655440000",
+      "token": "75678fc6-2716-4d31-ae5b-aeadb7b2cf1c"
+    },
+    {
+      "format": "prefixed-id",
+      "hash": "80b967131ae3d337482f94815ffae1f6ee7ba17ac64e4c911d0d30981c372437",
+      "input": "cus_9s6XKzkNRiz8i3",
+      "token": "cus_05htcj94y3475o"
+    },
+    {
+      "format": "prefixed-id",
+      "hash": "159f5c03f9f972aed2ea562b6e64dd8bc1f73f826edf6ed48583e54dfef57a7b",
+      "input": "tx_8f3a91b2c4d5e6f7",
+      "token": "tx_1oxbcu8iw03lcdfu"
+    },
+    {
+      "format": "prefixed-id",
+      "hash": "b642742996b4d83d4425cb3c2c78e5b7751b76b3dc2fc2ef8d6bdb56bcfff329",
+      "input": "pi_3MtwBwLkdIwHu7ix28a3tqPa",
+      "token": "pi_p85ey6titok20n8crdsaknwc"
+    },
+    {
+      "format": "prefixed-id",
+      "hash": "be26c5b01a8a0ae18148f741a037e8eb79d7035e7fd31e4e236c9cda011333a5",
+      "input": "trf_NSNlqAmwiubZOj4S6EJT4M0k",
+      "token": "trf_wl17o0e5pbwah0hpve7fo779"
+    },
+    {
+      "format": "prefixed-id",
+      "hash": "3cc967920db0d253ce42778e2e96f2875a02cd05a9601e0310ded3289584349e",
+      "input": "acct_1032D82eZvKYlo2C",
+      "token": "acct_jv77wsfzh7debaos"
+    },
+    {
+      "format": "digits",
+      "hash": "45b715f1eb9d512e442895411cc30f6d698db6ff198888de7394738ea95a992b",
+      "input": "2348012345678",
+      "token": "1952930155493"
+    },
+    {
+      "format": "digits",
+      "hash": "acde86f951dcc18500484cd450403b549b8e0844604eb4d2c9d9c2dba0041063",
+      "input": "4242424242424242",
+      "token": "1764128233296825"
+    },
+    {
+      "format": "digits",
+      "hash": "39a86435a86bc1365cd16d22d738de529b0a1ab952f1b2525126f39d1562bdbc",
+      "input": "060001923",
+      "token": "509551550"
+    },
+    {
+      "format": "alnum",
+      "hash": "79e38a02988ac441525983efdee84b1a8f417ac773213fa1fd577a4b8894d151",
+      "input": "ABC123xyz",
+      "token": "uvdluq3ur"
+    },
+    {
+      "format": "alnum",
+      "hash": "eba3d3369fbdf822dfb6d649f77455ea23aaf2088347857af18acbd6b5f89e7e",
+      "input": "k9J2mQ4p",
+      "token": "qjwfx833"
+    },
+    {
+      "format": "alnum",
+      "hash": "ade307031491233dae452a2d3256277113f770b98d302800911eeb887c851435",
+      "input": "ref2024",
+      "token": "cckikks"
+    },
+    {
+      "format": "generic",
+      "hash": "650e81a1b59fb8f6e7d97b55f44a5113f5c4c781c3fca6b11f47b31366b7b629",
+      "input": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJVadQssw5c",
+      "token": "tok_9o0lvcjyjbh7b8k5"
+    },
+    {
+      "format": "generic",
+      "hash": "fdefaa138be317bd58d6d7c9764be41fa0c4475ee468614d4c86043e4f292126",
+      "input": "xpay_secret_abcdefghijklmnopqrstuvwx",
+      "token": "tok_rjjdzql47aafig07"
+    },
+    {
+      "format": "prefixed-id",
+      "hash": "1f0f6da83ca3c3bafe573681f7c7acc17b19f56733b16609c7d1444e4401b3c9",
+      "input": "whsec_x7YmQ2nP4rT6vB8dF0hJ3kL5",
+      "token": "whsec_tfdweelqqxl32udgh3c191mn"
+    },
+    {
+      "format": "alnum",
+      "hash": "ca3cdb9e81e3d04838173c9d81a20ea1e69ed10ef7a419e20adc32fa99d3b8aa",
+      "input": "success",
+      "token": "cvt2zr4"
+    },
+    {
+      "format": "prefixed-id",
+      "hash": "bfdbd73d12c31d2950263d4a78bc29101b276de6d4d8bd5e366290fed16a30d0",
+      "input": "pending_approval",
+      "token": "pending_ed8ogwk8"
+    },
+    {
+      "format": "generic",
+      "hash": "6e99103071fe31bfe2a2d721ec935ca08f642bd42ea0d01a4ab18c493bcc3b40",
+      "input": "application/json",
+      "token": "tok_jlm6vaz693uivvug"
+    },
+    {
+      "format": "prefixed-id",
+      "hash": "f190dc926dfbad280b3d39fad71a7cf440d4744543e5c3d1206b85118feca7d1",
+      "input": "insufficient_funds",
+      "token": "insufficient_di08q"
+    }
+  ]
+}

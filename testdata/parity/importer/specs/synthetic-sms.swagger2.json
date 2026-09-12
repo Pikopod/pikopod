@@ -1,0 +1,386 @@
+{
+ "swagger": "2.0",
+ "info": {
+  "title": "Synthetic SMS API (test fixture)",
+  "description": "Invented Swagger 2.0 fixture \u2014 no real provider. Apache-2.0.",
+  "version": "2.0",
+  "license": {
+   "name": "Apache-2.0"
+  }
+ },
+ "host": "sms.synthetic.test",
+ "basePath": "/rest",
+ "schemes": [
+  "https"
+ ],
+ "securityDefinitions": {
+  "basic": {
+   "type": "basic"
+  }
+ },
+ "paths": {
+  "/account/info": {
+   "get": {
+    "operationId": "accountInfo",
+    "summary": "Account info",
+    "produces": [
+     "application/json"
+    ],
+    "responses": {
+     "200": {
+      "description": "OK",
+      "schema": {
+       "$ref": "#/definitions/Account"
+      }
+     },
+     "400": {
+      "description": "Bad Request"
+     }
+    },
+    "security": [
+     {
+      "basic": []
+     }
+    ]
+   }
+  },
+  "/account/update": {
+   "post": {
+    "operationId": "accountUpdate",
+    "summary": "Update account",
+    "produces": [
+     "application/json"
+    ],
+    "responses": {
+     "200": {
+      "description": "OK",
+      "schema": {
+       "$ref": "#/definitions/Account"
+      }
+     },
+     "400": {
+      "description": "Bad Request"
+     }
+    },
+    "security": [
+     {
+      "basic": []
+     }
+    ],
+    "consumes": [
+     "application/json"
+    ],
+    "parameters": [
+     {
+      "name": "body",
+      "in": "body",
+      "required": true,
+      "schema": {
+       "$ref": "#/definitions/Account"
+      }
+     }
+    ]
+   }
+  },
+  "/sms/submit": {
+   "get": {
+    "operationId": "submitGet",
+    "summary": "Submit via query",
+    "produces": [
+     "application/json"
+    ],
+    "responses": {
+     "200": {
+      "description": "OK",
+      "schema": {
+       "$ref": "#/definitions/Ticket"
+      }
+     },
+     "400": {
+      "description": "Bad Request"
+     }
+    },
+    "security": [
+     {
+      "basic": []
+     }
+    ]
+   },
+   "post": {
+    "operationId": "submitPost",
+    "summary": "Submit a message",
+    "produces": [
+     "application/json"
+    ],
+    "responses": {
+     "200": {
+      "description": "OK",
+      "schema": {
+       "$ref": "#/definitions/Ticket"
+      }
+     },
+     "400": {
+      "description": "Bad Request"
+     }
+    },
+    "security": [
+     {
+      "basic": []
+     }
+    ],
+    "consumes": [
+     "application/json"
+    ],
+    "parameters": [
+     {
+      "name": "body",
+      "in": "body",
+      "required": true,
+      "schema": {
+       "$ref": "#/definitions/Message"
+      }
+     }
+    ]
+   }
+  },
+  "/sms/submit/bulk": {
+   "post": {
+    "operationId": "submitBulk",
+    "summary": "Bulk submit",
+    "produces": [
+     "application/json"
+    ],
+    "responses": {
+     "200": {
+      "description": "OK",
+      "schema": {
+       "$ref": "#/definitions/Ticket"
+      }
+     },
+     "400": {
+      "description": "Bad Request"
+     }
+    },
+    "security": [
+     {
+      "basic": []
+     }
+    ],
+    "consumes": [
+     "application/json"
+    ],
+    "parameters": [
+     {
+      "name": "body",
+      "in": "body",
+      "required": true,
+      "schema": {
+       "$ref": "#/definitions/Message"
+      }
+     }
+    ]
+   }
+  },
+  "/sms/submit/long": {
+   "post": {
+    "operationId": "submitLong",
+    "summary": "Long message",
+    "produces": [
+     "application/json"
+    ],
+    "responses": {
+     "200": {
+      "description": "OK",
+      "schema": {
+       "$ref": "#/definitions/Ticket"
+      }
+     },
+     "400": {
+      "description": "Bad Request"
+     }
+    },
+    "security": [
+     {
+      "basic": []
+     }
+    ],
+    "consumes": [
+     "application/json"
+    ],
+    "parameters": [
+     {
+      "name": "body",
+      "in": "body",
+      "required": true,
+      "schema": {
+       "$ref": "#/definitions/Message"
+      }
+     }
+    ]
+   }
+  },
+  "/sms/dlr": {
+   "get": {
+    "operationId": "dlrGet",
+    "summary": "Poll delivery reports",
+    "produces": [
+     "application/json"
+    ],
+    "responses": {
+     "200": {
+      "description": "OK",
+      "schema": {
+       "$ref": "#/definitions/DeliveryReport"
+      }
+     },
+     "400": {
+      "description": "Bad Request"
+     }
+    },
+    "security": [
+     {
+      "basic": []
+     }
+    ]
+   },
+   "post": {
+    "operationId": "dlrPost",
+    "summary": "Query delivery reports",
+    "produces": [
+     "application/json"
+    ],
+    "responses": {
+     "200": {
+      "description": "OK",
+      "schema": {
+       "$ref": "#/definitions/DeliveryReport"
+      }
+     },
+     "400": {
+      "description": "Bad Request"
+     }
+    },
+    "security": [
+     {
+      "basic": []
+     }
+    ],
+    "consumes": [
+     "application/json"
+    ],
+    "parameters": [
+     {
+      "name": "body",
+      "in": "body",
+      "required": true,
+      "schema": {
+       "$ref": "#/definitions/Message"
+      }
+     }
+    ]
+   }
+  },
+  "/sms/ticket/{ticketId}": {
+   "get": {
+    "operationId": "ticketStatus",
+    "summary": "Ticket status",
+    "produces": [
+     "application/json"
+    ],
+    "responses": {
+     "200": {
+      "description": "OK",
+      "schema": {
+       "$ref": "#/definitions/Ticket"
+      }
+     },
+     "400": {
+      "description": "Bad Request"
+     }
+    },
+    "security": [
+     {
+      "basic": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "ticketId",
+      "in": "path",
+      "required": true,
+      "type": "string"
+     }
+    ]
+   }
+  }
+ },
+ "definitions": {
+  "Message": {
+   "type": "object",
+   "properties": {
+    "to": {
+     "type": "string"
+    },
+    "from": {
+     "type": "string"
+    },
+    "text": {
+     "type": "string"
+    }
+   }
+  },
+  "Ticket": {
+   "type": "object",
+   "properties": {
+    "ticketId": {
+     "type": "string"
+    },
+    "status": {
+     "type": "string"
+    },
+    "price": {
+     "type": "number",
+     "format": "double"
+    },
+    "parts": {
+     "type": "integer"
+    }
+   }
+  },
+  "DeliveryReport": {
+   "type": "object",
+   "properties": {
+    "ticketId": {
+     "type": "string"
+    },
+    "state": {
+     "type": "string",
+     "enum": [
+      "delivered",
+      "failed",
+      "buffered"
+     ]
+    },
+    "doneAt": {
+     "type": "string",
+     "format": "date-time"
+    }
+   }
+  },
+  "Account": {
+   "type": "object",
+   "properties": {
+    "balance": {
+     "type": "number",
+     "format": "double"
+    },
+    "currency": {
+     "type": "string"
+    },
+    "callbackUrl": {
+     "type": "string"
+    }
+   }
+  }
+ }
+}

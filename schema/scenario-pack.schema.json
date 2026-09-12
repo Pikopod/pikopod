@@ -1,0 +1,83 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/pikopod/pikopod/main/schema/scenario-pack.schema.json",
+  "title": "ScenarioPack",
+  "description": "A pikopod scenario pack: a named, shareable failure scenario run against a sandbox. YAML on disk; this schema describes the JSON-shaped document. The definition block mirrors the scenario definition language (internal/scenario/definition.go): limits are 200 steps, 50 assertions/step, 1000 assertions total, 90 virtual days per wait.",
+  "type": "object",
+  "required": ["name", "provider", "definition"],
+  "properties": {
+    "name": { "type": "string", "minLength": 1, "description": "Pack slug, unique within a packs directory." },
+    "provider": { "type": "string", "minLength": 1, "description": "The sandbox/provider this pack was authored against. Metadata: `pikopod scenario run` targets whatever sandbox you name." },
+    "description": { "type": "string" },
+    "contractVersion": { "type": "integer", "minimum": 1, "description": "from-drift pins: the effective-contract version at pin time — the pack runs against ResolveAt(contractVersion) forever, so later refinement can never move a pin." },
+    "definition": {
+      "type": "object",
+      "required": ["steps"],
+      "properties": {
+        "inputs": {
+          "type": "array",
+          "maxItems": 50,
+          "items": {
+            "type": "object",
+            "required": ["name", "type"],
+            "properties": {
+              "name": { "type": "string", "pattern": "^[A-Za-z_][A-Za-z0-9_]*$" },
+              "type": { "type": "string", "enum": ["string", "number", "boolean"] },
+              "required": { "type": "boolean" },
+              "default": {}
+            },
+            "additionalProperties": false
+          }
+        },
+        "defaults": { "type": "object" },
+        "requiresFidelity": { "type": "string", "enum": ["L0", "L1", "L2", "L3"] },
+        "steps": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 200,
+          "items": { "$ref": "#/$defs/step" }
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "step": {
+      "type": "object",
+      "required": ["key", "type", "config"],
+      "properties": {
+        "key": { "type": "string", "pattern": "^[A-Za-z0-9_.-]+$", "maxLength": 80 },
+        "description": { "type": "string" },
+        "type": { "type": "string", "enum": ["REQUEST", "WAIT", "EXPECT_WEBHOOK", "INJECT_FAULT", "CLEAR_FAULT", "ASSERT_STATE", "SEED_STATE", "SNAPSHOT", "NOTE", "VERIFY_REQUESTS"] },
+        "config": { "type": "object" },
+        "assertions": { "type": "array", "maxItems": 50, "items": { "$ref": "#/$defs/assertion" } },
+        "capture": {
+          "type": "object",
+          "additionalProperties": { "type": "string", "description": "source$jsonpath, e.g. response.body$.id" }
+        },
+        "continueOnFailure": { "type": "boolean" },
+        "timeoutMs": { "type": "integer", "minimum": 0 }
+      },
+      "additionalProperties": false
+    },
+    "assertion": {
+      "type": "object",
+      "required": ["target", "op"],
+      "properties": {
+        "subject": { "type": "string", "enum": ["SANDBOX", "CLIENT", "PRODUCTION"] },
+        "target": { "type": "string", "enum": ["response.status", "response.headers", "response.body", "response.latencyMs", "state.resource", "state.resourceCount", "webhook.delivery", "webhook.count", "execution.faultApplied", "sandbox.requestCount", "sandbox.request"] },
+        "path": { "type": "string", "description": "JSONPath into the target document, starting with $." },
+        "key": { "type": "string", "description": "Header name, for response.headers." },
+        "resourceType": { "type": "string" },
+        "resourceId": { "type": "string" },
+        "match": { "type": "object" },
+        "op": { "type": "string", "enum": ["equals", "notEquals", "contains", "notContains", "in", "matches", "matchesSchema", "exists", "absent", "gt", "gte", "lt", "lte", "countEquals", "lengthEquals", "isOneOf"] },
+        "expected": {},
+        "schemaRef": { "type": "string" },
+        "soft": { "type": "boolean" }
+      },
+      "additionalProperties": false
+    }
+  }
+}

@@ -1,0 +1,81 @@
+version: 2
+project_name: pikopod
+
+builds:
+  - id: pikopod
+    main: ./cmd/pikopod
+    binary: pikopod
+    env:
+      - CGO_ENABLED=0 # zero-cgo constraint: static binaries, trivial cross-compile
+    goos: [linux, darwin, windows]
+    goarch: [amd64, arm64]
+    ldflags:
+      - -s -w -X main.version={{ .Version }}
+
+archives:
+  - formats: [tar.gz]
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+
+checksum:
+  name_template: SHA256SUMS
+
+sboms:
+  - artifacts: archive
+
+signs:
+  - cmd: cosign
+    certificate: "${artifact}.pem"
+    args: ["sign-blob", "--yes", "--output-certificate=${certificate}", "--output-signature=${signature}", "${artifact}"]
+    artifacts: checksum
+    output: true
+
+nfpms:
+  - id: pikopod
+    package_name: pikopod
+    formats: [deb, rpm]
+    file_name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    vendor: Pikopod
+    homepage: https://github.com/pikopod/pikopod
+    maintainer: Pikopod <noreply@pikopod.dev>
+    description: |-
+      Watches third-party APIs for breaking changes.
+      A fail-open observing proxy, a deterministic sandbox, a spec watcher,
+      and a drift-to-PR fixer in one static binary.
+    license: Apache-2.0
+    section: utils
+    contents:
+      - src: LICENSE
+        dst: /usr/share/doc/pikopod/LICENSE
+      - src: NOTICE
+        dst: /usr/share/doc/pikopod/NOTICE
+
+brews:
+  - name: pikopod
+    repository:
+      owner: pikopod
+      name: homebrew-tap
+      branch: main
+      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
+    homepage: https://github.com/pikopod/pikopod
+    description: Watches third-party APIs for breaking changes
+    license: Apache-2.0
+    commit_author:
+      name: pikopod-release
+      email: noreply@pikopod.dev
+    test: |
+      system "#{bin}/pikopod", "--version"
+
+dockers:
+  - image_templates:
+      - ghcr.io/pikopod/pikopod:{{ .Version }}
+      - ghcr.io/pikopod/pikopod:latest
+    dockerfile: Dockerfile
+    build_flag_templates:
+      - --platform=linux/amd64
+
+release:
+  draft: false
+  prerelease: auto

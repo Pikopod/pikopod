@@ -1,0 +1,168 @@
+{
+  "meta": {
+    "specFile": "sandbox/widgets.spec.json",
+    "sandboxSeed": "parity-seed-1",
+    "virtualClockMs": 1735689600000,
+    "credential": "pikopod_sbx_test_e5c3fd0316418e1bc3ec8809f31fffc1eb4332a655a99378",
+    "normalizedPaths": [
+      "steps[*].reqHeaders.* == meta.credential -> \"$CREDENTIAL\" (TS mints issued tokens via randomBytes; the replayer substitutes the engine credential)"
+    ]
+  },
+  "steps": [
+    {
+      "name": "create-widget",
+      "method": "POST",
+      "path": "/widgets",
+      "reqHeaders": {},
+      "reqBody": {
+        "name": "gear",
+        "size": 3
+      },
+      "status": 201,
+      "respHeaders": {
+        "content-type": "application/json; charset=utf-8",
+        "etag": "\"0\""
+      },
+      "respBody": {
+        "id": "widgets_1",
+        "name": "gear",
+        "size": 3
+      }
+    },
+    {
+      "name": "read-created",
+      "method": "GET",
+      "path": "/widgets/widgets_1",
+      "reqHeaders": {},
+      "reqBody": null,
+      "status": 200,
+      "respHeaders": {
+        "content-type": "application/json; charset=utf-8",
+        "etag": "\"0\""
+      },
+      "respBody": {
+        "id": "widgets_1",
+        "name": "gear",
+        "size": 3
+      }
+    },
+    {
+      "name": "list-read-your-write",
+      "method": "GET",
+      "path": "/widgets",
+      "reqHeaders": {},
+      "reqBody": null,
+      "status": 200,
+      "respHeaders": {
+        "content-type": "application/json; charset=utf-8"
+      },
+      "respBody": [
+        {
+          "id": "widgets_1",
+          "name": "gear",
+          "size": 3
+        }
+      ]
+    },
+    {
+      "name": "replace-if-match",
+      "method": "PUT",
+      "path": "/widgets/widgets_1",
+      "reqHeaders": {
+        "if-match": "\"0\""
+      },
+      "reqBody": {
+        "name": "cog"
+      },
+      "status": 200,
+      "respHeaders": {
+        "content-type": "application/json; charset=utf-8",
+        "etag": "\"1\""
+      },
+      "respBody": {
+        "id": "widgets_1",
+        "name": "cog"
+      }
+    },
+    {
+      "name": "merge-patch",
+      "method": "PATCH",
+      "path": "/widgets/widgets_1",
+      "reqHeaders": {},
+      "reqBody": {
+        "size": 9
+      },
+      "status": 200,
+      "respHeaders": {
+        "content-type": "application/json; charset=utf-8",
+        "etag": "\"2\""
+      },
+      "respBody": {
+        "id": "widgets_1",
+        "name": "cog",
+        "size": 9
+      }
+    },
+    {
+      "name": "stale-if-match-412",
+      "method": "PUT",
+      "path": "/widgets/widgets_1",
+      "reqHeaders": {
+        "if-match": "\"0\""
+      },
+      "reqBody": {
+        "name": "nope"
+      },
+      "status": 412,
+      "respHeaders": {
+        "content-type": "application/json; charset=utf-8"
+      },
+      "respBody": {
+        "message": "Precondition Failed"
+      }
+    },
+    {
+      "name": "validation-400",
+      "method": "POST",
+      "path": "/widgets",
+      "reqHeaders": {},
+      "reqBody": {
+        "size": 1
+      },
+      "status": 400,
+      "respHeaders": {
+        "content-type": "application/json; charset=utf-8"
+      },
+      "respBody": {
+        "message": "Validation failed",
+        "errors": [
+          "name is required"
+        ]
+      }
+    },
+    {
+      "name": "delete-widget",
+      "method": "DELETE",
+      "path": "/widgets/widgets_1",
+      "reqHeaders": {},
+      "reqBody": null,
+      "status": 204,
+      "respHeaders": {},
+      "respBody": null
+    },
+    {
+      "name": "read-after-delete-404",
+      "method": "GET",
+      "path": "/widgets/widgets_1",
+      "reqHeaders": {},
+      "reqBody": null,
+      "status": 404,
+      "respHeaders": {
+        "content-type": "application/json; charset=utf-8"
+      },
+      "respBody": {
+        "message": "Not Found"
+      }
+    }
+  ]
+}

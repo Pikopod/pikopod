@@ -1,0 +1,44 @@
+# Binaries
+/pikopod
+/pikopod.exe
+/dist/
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Test and coverage output
+*.test
+*.out
+coverage.*
+__debug_bin*
+
+# Runtime data (default data_dir is ./pikopod-data)
+/pikopod-data/
+*.db
+*.db-wal
+*.db-shm
+*.ndjson
+
+# Local config and credentials
+/pikopod.yaml
+/pikopod.*.yaml
+.env
+.env.*
+*.pem
+*.key
+*.sig
+*.crt
+
+# Editor and OS
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*~
+
+# Agent and local tooling state
+.gstack/
+.claude/
+.aider*
