@@ -9,14 +9,11 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// version is stamped by goreleaser via -ldflags.
-var version = "dev"
-
 func main() {
 	root := &cobra.Command{
 		Use:           "pikopod",
 		Short:         "Sandbox, scenario-test, and drift-watch your third-party API integrations — locally",
-		Version:       version,
+		Version:       currentVersion(),
 		SilenceUsage:  true,
 		SilenceErrors: true,
 	}
