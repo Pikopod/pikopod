@@ -54,13 +54,14 @@ func (ex *Exchange) Release() {
 // Metrics are exposed on /healthz (JSON) — the agent proves liveness and
 // value in one curl.
 type Metrics struct {
-	RequestsProxied   atomic.Int64
-	UpstreamErrors    atomic.Int64
-	ObserverPanics    atomic.Int64
-	CapturesDropped   atomic.Int64
-	CapturesQueued    atomic.Int64
-	RecordingsWritten atomic.Int64
-	RecordingErrors   atomic.Int64
+	RequestsProxied    atomic.Int64
+	UpstreamErrors     atomic.Int64
+	UpstreamBodyErrors atomic.Int64
+	ObserverPanics     atomic.Int64
+	CapturesDropped    atomic.Int64
+	CapturesQueued     atomic.Int64
+	RecordingsWritten  atomic.Int64
+	RecordingErrors    atomic.Int64
 	// RecordingsSampledOut counts routine records learned from but not
 	// persisted, per the sampling rate.
 	RecordingsSampledOut atomic.Int64
@@ -113,6 +114,12 @@ func New(cfg *config.Config, m *Metrics, captureDepth int) (*Server, error) {
 				pr.Out.URL.Path = joinPath(target.Path, strings.TrimPrefix(pr.In.URL.Path, up.prefix))
 				pr.Out.URL.RawQuery = pr.In.URL.RawQuery
 				pr.Out.Host = target.Host
+			},
+			// ErrorHandler only fires BEFORE the response starts. Wrap the
+			// body so a failure mid-copy is counted rather than silent.
+			ModifyResponse: func(res *http.Response) error {
+				res.Body = &upstreamBody{rc: res.Body, m: m}
+				return nil
 			},
 			ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
 				// Honest 502 with a marker; NEVER an automatic retry.
@@ -268,6 +275,23 @@ func (b *cappedBuffer) Write(p []byte) (int, error) {
 	}
 	return b.Buffer.Write(p)
 }
+
+type upstreamBody struct {
+	rc      io.ReadCloser
+	m       *Metrics
+	counted bool
+}
+
+func (u *upstreamBody) Read(p []byte) (int, error) {
+	n, err := u.rc.Read(p)
+	if err != nil && err != io.EOF && !u.counted {
+		u.counted = true
+		u.m.UpstreamBodyErrors.Add(1)
+	}
+	return n, err
+}
+
+func (u *upstreamBody) Close() error { return u.rc.Close() }
 
 type teeReadCloser struct {
 	rc io.ReadCloser

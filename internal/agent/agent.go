@@ -392,6 +392,7 @@ func (a *Agent) healthz(w http.ResponseWriter, r *http.Request) {
 		"uptime_seconds":         int(time.Since(a.started).Seconds()),
 		"requests_proxied":       a.Metrics.RequestsProxied.Load(),
 		"upstream_errors":        a.Metrics.UpstreamErrors.Load(),
+		"upstream_body_errors":   a.Metrics.UpstreamBodyErrors.Load(),
 		"recordings_written":     a.Metrics.RecordingsWritten.Load(),
 		"recordings_dropped":     a.Metrics.CapturesDropped.Load(),
 		"recordings_sampled_out": a.Metrics.RecordingsSampledOut.Load(),
