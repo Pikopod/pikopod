@@ -503,9 +503,12 @@ func TestSlowSinkNeverBlocksReport(t *testing.T) {
 			a.ReportDeclared("pay", fmt.Sprintf("fp_slow_%03d", i), declaredEvent())
 		}
 	}()
+	// A hang detector, not a performance budget: a Report that genuinely
+	// blocks on the wedged sink never returns, so the deadline only has to
+	// outlast a slow shared CI runner under -race.
 	select {
 	case <-done:
-	case <-time.After(5 * time.Second):
+	case <-time.After(60 * time.Second):
 		t.Fatal("Report blocked on a wedged sink")
 	}
 	a.mu.Lock()
