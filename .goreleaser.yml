@@ -54,6 +54,9 @@ nfpms:
 
 brews:
   - name: pikopod
+    # Homebrew resolves Formula/ when it exists and ignores the repo root,
+    # so the formula must land there or `brew install` cannot find it.
+    directory: Formula
     repository:
       owner: pikopod
       name: homebrew-tap
