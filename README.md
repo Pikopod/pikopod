@@ -37,8 +37,13 @@ go install github.com/pikopod/pikopod/cmd/pikopod@latest
 Or with Homebrew:
 
 ```bash
+brew trust pikopod/tap
 brew install pikopod/tap/pikopod
 ```
+
+Recent Homebrew requires third-party taps to be trusted explicitly. Without
+that first line it refuses to load the formula and reports it as
+`Invalid formula` — the formula is fine, the tap simply is not trusted yet.
 
 Or download a signed binary from
 [Releases](https://github.com/pikopod/pikopod/releases) — macOS and Linux,
@@ -48,11 +53,15 @@ Verify what you downloaded — every release ships `SHA256SUMS`, cosign-signed
 with SLSA provenance:
 
 ```bash
-sha256sum -c SHA256SUMS --ignore-missing
+sha256sum -c SHA256SUMS --ignore-missing   # macOS without coreutils: shasum -a 256 -c
 cosign verify-blob --certificate SHA256SUMS.pem --signature SHA256SUMS.sig SHA256SUMS \
-  --certificate-identity-regexp 'github.com/pikopod/pikopod' \
+  --certificate-identity-regexp '^https://github.com/Pikopod/pikopod/\.github/workflows/release\.yml@refs/tags/' \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com
 ```
+
+The identity is case-sensitive and the organisation is `Pikopod`. Anchoring it
+to the release workflow is what makes the check meaningful: it proves the
+artifacts were built by that workflow, on a tag, in this repository.
 
 ## Start here: catch a breaking change in CI
 
