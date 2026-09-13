@@ -108,9 +108,6 @@ func New(cfg *config.Config, m *Metrics, captureDepth int) (*Server, error) {
 		rp := &httputil.ReverseProxy{
 			// Flush immediately so streaming/SSE passes through unbuffered.
 			FlushInterval: -1,
-			// DefaultTransport's 2-idle-conns-per-host would cost a TLS
-			// handshake per call on a production payment path.
-			Transport: upstreamTransport(),
 			Rewrite: func(pr *httputil.ProxyRequest) {
 				pr.SetURL(target)
 				pr.Out.URL.Path = joinPath(target.Path, strings.TrimPrefix(pr.In.URL.Path, up.prefix))
@@ -128,16 +125,6 @@ func New(cfg *config.Config, m *Metrics, captureDepth int) (*Server, error) {
 		s.proxies = append(s.proxies, up)
 	}
 	return s, nil
-}
-
-// upstreamTransport widens DefaultTransport's idle pool for pikopod's one-host
-// traffic. Timeouts stay stdlib: never impose a deadline the provider would not.
-func upstreamTransport() http.RoundTripper {
-	t := http.DefaultTransport.(*http.Transport).Clone()
-	t.MaxIdleConns = 256
-	t.MaxIdleConnsPerHost = 64
-	t.IdleConnTimeout = 90 * time.Second
-	return t
 }
 
 // Captures exposes the observation stream to the recorder.
