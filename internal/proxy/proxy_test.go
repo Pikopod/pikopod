@@ -35,7 +35,9 @@ func testServer(tb testing.TB, upstreamURL string, captureDepth int) *Server {
 // upstream's even when observation is fully wedged (nobody drains the
 // channel and it overflows) — internal state can never touch the hot path.
 func TestCriticalFailOpen_ByteIdenticalUnderObserverPressure(t *testing.T) {
-	payload := make([]byte, 256<<10)
+	// 64 KiB: larger than ReverseProxy's 32 KiB copy buffer so the body
+	// still arrives in multiple writes, well under maxCapturedBody.
+	payload := make([]byte, 64<<10)
 	rand.Read(payload)
 	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
@@ -48,10 +50,12 @@ func TestCriticalFailOpen_ByteIdenticalUnderObserverPressure(t *testing.T) {
 	s := testServer(t, up.URL, 1) // capture depth 1: overflows immediately, nobody drains
 	front := httptest.NewServer(s)
 	defer front.Close()
+	client := &http.Client{Transport: &http.Transport{}}
+	defer client.CloseIdleConnections()
 
 	attempt := 0
 	for i := 0; i < 25; i++ {
-		resp, err := http.Post(front.URL+"/examplepay/transaction", "application/json", bytes.NewReader([]byte(`{"amount":1}`)))
+		resp, err := client.Post(front.URL+"/examplepay/transaction", "application/json", bytes.NewReader([]byte(`{"amount":1}`)))
 		if err != nil {
 			t.Fatal(err)
 		}
