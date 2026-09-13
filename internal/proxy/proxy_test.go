@@ -54,10 +54,22 @@ func TestCriticalFailOpen_ByteIdenticalUnderObserverPressure(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		got, _ := io.ReadAll(resp.Body)
+		got, readErr := io.ReadAll(resp.Body)
 		resp.Body.Close()
-		if resp.StatusCode != 201 || !bytes.Equal(got, payload) {
-			t.Fatalf("iteration %d: response altered under observer pressure (status=%d, len=%d)", i, resp.StatusCode, len(got))
+		if readErr != nil {
+			t.Fatalf("iteration %d: reading the proxied body failed after %d/%d bytes: %v (upstream_errors=%d)",
+				i, len(got), len(payload), readErr, s.Metrics.UpstreamErrors.Load())
+		}
+		if ue := s.Metrics.UpstreamErrors.Load(); ue > 0 {
+			t.Fatalf("iteration %d: upstream dropped mid-response (%d errors, %d/%d bytes) — not an alteration by the proxy",
+				i, ue, len(got), len(payload))
+		}
+		if resp.StatusCode != 201 {
+			t.Fatalf("iteration %d: status altered under observer pressure: got %d, want 201", i, resp.StatusCode)
+		}
+		if !bytes.Equal(got, payload) {
+			t.Fatalf("iteration %d: BODY ALTERED under observer pressure — got %d bytes, want %d; this is a fail-open contract violation",
+				i, len(got), len(payload))
 		}
 	}
 	if s.Metrics.CapturesDropped.Load() == 0 {
