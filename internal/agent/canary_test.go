@@ -26,23 +26,18 @@ import (
 // byte anywhere is a release blocker.
 func TestCanarySentinelGate(t *testing.T) {
 	sentinels := []string{
-		"xpay_secret_M6CANARY00000000000000000000",  // secret key (request + response)
-		"m6.canary.person@leakmail.test",        // email
-		"4242424242424242",                      // card PAN
-		"+2348012345678",                        // phone
-		"0f8fad5b-d9cb-469f-a165-70867728950e",  // uuid identifier
-		"tok_M6CANARY_response_secret_11112222", // response-header secret
-		"drifted_M6CANARY_enum_value",           // appears as a NEW enum value post-warmup
+		"xpay_secret_M6CANARY00000000000000000000", // secret key (request + response)
+		"m6.canary.person@leakmail.test",           // email
+		"4242424242424242",                         // card PAN
+		"+2348012345678",                           // phone
+		"0f8fad5b-d9cb-469f-a165-70867728950e",     // uuid identifier
+		"tok_M6CANARY_response_secret_11112222",    // response-header secret
+		"drifted_M6CANARY_enum_value",              // appears as a NEW enum value post-warmup
 		// Regression sentinels for previously-missed leak positions:
 		"acct_M6canary99z",          // identifier as a map KEY
 		"m6.canary%40leakmail.test", // URL-encoded email in a path segment
 		"4556737586899855",          // PAN sent as a JSON NUMBER
 		"m6canaryfirstname",         // lowercase name (enum-ish by shape)
-		// Type-independence sentinels (numeric-secret class): each appears in
-		// BOTH numeric and string form in the traffic below. Values are long
-		// enough that a raw byte-sweep cannot collide with timestamps; the
-		// short-valued classes (cvv, expiry) get the JSON-aware check at the
-		// bottom of this test instead.
 		"934187",      // 11: pin (number + string)
 		"91736408",    // 12: otp (number + string)
 		"19470213",    // 13: dob as a number

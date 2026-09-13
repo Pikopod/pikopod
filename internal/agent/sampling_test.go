@@ -16,13 +16,6 @@ import (
 	"github.com/pikopod/pikopod/internal/config"
 )
 
-// THE no-distortion property (the reason sampling was allowed to ship):
-// with sampling at its most aggressive (rate 0), presence-rate math is
-// byte-identical to unsampled operation, because the learner taps the
-// stream BEFORE the persistence decision. A field present in half the
-// traffic freezes at presence 0.5 even though none of the post-warmup
-// records carrying (or omitting) it were persisted — and the guaranteed
-// classes (pre-warmup, drift evidence) still reach disk.
 func TestSamplingDoesNotDistortPresenceRates(t *testing.T) {
 	var n atomic.Int64
 	var drifted atomic.Bool
@@ -112,7 +105,7 @@ func TestSamplingDoesNotDistortPresenceRates(t *testing.T) {
 	if got := a.Metrics.RecordingsSampledOut.Load(); got != 8 {
 		t.Fatalf("expected the 8 routine records sampled out, got %d", got)
 	}
-	// And the drift still alerted (learning was never sampled).
+	a.Alerter.Flush()
 	if a.Alerter.Sent() == 0 {
 		t.Fatal("drift on sampled-out-class traffic must still alert")
 	}
