@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -77,7 +78,7 @@ func packDirs(cfg *config.Config) []string {
 	return []string{"scenarios", filepath.Join(cfg.DataDir, "scenarios")}
 }
 
-func scenarioList(cfg *config.Config, sandboxName string, out io.Writer) error {
+func scenarioList(cfg *config.Config, sandboxName string, verbose bool, out io.Writer) error {
 	_, def, err := loadSandboxDef(cfg, sandboxName)
 	if err != nil {
 		return err
@@ -89,6 +90,18 @@ func scenarioList(cfg *config.Config, sandboxName string, out io.Writer) error {
 		b := archetype.Bind(a, def)
 		if b.Applicable {
 			fmt.Fprintf(out, "  ✓ %-26s %s  (%d candidate binding(s))\n", a.ID, a.Title, len(b.Candidates))
+			if verbose {
+				for _, c := range b.Candidates {
+					roles := make([]string, 0, len(c.Bindings))
+					for r := range c.Bindings {
+						roles = append(roles, r)
+					}
+					sort.Strings(roles)
+					for _, r := range roles {
+						fmt.Fprintf(out, "      %s=%s\n", r, c.Bindings[r])
+					}
+				}
+			}
 		} else {
 			fmt.Fprintf(out, "  ✗ %-26s %s\n      %s\n", a.ID, a.Title, b.Reason)
 		}
