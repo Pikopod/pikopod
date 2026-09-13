@@ -38,12 +38,12 @@ func TestCanarySentinelGate(t *testing.T) {
 		"m6.canary%40leakmail.test", // URL-encoded email in a path segment
 		"4556737586899855",          // PAN sent as a JSON NUMBER
 		"m6canaryfirstname",         // lowercase name (enum-ish by shape)
-		"934187",      // 11: pin (number + string)
-		"91736408",    // 12: otp (number + string)
-		"19470213",    // 13: dob as a number
-		"1947-02-13",  // 14: date_of_birth as a string
-		"9012345671",  // 15: account_number as a JSON number
-		"91234567805", // 16: bvn as a JSON number
+		"934187",                    // 11: pin (number + string)
+		"91736408",                  // 12: otp (number + string)
+		"19470213",                  // 13: dob as a number
+		"1947-02-13",                // 14: date_of_birth as a string
+		"9012345671",                // 15: account_number as a JSON number
+		"91234567805",               // 16: bvn as a JSON number
 		// Key-position sentinel: redaction POINTERS are persisted now, and a
 		// raw PII key inside a pointer would leak what the sanitizer removed.
 		"m6canarykey@leakmail.test", // 17: PII as a map KEY (pointer-leak guard)
