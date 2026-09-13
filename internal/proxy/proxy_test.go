@@ -158,7 +158,7 @@ func TestTokenGateAndHeaderStripped(t *testing.T) {
 // (secret key, email, card number) must NOT survive to disk; enum strings must.
 func TestRecorderRedactsAtWrite(t *testing.T) {
 	const canarySecret = "xpay_secret_CANARY0000000000000000"
-	const canaryEmail = "canary.person@realmail.com"
+	const canaryEmail = "canary.person@example.com"
 	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		fmt.Fprintf(w, `{"id":"tx_9CANARY9","status":"success","customer_email":%q,"api_key":%q,"amount":5000}`, canaryEmail, canarySecret)
