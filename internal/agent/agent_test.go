@@ -46,7 +46,7 @@ func (c *captureSink) snapshot() []string {
 // The scripted story as a test: record → warmup → provider mutates →
 // EXACTLY ONE alert per fingerprint → canary sentinels never egress.
 func TestScriptedStory_DriftDetectedOncePerFingerprint(t *testing.T) {
-	const canaryEmail = "story.canary@realmail.com"
+	const canaryEmail = "story.canary@example.com"
 	var mutated atomic.Bool
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
