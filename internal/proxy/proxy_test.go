@@ -53,40 +53,94 @@ func TestCriticalFailOpen_ByteIdenticalUnderObserverPressure(t *testing.T) {
 	client := &http.Client{Transport: &http.Transport{}}
 	defer client.CloseIdleConnections()
 
-	attempt := 0
-	for i := 0; i < 25; i++ {
+	const want = 25
+	upstreamDrops := 0
+	compared := 0
+	for compared < want {
+		if upstreamDrops > want {
+			t.Fatalf("upstream dropped mid-response %d times; the environment is too unstable to assert on", upstreamDrops)
+		}
 		resp, err := client.Post(front.URL+"/examplepay/transaction", "application/json", bytes.NewReader([]byte(`{"amount":1}`)))
 		if err != nil {
 			t.Fatal(err)
 		}
+		before := s.Metrics.UpstreamBodyErrors.Load()
 		got, readErr := io.ReadAll(resp.Body)
 		resp.Body.Close()
-		// A loopback socket closing mid-copy is not what this test asserts.
-		// The contract is that PIKOPOD does not alter the bytes, so retry a
-		// connection-level failure once rather than blaming the proxy for it.
-		if readErr != nil && attempt == 0 {
-			attempt++
-			i--
-			continue
-		}
 		if readErr != nil {
-			t.Fatalf("iteration %d: reading the proxied body failed after %d/%d bytes: %v (upstream_errors=%d)",
-				i, len(got), len(payload), readErr, s.Metrics.UpstreamErrors.Load())
-		}
-		if ue := s.Metrics.UpstreamErrors.Load(); ue > 0 {
-			t.Fatalf("iteration %d: upstream dropped mid-response (%d errors, %d/%d bytes) — not an alteration by the proxy",
-				i, ue, len(got), len(payload))
+			if s.Metrics.UpstreamBodyErrors.Load() > before {
+				upstreamDrops++
+				continue
+			}
+			t.Fatalf("comparison %d: body truncated at %d/%d bytes with a healthy upstream: %v; pikopod cut the response short",
+				compared, len(got), len(payload), readErr)
 		}
 		if resp.StatusCode != 201 {
-			t.Fatalf("iteration %d: status altered under observer pressure: got %d, want 201", i, resp.StatusCode)
+			t.Fatalf("comparison %d: status altered under observer pressure: got %d, want 201", compared, resp.StatusCode)
 		}
 		if !bytes.Equal(got, payload) {
-			t.Fatalf("iteration %d: BODY ALTERED under observer pressure — got %d bytes, want %d; this is a fail-open contract violation",
-				i, len(got), len(payload))
+			t.Fatalf("comparison %d: BODY ALTERED under observer pressure — got %d bytes, want %d; this is a fail-open contract violation",
+				compared, len(got), len(payload))
 		}
+		compared++
+	}
+	if compared != want {
+		t.Fatalf("test invalid: compared %d responses, want %d", compared, want)
 	}
 	if s.Metrics.CapturesDropped.Load() == 0 {
 		t.Fatal("test invalid: expected drops to have occurred")
+	}
+}
+
+func TestUpstreamDiesMidBodyIsCounted(t *testing.T) {
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Length", "4096") // promise more than we send
+		w.WriteHeader(200)
+		w.Write(make([]byte, 128))
+		if f, ok := w.(http.Flusher); ok {
+			f.Flush()
+		}
+		panic(http.ErrAbortHandler) // drop the connection mid-body
+	}))
+	defer up.Close()
+
+	s := testServer(t, up.URL, 8)
+	front := httptest.NewServer(s)
+	defer front.Close()
+
+	resp, err := http.Get(front.URL + "/examplepay/transaction")
+	if err == nil {
+		io.ReadAll(resp.Body)
+		resp.Body.Close()
+	}
+	if got := s.Metrics.UpstreamBodyErrors.Load(); got != 1 {
+		t.Fatalf("upstream died mid-body: UpstreamBodyErrors = %d, want 1", got)
+	}
+	if got := s.Metrics.UpstreamErrors.Load(); got != 0 {
+		t.Fatalf("mid-body failure must not count as unreachable: UpstreamErrors = %d, want 0", got)
+	}
+}
+
+func TestHealthyUpstreamCountsNoBodyError(t *testing.T) {
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write(make([]byte, 64<<10))
+	}))
+	defer up.Close()
+
+	s := testServer(t, up.URL, 8)
+	front := httptest.NewServer(s)
+	defer front.Close()
+
+	for i := 0; i < 5; i++ {
+		resp, err := http.Get(front.URL + "/examplepay/transaction")
+		if err != nil {
+			t.Fatal(err)
+		}
+		io.ReadAll(resp.Body)
+		resp.Body.Close()
+	}
+	if got := s.Metrics.UpstreamBodyErrors.Load(); got != 0 {
+		t.Fatalf("healthy upstream: UpstreamBodyErrors = %d, want 0", got)
 	}
 }
 
