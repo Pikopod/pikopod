@@ -42,7 +42,7 @@ func RefuseUnsupportedSteps(def *ScenarioDefinition) error {
 			return errfmt.New(
 				"step "+strconv.Itoa(i)+" ("+def.Steps[i].Type+") cannot run against a remote target",
 				"a real endpoint has no fault arming, seeded state, virtual clock, webhook outbox, or request journal to consult",
-				"run this scenario against the local sandbox, or trim it to REQUEST/NOTE steps for the remote check",
+				"run this scenario against the local sandbox, or trim it to REQUEST/NOTE/SNAPSHOT steps for the remote check",
 				"scenarios/README.md")
 		}
 	}

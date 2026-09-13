@@ -270,7 +270,7 @@ func scenarioRun(cmd *cobra.Command, args []string) error {
 		if err != nil {
 			return err
 		}
-		fmt.Fprintf(out, "running against REAL endpoint %s — only REQUEST/NOTE steps; conditioning and state assertions are refused\n", targetURL)
+		fmt.Fprintf(out, "running against REAL endpoint %s — only REQUEST/NOTE/SNAPSHOT steps; conditioning and state assertions are refused\n", targetURL)
 	}
 
 	failed, errored := 0, 0
