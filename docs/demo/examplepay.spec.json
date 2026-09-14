@@ -1,0 +1,31 @@
+{
+  "openapi": "3.0.0",
+  "info": {"title": "ExamplePay", "version": "1"},
+  "components": {
+    "securitySchemes": {"bearer": {"type": "http", "scheme": "bearer"}},
+    "schemas": {"Charge": {"type": "object", "required": ["id","amount","status"],
+      "properties": {
+        "id": {"type": "string"},
+        "amount": {"type": "integer"},
+        "currency": {"type": "string"},
+        "status": {"type": "string", "enum": ["success","pending","failed"]}
+      }}}
+  },
+  "security": [{"bearer": []}],
+  "paths": {
+    "/charges": {
+      "get": {"operationId":"listCharges","responses":{"200":{"description":"ok","content":{"application/json":{"schema":{"type":"array","items":{"$ref":"#/components/schemas/Charge"}}}}}}},
+      "post": {"operationId":"createCharge",
+        "requestBody":{"content":{"application/json":{"schema":{"$ref":"#/components/schemas/Charge"}}}},
+        "responses":{"201":{"description":"created","content":{"application/json":{"schema":{"$ref":"#/components/schemas/Charge"}}}},
+                     "422":{"description":"declined","content":{"application/json":{"schema":{"type":"object","properties":{"error":{"type":"string"}}}}}}}}
+    },
+    "/charges/{id}": {
+      "get": {"operationId":"getCharge","parameters":[{"name":"id","in":"path","required":true,"schema":{"type":"string"}}],
+        "responses":{"200":{"description":"ok","content":{"application/json":{"schema":{"$ref":"#/components/schemas/Charge"}}}}}},
+      "patch": {"operationId":"updateCharge","parameters":[{"name":"id","in":"path","required":true,"schema":{"type":"string"}}],
+        "requestBody":{"content":{"application/json":{"schema":{"$ref":"#/components/schemas/Charge"}}}},
+        "responses":{"200":{"description":"ok","content":{"application/json":{"schema":{"$ref":"#/components/schemas/Charge"}}}}}}
+    }
+  }
+}

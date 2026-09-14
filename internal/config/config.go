@@ -36,7 +36,29 @@ type Upstream struct {
 	// SpecSource arms the DECLARED-drift watcher: a spec location (http(s),
 	// file, or git:<ref>:<path>) re-checked on spec_watch.interval_minutes.
 	SpecSource string `yaml:"spec_source,omitempty"`
+	// Incidents tunes failed-exchange capture for this upstream.
+	Incidents Incidents `yaml:"incidents,omitempty"`
 }
+
+type Incidents struct {
+	ClientErrors    bool    `yaml:"client_errors,omitempty"`
+	ClientErrorRate float64 `yaml:"client_error_rate,omitempty"`
+}
+
+// clientErrorFloor: minimum requests to an endpoint family before a 4xx rate
+// means anything. 20, not 10, because at 10 a single 4xx is already 10% and
+// clears the 5% default on its own — which is the case the floor exists for.
+const clientErrorFloor = 20
+
+// ClientErrorRateFor returns the configured 4xx threshold, defaulted.
+func (u Upstream) ClientErrorRateFor() float64 {
+	if u.Incidents.ClientErrorRate > 0 {
+		return u.Incidents.ClientErrorRate
+	}
+	return 0.05
+}
+
+func ClientErrorFloor() int { return clientErrorFloor }
 
 // SpecWatch tunes the declared-drift watcher (armed per-upstream by
 // spec_source).
@@ -46,15 +68,10 @@ type SpecWatch struct {
 }
 
 type Slack struct {
-	// WebhookURL is a plain incoming webhook. (Bot-token thread aggregation
-	// was a parsed-but-dead knob; removed until it is actually built.)
 	WebhookURL string `yaml:"webhook_url,omitempty"`
-	// MinLevel floors DELIVERY by severity (INFO default). Muted alerts still
-	// reach the event log and digest — this floors the channel, not the record.
-	MinLevel string `yaml:"min_level,omitempty"`
-	// DigestHours enables a periodic digest post (counts of new declared +
-	// observed findings by severity since the last digest). 0 = off.
-	DigestHours int `yaml:"digest_hours,omitempty"`
+
+	MinLevel    string `yaml:"min_level,omitempty"`
+	DigestHours int    `yaml:"digest_hours,omitempty"`
 }
 
 type LLM struct {

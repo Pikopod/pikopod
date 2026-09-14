@@ -2,33 +2,123 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://raw.githubusercontent.com/pikopod/pikopod/main/schema/drift-event.schema.json",
   "title": "DriftEvent",
-  "description": "The one shape pikopod emits for a detected provider drift — to stdout, to the Slack webhook sink, and to the local event log (<data_dir>/events.ndjson). schema_version gates compatibility; consumers MUST ignore unknown fields.",
+  "description": "The one shape pikopod emits for a detected provider DRIFT (a successful response whose shape changed) or INCIDENT (an exchange that failed) - to stdout, to the Slack webhook sink, and to the local event log (<data_dir>/events.ndjson). COMPATIBILITY: consumers MUST ignore unknown fields, and MUST ignore kinds they do not recognise - new kinds may be added without a schema_version bump. schema_version moves only for a STRUCTURAL change: a field removed, a type changed, or an existing field's meaning changed. v2 added the four incident kinds and this rule; a v1 consumer that validated the kind enum strictly will reject incident events.",
   "type": "object",
-  "required": ["schema_version", "fingerprint", "upstream", "method", "endpoint", "status_class", "kind", "first_seen", "last_seen", "occurrences"],
+  "required": [
+    "schema_version",
+    "fingerprint",
+    "upstream",
+    "method",
+    "endpoint",
+    "status_class",
+    "kind",
+    "first_seen",
+    "last_seen",
+    "occurrences"
+  ],
   "properties": {
-    "schema_version": { "type": "string", "const": "1" },
-    "fingerprint": { "type": "string", "pattern": "^fp_[0-9a-f]{12}$", "description": "Stable id of the divergence; same diff → same fingerprint across occurrences." },
-    "upstream": { "type": "string" },
-    "method": { "type": "string" },
-    "endpoint": { "type": "string", "description": "Path TEMPLATE (e.g. /transaction/tx_{id}) — never a concrete path; concrete identifiers must not egress." },
-    "status_class": { "type": "string", "enum": ["2xx", "3xx", "4xx", "5xx", ""], "description": "Always emitted; empty string on DECLARED events (a spec change has no wire status)." },
+    "schema_version": {
+      "type": "string",
+      "const": "2"
+    },
+    "fingerprint": {
+      "type": "string",
+      "pattern": "^fp_[0-9a-f]{12}$",
+      "description": "Stable id of the divergence; same diff \u2192 same fingerprint across occurrences."
+    },
+    "upstream": {
+      "type": "string"
+    },
+    "method": {
+      "type": "string"
+    },
+    "endpoint": {
+      "type": "string",
+      "description": "Path TEMPLATE (e.g. /transaction/tx_{id}) \u2014 never a concrete path; concrete identifiers must not egress."
+    },
+    "status_class": {
+      "type": "string",
+      "enum": [
+        "2xx",
+        "3xx",
+        "4xx",
+        "5xx",
+        ""
+      ],
+      "description": "Always emitted; empty string on DECLARED events (a spec change has no wire status)."
+    },
     "kind": {
       "type": "string",
-      "description": "Observed kinds are the closed enum below; DECLARED events (source=declared) carry declared:<spec-diff check id>.",
+      "description": "Observed SHAPE kinds and INCIDENT kinds. The enum below is the set pikopod emits TODAY, not a closed set for all time - treat an unrecognised kind as informational rather than an error. Incident kinds (upstream_error, upstream_unreachable, rate_limited, client_error) describe a failed exchange and need no baseline. DECLARED events (source=declared) carry declared:<spec-diff check id>.",
       "anyOf": [
-        { "enum": ["field_added", "field_removed", "type_changed", "enum_value_new", "status_new", "field_nullable", "status_code_changed", "error_shape_changed"] },
-        { "pattern": "^declared:[a-z0-9-]+$" }
+        {
+          "enum": [
+            "field_added",
+            "field_removed",
+            "type_changed",
+            "enum_value_new",
+            "status_new",
+            "field_nullable",
+            "status_code_changed",
+            "error_shape_changed",
+            "upstream_error",
+            "upstream_unreachable",
+            "rate_limited",
+            "client_error"
+          ]
+        },
+        {
+          "pattern": "^declared:[a-z0-9-]+$"
+        }
       ]
     },
-    "field": { "type": "string", "description": "Field path within the body (slash-joined), when kind concerns a field." },
-    "before": { "type": "string", "description": "Reference-side view: dominant type, known value set, or prior status class." },
-    "after": { "type": "string", "description": "Observed-side view: new type, new value, or new status class." },
-    "first_seen": { "type": "string", "format": "date-time" },
-    "last_seen": { "type": "string", "format": "date-time" },
-    "occurrences": { "type": "integer", "minimum": 1 },
-    "source": { "type": "string", "enum": ["declared"], "description": "Absent = observed drift (traffic vs baselines); \"declared\" = the provider changed their SPEC (spec-diff engine)." },
-    "level": { "type": "string", "enum": ["ERR", "WARN", "INFO"], "description": "Derived severity: declared per the spec-diff law, observed per the risk asymmetry (removed/type=ERR, new enum value=WARN, additive/documented=INFO). Absent on events persisted before it existed." },
-    "detail": { "type": "string", "description": "Pre-rendered human sentence for declared findings." },
-    "note": { "type": "string", "description": "Declared×observed join context (e.g. the provider's new spec version documents this change)." }
+    "field": {
+      "type": "string",
+      "description": "Field path within the body (slash-joined), when kind concerns a field."
+    },
+    "before": {
+      "type": "string",
+      "description": "Reference-side view: dominant type, known value set, or prior status class."
+    },
+    "after": {
+      "type": "string",
+      "description": "Observed-side view: new type, new value, or new status class."
+    },
+    "first_seen": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "last_seen": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "occurrences": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "source": {
+      "type": "string",
+      "enum": [
+        "declared"
+      ],
+      "description": "Absent = observed drift (traffic vs baselines); \"declared\" = the provider changed their SPEC (spec-diff engine)."
+    },
+    "level": {
+      "type": "string",
+      "enum": [
+        "ERR",
+        "WARN",
+        "INFO"
+      ],
+      "description": "Derived severity: declared per the spec-diff law, observed per the risk asymmetry (removed/type=ERR, new enum value=WARN, additive/documented=INFO). Absent on events persisted before it existed."
+    },
+    "detail": {
+      "type": "string",
+      "description": "Pre-rendered human sentence for declared findings."
+    },
+    "note": {
+      "type": "string",
+      "description": "Declared\u00d7observed join context (e.g. the provider's new spec version documents this change)."
+    }
   }
 }

@@ -50,7 +50,7 @@ func newLLMClient(cfg *config.Config, model string) *nl.Client {
 }
 
 func newDemoCmd() *cobra.Command {
-	return &cobra.Command{Use: "demo", Short: "Self-contained drift demo: fake provider drifts, alert prints (<5 min, zero config)",
+	return &cobra.Command{Use: "demo", Short: "One lap of the loop in a second: fake provider drifts, alert prints, fingerprint replays (zero config)",
 		RunE: func(cmd *cobra.Command, args []string) error { return demo.Run(cmd.OutOrStdout()) }}
 }
 
@@ -133,7 +133,7 @@ func newImportCmd() *cobra.Command {
 }
 
 func newUpCmd() *cobra.Command {
-	c := &cobra.Command{Use: "up", Short: "Serve the drift agent (:4700) and registered sandboxes (:4600)",
+	c := &cobra.Command{Use: "up", Short: "Serve the observing agent (:4700) and registered sandboxes (:4600)",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg, err := loadConfig(cmd)
 			if err != nil {
@@ -312,7 +312,7 @@ func newScenarioCmd() *cobra.Command {
 	create.Flags().Bool("yes", false, "save without the confirmation prompt")
 	create.Flags().String("model", "", "OpenRouter model (default "+nl.DefaultModel+")")
 
-	c.AddCommand(list, run, create, newFromDriftCmd(), newFromRecordingsCmd())
+	c.AddCommand(list, run, create, newFromDriftCmd(), newFromRecordingsCmd(), newReproduceCmd())
 	return c
 }
 

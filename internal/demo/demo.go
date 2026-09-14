@@ -84,15 +84,23 @@ func Run(out io.Writer) error {
 	time.Sleep(100 * time.Millisecond) // let alert prints flush
 
 	say("")
-	say("④ That's the product: ONE alert per change (deduped across %d drifted requests),", 10)
-	say("   the exact field diff, and a fingerprint you can replay as a scenario that")
-	say("   pins the contract you integrated against — it fails the moment you adopt")
-	say("   the provider's change, so the break lands locally, not in prod.")
+	say("④ ONE alert per change, deduped across %d drifted requests, with the exact", 10)
+	say("   field diff and a fingerprint.")
 	say("")
-	say("Next steps:")
-	say("  pikopod init                       # wire your real provider + Slack")
-	say("  pikopod sandbox add <name> --spec … # spec → stateful sandbox at /<name>/")
-	say("  pikopod up                         # watch staging, then production")
+	say("⑤ Detecting it is the easy part. The fingerprint above is a handle: feed it")
+	say("   back and the change becomes a scenario that runs against a sandbox built")
+	say("   from your provider's own spec, so the break happens on your laptop.")
+	say("   That loop — rehearse, ship, observe, reproduce, keep it fixed — is the")
+	say("   product. This demo showed one lap of it.")
+	say("")
+	say("Try the other end of the loop, no proxy and no production needed:")
+	say("  pikopod init                        # scaffold pikopod.yaml")
+	say("  pikopod import <name> --spec …      # their spec → a stateful sandbox")
+	say("  pikopod scenario list <name>        # which failure modes YOUR integration has")
+	say("")
+	say("Then, when you are ready to watch real traffic:")
+	say("  pikopod up                          # staging first, then production")
+	say("  pikopod incidents                   # what failed; reproduce any of it")
 	return nil
 }
 

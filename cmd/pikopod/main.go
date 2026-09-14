@@ -43,6 +43,7 @@ func main() {
 		newAckCmd(),
 		newAcceptCmd(),
 		newReportCmd(),
+		newIncidentsCmd(),
 		newDoctorCmd(),
 		newInspectCmd(),
 		newStatusCmd(),

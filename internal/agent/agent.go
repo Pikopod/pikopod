@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -38,6 +39,9 @@ type Agent struct {
 	// classes tracks status classes ever seen per upstream|method|template —
 	// StatusNew detection needs cross-family knowledge.
 	classes map[string]map[string]bool
+	// clientErrs counts requests and 4xx per endpoint family, so a 4xx rate
+	// has a denominator. Guarded by mu.
+	clientErrs map[string]errCounts
 	// muted: upstream → endpoint templates whose alerts are suppressed
 	// (config `mute`). Findings are still computed; emission is skipped.
 	muted map[string]map[string]bool
@@ -59,6 +63,9 @@ type Agent struct {
 	// observer goroutine increments while /healthz reads.
 	EventsEmitted atomic.Int64
 }
+
+// errCounts is one endpoint family's request and 4xx tallies.
+type errCounts struct{ total, errors int }
 
 // New wires everything. Alert options are configurable for demo/eval.
 func New(cfg *config.Config, alertOpts alert.Options, extraSinks ...alert.Sink) (*Agent, error) {
@@ -98,12 +105,13 @@ func New(cfg *config.Config, alertOpts alert.Options, extraSinks ...alert.Sink) 
 	}
 	a := &Agent{
 		Cfg: cfg, Metrics: metrics, Proxy: p, Alerter: al,
-		learners:  map[string]*baseline.Learner{},
-		classes:   map[string]map[string]bool{},
-		muted:     muted,
-		refiners:  map[string]*contract.Refiner{},
-		contracts: map[string]*ir.ApiDefinition{},
-		started:   time.Now(),
+		learners:   map[string]*baseline.Learner{},
+		classes:    map[string]map[string]bool{},
+		clientErrs: map[string]errCounts{},
+		muted:      muted,
+		refiners:   map[string]*contract.Refiner{},
+		contracts:  map[string]*ir.ApiDefinition{},
+		started:    time.Now(),
 	}
 	rec := proxy.NewRecorder(cfg.DataDir, tok, metrics)
 	rec.SetObserver(a.observe)
@@ -231,6 +239,18 @@ func (a *Agent) observe(rec *proxy.Record) (notable bool) {
 		return notable
 	}
 
+	// Incidents are facts about THIS exchange, so unlike drift they need no
+	// baseline and fire from the first request.
+	if kind, ok := a.incidentKind(rec, obs.Template); ok {
+		notable = true // the recording IS the reproduction; sampling must not drop it
+		a.EventsEmitted.Add(1)
+		a.Alerter.Report(drift.Finding{
+			Upstream: rec.Upstream, Method: rec.Method, Template: obs.Template,
+			StatusClass: obs.Family.StatusClass, Kind: kind,
+			After: strconv.Itoa(rec.Status),
+		})
+	}
+
 	classKey := rec.Upstream + "|" + rec.Method + "|" + obs.Template
 	a.mu.Lock()
 	known := a.classes[classKey]
@@ -270,6 +290,70 @@ func (a *Agent) observe(rec *proxy.Record) (notable bool) {
 		a.Alerter.Report(f)
 	}
 	return notable
+}
+
+// incidentKind classifies a failed exchange. 5xx, 429 and pikopod's own
+// unreachable-502 always qualify; 4xx is opt-in and rate-gated.
+func (a *Agent) incidentKind(rec *proxy.Record, template string) (drift.Kind, bool) {
+	isClientErr := rec.Status >= 400 && rec.Status < 500
+	total, errs := a.countExchange(rec.Upstream, rec.Method, template, isClientErr)
+
+	switch {
+	case rec.Status == 429:
+		return drift.RateLimited, true
+	case rec.Status >= 500:
+		// pikopod's own 502 carries the marker; a real upstream 502 does not.
+		if headerHas(rec.RespHeader, "x-pikopod-error", "upstream-unreachable") {
+			return drift.UpstreamUnreachable, true
+		}
+		return drift.UpstreamError, true
+	case isClientErr:
+		up := a.Cfg.Upstreams[rec.Upstream]
+		// Below the sample floor no rate is claimed: the first 4xx is 100%.
+		if !up.Incidents.ClientErrors || total < config.ClientErrorFloor() {
+			return "", false
+		}
+		if float64(errs)/float64(total) > up.ClientErrorRateFor() {
+			return drift.ClientError, true
+		}
+	}
+	return "", false
+}
+
+// countExchange tallies one request against its endpoint family and returns the
+// running totals. Every exchange counts, or the 4xx rate has no denominator.
+func (a *Agent) countExchange(upstream, method, template string, isClientErr bool) (total, errs int) {
+	key := upstream + "|" + method + "|" + template
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	c := a.clientErrs[key]
+	c.total++
+	if isClientErr {
+		c.errors++
+	}
+	a.clientErrs[key] = c
+	return c.total, c.errors
+}
+
+// headerHas reports whether a recorded header carries a value, case-insensitively.
+// Recorded headers are map[string]any; values may be a string or a []any.
+func headerHas(h map[string]any, key, want string) bool {
+	for k, v := range h {
+		if !strings.EqualFold(k, key) {
+			continue
+		}
+		switch t := v.(type) {
+		case string:
+			return strings.EqualFold(t, want)
+		case []any:
+			for _, e := range t {
+				if s, ok := e.(string); ok && strings.EqualFold(s, want) {
+					return true
+				}
+			}
+		}
+	}
+	return false
 }
 
 // Run serves the agent until ctx cancels. Persistence flushes periodically

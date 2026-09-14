@@ -7,12 +7,22 @@ For contribution flow (forking, pull requests, commit style), see
 
 ## Prerequisites
 
-- **Go 1.22 or newer.** That is the only hard requirement.
-- **No cgo.** pikopod builds static binaries with `CGO_ENABLED=0`, including
-  its SQLite layer. If a change needs cgo, it needs a discussion first.
+- **Go, at the version `go.mod` declares.** That is the only hard requirement,
+  and `go.mod` is the source of truth — CI resolves it with
+  `go-version-file: go.mod` rather than pinning a number, so this document
+  cannot drift out of date the way a hardcoded version would.
+- **No cgo.** pikopod builds static binaries with `CGO_ENABLED=0`, including its
+  SQLite layer — that is `modernc.org/sqlite`, the pure-Go driver, not
+  `mattn/go-sqlite3`. Swapping it for the cgo driver would break every
+  cross-compiled release target, so if a change needs cgo it needs a discussion
+  first.
 - **Python 3** (optional) only if you regenerate synthetic test fixtures.
 
-Any platform Go targets works. CI builds and tests on Linux and macOS.
+Any platform Go targets works. **CI runs tests on Linux only**
+(`ubuntu-latest`). The darwin and windows entries in the release matrix are
+cross-compiles — `go build`, never `go test` — so if you change anything
+platform-sensitive, run the suite on your own machine and say so in the pull
+request.
 
 ## Initial setup
 
@@ -34,6 +44,33 @@ go run ./cmd/pikopod demo
 `demo` is self-contained: it starts a fake provider in-process, sends traffic
 through the agent, silently changes the provider's responses, and prints the
 alerts. It takes about a second and needs no config.
+
+## Where local state goes
+
+Running pikopod from the repo writes into the repo. All of it is gitignored, so
+you will not commit it by accident, but you should know it is there:
+
+| Path | What |
+| --- | --- |
+| `./pikopod.yaml` | Config, written by `pikopod init` |
+| `./pikopod-data/` | Everything else: `recordings/*.ndjson`, `baselines/`, `events.ndjson`, `alerts/state.json`, `scenarios/`, and `.salt` |
+
+`.salt` is the per-install tokenization secret. Deleting it re-tokenizes
+everything, so old recordings stop correlating with new ones — that is the
+intended behaviour, not a bug, but it will surprise you mid-debug.
+
+To keep an experiment out of the way, point the binary somewhere else:
+
+```bash
+go run ./cmd/pikopod --config /tmp/scratch/pikopod.yaml up
+```
+
+`--config` is a persistent flag and works on every command. `data_dir` inside
+that file decides where the rest lands.
+
+The drift-event schema everything scripts against is
+[`schema/drift-event.schema.json`](./schema/drift-event.schema.json), and
+`e2e/schema_contract_test.go` fails the build if it and the Go struct diverge.
 
 ## Build and test loop
 
@@ -89,7 +126,7 @@ The e2e suite lives in `e2e/` and runs as part of `go test ./...`.
 | Package | Role |
 | --- | --- |
 | `specwatch` | Re-fetches the provider's published spec. ETag gated, never advances the pin. |
-| `specdiff` | Typed spec-to-spec diff. Severity derived by law, never hand-assigned. |
+| `specdiff` | Typed spec-to-spec diff. One function maps change shape onto ERR/WARN/INFO; no check carries a hand-assigned severity. |
 | `specupdate` | Format-preserving, additive-only spec patches by YAML AST surgery. |
 | `conformance` | Does the provider obey its own documentation? |
 | `contract` | The traffic overlay layered beside the spec-derived contract. |
@@ -100,7 +137,7 @@ The e2e suite lives in `e2e/` and runs as part of `go test ./...`.
 | --- | --- |
 | `ir` | The normalized contract. Every field carries provenance. |
 | `importer` | OpenAPI, Swagger 2.0, Postman, GraphQL to IR. |
-| `docimport` | Documentation URL to spec, by deterministic rungs. |
+| `docimport` | Documentation URL to spec. Three deterministic rungs, then an opt-in model rung that needs your own key. |
 | `sandbox` | The deterministic engine: routing, auth, validation, synthesis, faults, webhooks. |
 | `replay` | Recorded traffic as the sandbox's final resolution tier, plus the CI gate. |
 | `scenario` | Pack schema, validator, runner, archetype catalogue, NL authoring. |
@@ -116,6 +153,14 @@ The e2e suite lives in `e2e/` and runs as part of `go test ./...`.
 | `config` | Loads pikopod.yaml. Unknown keys are startup errors. |
 | `demo` | The zero-config first-run story. |
 
+## The README recording
+
+`docs/demo/demo.gif` is generated, not hand-made: every byte of program output
+in it came from running the real binary. `docs/demo/README.md` has the
+regeneration steps and the one rule that matters — regenerate when the output
+changes, not on a schedule, because each one is a permanent ~113 KB blob in git
+history.
+
 ## Parity goldens
 
 `testdata/parity/` holds committed golden files, and several suites diff
@@ -123,13 +168,36 @@ against them.
 
 **They are maintainer-regenerated. Do not hand-edit them.**
 
-If your change legitimately alters a golden, say so in the pull request and
-leave the golden alone. A pull request that edits a golden to make a test pass
-is indistinguishable from one that breaks the behavior the golden protects, and
-it will be sent back.
+A pull request that edits a golden to make a test pass is indistinguishable from
+one that breaks the behavior the golden protects, and it will be sent back.
 
-Golden-backed suites: `internal/importer`, `internal/sanitize`,
-`internal/sandbox`, `internal/scenario/archetype`, `internal/scenario/nl`.
+### What to do when your change legitimately moves a golden
+
+There is **no regeneration command yet**; regenerating is a manual maintainer
+step. The process is:
+
+1. **Leave the golden exactly as it is.** Do not edit it, do not delete it.
+2. **Expect the parity job to be red**, and expect `go test ./...` to be red
+   locally. That is correct for this kind of change and it is not a sign you
+   have done something wrong.
+3. **Say so in the pull request**: which golden moved, and why your change
+   should move it. That sentence is what gets reviewed.
+4. A maintainer regenerates on your branch, from the code, and pushes the
+   result. Review then judges the regenerated golden on its own.
+
+This is the one place the "a red suite is not a starting point" rule above does
+not apply, and it applies to nothing else.
+
+### Which suites use them
+
+Five packages have `TestParity*` suites — the ones CI's parity job runs:
+`internal/importer`, `internal/sanitize`, `internal/sandbox`,
+`internal/scenario/archetype`, `internal/scenario/nl`.
+
+Three more read fixtures out of `testdata/parity/` without a parity suite of
+their own: `cmd/pikopod`, `internal/ir`, `internal/scenario`. If your change
+moves a fixture, check those too — their failures will not look like parity
+failures.
 
 ## Test fixtures and licensing
 
@@ -148,9 +216,14 @@ python3 tools/gen-synthetic-fixtures.py
 ## Release
 
 Releases are cut by tag and built by GoReleaser. Each release ships static
-binaries for macOS and Linux on amd64 and arm64, a `SHA256SUMS` file signed
-with cosign, SLSA provenance, deb and rpm packages, a container image on GHCR,
-and a Homebrew formula.
+binaries for **macOS, Linux and Windows** on amd64 and arm64 (`.tar.gz`, `.zip`
+on Windows), an SBOM per archive, a `SHA256SUMS` file signed with cosign, SLSA
+provenance, deb and rpm packages, a container image on GHCR, and a Homebrew
+formula.
+
+Everything in that list is a published artifact someone may depend on, so it
+all has to work — if we stop supporting one, remove it from `.goreleaser.yml`
+rather than leaving it unadvertised.
 
 ```bash
 git tag v0.2.0
@@ -164,14 +237,15 @@ a `HOMEBREW_TAP_GITHUB_TOKEN` repository secret holding a token with
 repository and cannot push across repositories. The formula is written on the
 first tagged release; there is no formula before then.
 
-Verify a release the way a user would:
+Verify a release the way a user would. The command lives in exactly one place —
+[docs/security.md](docs/security.md#verifying-a-release) — because an
+unanchored or wrongly-cased copy silently verifies nothing, and a verification
+command that always passes is worse than none.
 
-```bash
-sha256sum -c SHA256SUMS --ignore-missing
-cosign verify-blob --certificate SHA256SUMS.pem --signature SHA256SUMS.sig SHA256SUMS \
-  --certificate-identity-regexp 'github.com/pikopod/pikopod' \
-  --certificate-oidc-issuer https://token.actions.githubusercontent.com
-```
+Two things that command gets right and a hand-written one usually does not: the
+organisation is `Pikopod`, capitalised, and the identity is **anchored** to the
+release workflow and to `refs/tags/`. An unanchored regexp matches any workflow
+in any repository whose identity URL happens to contain the substring.
 
 ## House rules
 
@@ -195,8 +269,20 @@ binding treats zero candidates as a first-class answer with a reason, and how
 **Errors are a contract.** Use `errfmt.New(what, why, fix, docs)` rather than
 `fmt.Errorf`, and make sure the doc anchor you cite exists.
 
-**Exit codes are API.** `0` clean, `1` drift found, `2` tool or configuration
-error. Never conflate `1` and `2`. See [docs/exit-codes.md](./docs/exit-codes.md).
+**Exit codes are API.** `0` clean, `1` the check ran and failed, `2` tool or
+configuration error — including any result pikopod cannot stand behind. Never
+conflate `1` and `2`. [docs/exit-codes.md](./docs/exit-codes.md) is the
+definition; do not restate it in a third place.
+
+**Every model call is opt-in, keyed by the user, and confined to three places.**
+"It initiates no network traffic of its own" is a headline promise, so anything
+that reaches a model goes through `internal/scenario/nl` and nowhere else.
+Today exactly three commands can call one — `scenario create`, `fix`, and
+`import` against a documentation URL — and each refuses with a typed error when
+no key is configured rather than degrading quietly. Adding a fourth means
+adding a row to
+[docs/security.md](./docs/security.md#what-leaves-the-machine) naming what it
+carries, in the same pull request.
 
 **Comments are two lines maximum.** Say why, not what. Anything longer belongs
 in `docs/`, where users can find it.
