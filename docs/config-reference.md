@@ -15,9 +15,12 @@ Environment variables override the file. The full set:
 | `PIKOPOD_LISTEN` | `listen` |
 | `PIKOPOD_DATA_DIR` | `data_dir` |
 | `PIKOPOD_TOKEN` | the listener token (never passed as an argument — argv is visible in `ps`) |
-| `PIKOPOD_OPENROUTER_KEY` / `OPENROUTER_API_KEY` | `llm.openrouter_key` |
-| `PIKOPOD_OPENROUTER_MODEL` / `OPENROUTER_MODEL` | `llm.model` |
-| `PIKOPOD_OPENROUTER_BASE` | LLM API base URL (testing/staging) |
+| `PIKOPOD_LLM_KEY` | `llm.api_key` (provider-neutral) |
+| `OPENROUTER_API_KEY` | OpenRouter's provider-native key environment variable |
+| `PIKOPOD_OPENROUTER_KEY` | deprecated OpenRouter-only key alias |
+| `PIKOPOD_OPENROUTER_MODEL` / `OPENROUTER_MODEL` | `llm.model` for OpenRouter |
+| `PIKOPOD_LLM_BASE` | configured LLM provider base URL override (testing/staging) |
+| `PIKOPOD_OPENROUTER_BASE` | deprecated OpenRouter-only base URL override |
 | `PIKOPOD_DEBUG` | verbose diagnostics |
 
 A minimal working file:
@@ -279,12 +282,30 @@ and each degradation explains which fields missed.
 
 ```yaml
 llm:
-  openrouter_key: sk-or-...
-  model: openai/gpt-4o-mini   # the default when unset
+  provider: openrouter          # default when unset
+  api_key: sk-or-...            # provider-neutral key
+  model: openai/gpt-4o-mini     # OpenRouter default when unset
+  # openrouter_key: sk-or-...   # deprecated alias, still honoured
 ```
 
 Bring your own key. pikopod never ships a key and never proxies your requests
-through anyone else.
+through anyone else. `openrouter` is currently the only registered provider;
+the `Provider` boundary is the extension point for additional providers.
+
+Key resolution is deterministic and stops at the first value found:
+
+1. `llm.api_key`
+2. `PIKOPOD_LLM_KEY`
+3. the provider's standard environment variable (`OPENROUTER_API_KEY` today)
+4. for OpenRouter only, deprecated `PIKOPOD_OPENROUTER_KEY` or
+   `llm.openrouter_key`
+
+When a key is stored in `pikopod.yaml`, the file must be private (`0600`).
+Environment-provided keys do not make the configuration file secret.
+
+For testing or staging, `PIKOPOD_LLM_BASE` overrides the configured provider's
+API base URL. `PIKOPOD_OPENROUTER_BASE` remains supported as a deprecated
+OpenRouter-only fallback when the generic override is unset.
 
 The key is optional. Three things use it:
 

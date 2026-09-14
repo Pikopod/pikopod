@@ -1,30 +1,15 @@
-// OpenRouter gateway, reduced to the one operation pikopod needs: POST
-// ${base}/chat/completions, JSON response format, no tools, temperature 0.
 package nl
 
 import (
-	"bufio"
-	"bytes"
 	"context"
 	"encoding/json"
-	"fmt"
-	"io"
 	"net/http"
 	"os"
 	"regexp"
 	"strings"
-	"time"
 
 	"github.com/pikopod/pikopod/internal/errfmt"
 )
-
-// DefaultBaseURL is the OpenRouter API base.
-const DefaultBaseURL = "https://openrouter.ai/api/v1"
-
-// DefaultModel is used when pikopod.yaml sets no llm.model.
-const DefaultModel = "openai/gpt-4o-mini"
-
-const requestTimeout = 60 * time.Second
 
 // systemInstruction is the scenario.fromDescription registry entry, verbatim.
 const systemInstruction = "You map a developer API-testing request onto ONE archetype from the supplied inventory. " +
@@ -77,167 +62,90 @@ func safeJSONParse(text string) any {
 	return out
 }
 
-// Client is a minimal OpenRouter chat-completions client (BYOK).
+// Client owns the provider-neutral prompt/validation pipeline. The exported
+// transport fields are retained for the existing OpenRouter callers and tests;
+// configurable providers receive them immediately before each completion.
 type Client struct {
-	BaseURL string
-	APIKey  string
-	Model   string
-	// MaxTokens caps the completion (default 2048; document extraction needs
-	// far more than an intent).
-	MaxTokens int
-	// Stream switches to SSE streaming — REQUIRED for long generations:
-	// proxies kill quiet multi-minute responses, streamed ones keep flowing.
-	Stream bool
-	// HTTPClient may be overridden in tests.
+	provider Provider
+
+	BaseURL    string
+	APIKey     string
+	Model      string
+	MaxTokens  int
+	Stream     bool
 	HTTPClient *http.Client
 }
 
-// NewClient builds a client from the BYOK key + model (both may be empty; an
-// empty key fails at call time with the errfmt contract error).
+// NewClient preserves the historical constructor while using the provider
+// selected by configuration. Without a loaded config it defaults to OpenRouter.
 func NewClient(apiKey, model string) *Client {
-	if model == "" {
-		model = DefaultModel
-	}
-	return &Client{BaseURL: DefaultBaseURL, APIKey: apiKey, Model: model, HTTPClient: &http.Client{Timeout: requestTimeout}}
+	return NewClientForProvider(configuredProviderName(), apiKey, model)
 }
 
-// ErrNoKey is the contract error for a missing BYOK key.
-func ErrNoKey() error {
-	return errfmt.New(
-		"plain-English scenario drafting is disabled",
-		"no OpenRouter key is configured (llm.openrouter_key / PIKOPOD_OPENROUTER_KEY)",
-		"add your own key to pikopod.yaml to enable `scenario create`; deterministic scenario packs work without one",
-		"docs/config-reference.md#llm")
-}
-
-type chatMessage struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
-}
-
-type chatRequest struct {
-	Model          string        `json:"model"`
-	Messages       []chatMessage `json:"messages"`
-	ResponseFormat struct {
-		Type string `json:"type"`
-	} `json:"response_format"`
-	Temperature float64 `json:"temperature"`
-	MaxTokens   int     `json:"max_tokens"`
-	Stream      bool    `json:"stream,omitempty"`
-}
-
-type chatResponse struct {
-	Choices []struct {
-		Message struct {
-			Content string `json:"content"`
-		} `json:"message"`
-	} `json:"choices"`
-}
-
-// complete POSTs one chat completion and returns the raw text.
-func (c *Client) complete(ctx context.Context, systemPrompt, userPrompt string) (string, error) {
-	if c.APIKey == "" {
-		return "", ErrNoKey()
-	}
-	maxTokens := c.MaxTokens
-	if maxTokens == 0 {
-		maxTokens = 2048
-	}
-	reqBody := chatRequest{Model: c.Model, Temperature: 0, MaxTokens: maxTokens, Stream: c.Stream}
-	reqBody.Messages = []chatMessage{
-		{Role: "system", Content: systemPrompt},
-		{Role: "user", Content: userPrompt},
-	}
-	reqBody.ResponseFormat.Type = "json_object"
-	raw, err := json.Marshal(reqBody)
+// NewClientForProvider builds a client over a registered provider. Invalid
+// names are retained as a provider error so callers keep the historical
+// no-error constructor shape; normal config loading rejects them earlier.
+func NewClientForProvider(name, apiKey, model string) *Client {
+	resolvedName := normalizeProviderName(name)
+	p, err := NewProvider(resolvedName, ProviderOptions{APIKey: apiKey, Model: model})
 	if err != nil {
-		return "", err
+		return &Client{provider: &errorProvider{err: err}, APIKey: apiKey, Model: model}
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.BaseURL+"/chat/completions", bytes.NewReader(raw))
-	if err != nil {
-		return "", err
+	c := NewClientWithProvider(p)
+	if base := os.Getenv("PIKOPOD_LLM_BASE"); base != "" {
+		c.BaseURL = base
+	} else if resolvedName == DefaultProviderName {
+		if base := os.Getenv("PIKOPOD_OPENROUTER_BASE"); base != "" {
+			c.BaseURL = base
+		}
 	}
-	req.Header.Set("authorization", "Bearer "+c.APIKey)
-	req.Header.Set("content-type", "application/json")
-	resp, err := c.HTTPClient.Do(req)
-	if err != nil {
-		return "", errfmt.Newf("cannot reach OpenRouter", "check your network and the key in pikopod.yaml", "docs/config-reference.md#llm", "%v", err)
+	return c
+}
+
+// NewClientWithProvider is the no-network seam used by tests and future
+// provider implementations.
+func NewClientWithProvider(p Provider) *Client {
+	c := &Client{provider: p}
+	if configurable, ok := p.(configurableProvider); ok {
+		opts := configurable.providerOptions()
+		c.BaseURL = opts.BaseURL
+		c.APIKey = opts.APIKey
+		c.Model = opts.Model
+		c.MaxTokens = opts.MaxTokens
+		c.Stream = opts.Stream
+		c.HTTPClient = opts.HTTPClient
 	}
-	defer resp.Body.Close()
-	if c.Stream && resp.StatusCode == http.StatusOK {
-		return c.readStream(resp.Body)
-	}
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
-	if err != nil {
-		return "", errfmt.Newf("OpenRouter response could not be read", "retry; the connection dropped mid-response", "", "%v", err)
-	}
-	if resp.StatusCode != http.StatusOK {
-		detail := fmt.Sprintf("it answered %d", resp.StatusCode)
-		if os.Getenv("PIKOPOD_DEBUG") != "" {
-			snippet := body
-			if len(snippet) > 2048 {
-				snippet = snippet[:2048]
+	return c
+}
+
+func (c *Client) syncProviderOptions() {
+	if configurable, ok := c.provider.(configurableProvider); ok {
+		baseURL := c.BaseURL
+		if base := os.Getenv("PIKOPOD_LLM_BASE"); base != "" {
+			baseURL = base
+		} else if c.provider.Name() == DefaultProviderName {
+			if base := os.Getenv("PIKOPOD_OPENROUTER_BASE"); base != "" {
+				baseURL = base
 			}
-			detail += ": " + string(snippet)
 		}
-		return "", errfmt.New("OpenRouter refused the request", detail, "check the key is valid and has credit; set PIKOPOD_DEBUG=1 to include the response body", "docs/config-reference.md#llm")
+		c.BaseURL = baseURL
+		configurable.configure(ProviderOptions{
+			APIKey:     c.APIKey,
+			Model:      c.Model,
+			BaseURL:    baseURL,
+			MaxTokens:  c.MaxTokens,
+			Stream:     c.Stream,
+			HTTPClient: c.HTTPClient,
+		})
 	}
-	var parsed chatResponse
-	if err := json.Unmarshal(body, &parsed); err != nil {
-		return "", errfmt.Newf("OpenRouter answered strangely", "retry; if it persists, try another llm.model", "docs/config-reference.md#llm", "%v", err)
-	}
-	if len(parsed.Choices) == 0 {
-		return "", errfmt.New("OpenRouter returned no choices", "the model produced no output", "retry, or try another llm.model", "docs/config-reference.md#llm")
-	}
-	return parsed.Choices[0].Message.Content, nil
 }
 
-// readStream accumulates SSE deltas into the completion text. A server that
-// ignored stream:true and answered plain JSON is parsed as a normal completion.
-func (c *Client) readStream(body io.Reader) (string, error) {
-	raw, err := io.ReadAll(io.LimitReader(body, 16<<20))
-	if err != nil {
-		return "", errfmt.Newf("OpenRouter stream broke mid-response", "retry; the connection dropped", "docs/config-reference.md#llm", "%v", err)
+func (c *Client) complete(ctx context.Context, systemPrompt, userPrompt string) (string, error) {
+	if c.provider == nil {
+		return "", errfmt.New("no llm provider configured", "the client has no Provider", "construct it with NewClient or NewClientWithProvider", "docs/config-reference.md#llm")
 	}
-	if !bytes.Contains(raw, []byte("data: ")) {
-		var parsed chatResponse
-		if json.Unmarshal(raw, &parsed) == nil && len(parsed.Choices) > 0 {
-			return parsed.Choices[0].Message.Content, nil
-		}
-	}
-	var out strings.Builder
-	scanner := bufio.NewScanner(bytes.NewReader(raw))
-	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
-	for scanner.Scan() {
-		line := scanner.Text()
-		if !strings.HasPrefix(line, "data: ") {
-			continue
-		}
-		data := strings.TrimPrefix(line, "data: ")
-		if data == "[DONE]" {
-			break
-		}
-		var chunk struct {
-			Choices []struct {
-				Delta struct {
-					Content string `json:"content"`
-				} `json:"delta"`
-			} `json:"choices"`
-		}
-		if json.Unmarshal([]byte(data), &chunk) != nil {
-			continue // comment/keepalive lines
-		}
-		if len(chunk.Choices) > 0 {
-			out.WriteString(chunk.Choices[0].Delta.Content)
-		}
-	}
-	if err := scanner.Err(); err != nil {
-		return "", errfmt.Newf("OpenRouter stream broke mid-response", "retry; the connection dropped", "docs/config-reference.md#llm", "%v", err)
-	}
-	if out.Len() == 0 {
-		return "", errfmt.New("OpenRouter stream carried no content", "the model produced no output", "retry, or try another llm.model", "docs/config-reference.md#llm")
-	}
-	return out.String(), nil
+	c.syncProviderOptions()
+	return c.provider.Complete(ctx, systemPrompt, userPrompt)
 }
 
 // CompleteJSON runs one delimiter-hardened completion over an UNTRUSTED payload
