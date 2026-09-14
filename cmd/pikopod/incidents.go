@@ -34,9 +34,13 @@ func newIncidentsCmd() *cobra.Command {
 			upstream, _ := cmd.Flags().GetString("upstream")
 			format, _ := cmd.Flags().GetString("format")
 			limit, _ := cmd.Flags().GetInt("limit")
-			incidentsOnly, _ := cmd.Flags().GetBool("incidents-only")
+			only, _ := cmd.Flags().GetString("only")
 			if limit <= 0 {
 				limit = defaultIncidentLimit
+			}
+			if only != "" && only != "incidents" && only != "drift" {
+				return errfmt.New("unknown class", only+" is not a class of event",
+					"use --only incidents or --only drift", "docs/exit-codes.md")
 			}
 			if format != "" && format != "text" && format != "json" {
 				return errfmt.New("unknown format", format+" is not a supported format",
@@ -53,7 +57,10 @@ func newIncidentsCmd() *cobra.Command {
 			}
 			var kept []alert.DriftEvent
 			for _, ev := range evs {
-				if incidentsOnly && !ev.Kind.IsIncident() {
+				if only == "incidents" && !ev.Kind.IsIncident() {
+					continue
+				}
+				if only == "drift" && ev.Kind.IsIncident() {
 					continue
 				}
 				if kind != "" && string(ev.Kind) != kind {
@@ -81,7 +88,7 @@ func newIncidentsCmd() *cobra.Command {
 	c.Flags().String("upstream", "", "filter by upstream")
 	c.Flags().String("format", "text", "output format: text | json")
 	c.Flags().Int("limit", defaultIncidentLimit, "maximum events to show")
-	c.Flags().Bool("incidents-only", false, "exclude shape-change drift, show only failed exchanges")
+	c.Flags().String("only", "", "narrow to one class: incidents (failed exchanges) | drift (shape changes)")
 	return c
 }
 

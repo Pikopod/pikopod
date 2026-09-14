@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://raw.githubusercontent.com/pikopod/pikopod/main/schema/drift-event.schema.json",
   "title": "DriftEvent",
-  "description": "The one shape pikopod emits for a detected provider drift \u2014 to stdout, to the Slack webhook sink, and to the local event log (<data_dir>/events.ndjson). schema_version gates compatibility; consumers MUST ignore unknown fields.",
+  "description": "The one shape pikopod emits for a detected provider DRIFT (a successful response whose shape changed) or INCIDENT (an exchange that failed) - to stdout, to the Slack webhook sink, and to the local event log (<data_dir>/events.ndjson). COMPATIBILITY: consumers MUST ignore unknown fields, and MUST ignore kinds they do not recognise - new kinds may be added without a schema_version bump. schema_version moves only for a STRUCTURAL change: a field removed, a type changed, or an existing field's meaning changed. v2 added the four incident kinds and this rule; a v1 consumer that validated the kind enum strictly will reject incident events.",
   "type": "object",
   "required": [
     "schema_version",
@@ -49,7 +49,7 @@
     },
     "kind": {
       "type": "string",
-      "description": "Observed SHAPE kinds and INCIDENT kinds are the closed enum below; incident kinds (upstream_error, upstream_unreachable, rate_limited, client_error) describe a failed exchange and need no baseline. DECLARED events (source=declared) carry declared:<spec-diff check id>.",
+      "description": "Observed SHAPE kinds and INCIDENT kinds. The enum below is the set pikopod emits TODAY, not a closed set for all time - treat an unrecognised kind as informational rather than an error. Incident kinds (upstream_error, upstream_unreachable, rate_limited, client_error) describe a failed exchange and need no baseline. DECLARED events (source=declared) carry declared:<spec-diff check id>.",
       "anyOf": [
         {
           "enum": [

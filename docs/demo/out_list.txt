@@ -1,0 +1,15 @@
+archetypes vs examplepay (4 endpoints):
+  ✓ happy_path                 Happy path  (1 candidate binding(s))
+  ✓ unauthorized               Unauthorized  (4 candidate binding(s))
+  ✓ invalid_request            Invalid request  (1 candidate binding(s))
+  ✗ duplicate_delivery         Duplicate delivery
+      no webhookEvent matching {} for role 'emittedEvent'
+  ✓ rate_limit_backoff         Rate limit and backoff  (4 candidate binding(s))
+  ✓ state_transition_sequence  State transition sequence  (1 candidate binding(s))
+  ✓ retry_storm                Retry storm with recovery  (1 candidate binding(s))
+  ✓ declines                   Declines  (1 candidate binding(s))
+  ✓ timeouts                   Timeouts  (1 candidate binding(s))
+  ✓ partial_failure            Partial failure  (1 candidate binding(s))
+  ✓ downtime_recovery          Downtime and recovery  (1 candidate binding(s))
+
+run one: pikopod scenario run examplepay <name> [<name>...]

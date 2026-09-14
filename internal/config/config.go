@@ -46,8 +46,9 @@ type Incidents struct {
 }
 
 // clientErrorFloor: minimum requests to an endpoint family before a 4xx rate
-// means anything. Without it the first 4xx is a rate of 1.0.
-const clientErrorFloor = 10
+// means anything. 20, not 10, because at 10 a single 4xx is already 10% and
+// clears the 5% default on its own — which is the case the floor exists for.
+const clientErrorFloor = 20
 
 // ClientErrorRateFor returns the configured 4xx threshold, defaulted.
 func (u Upstream) ClientErrorRateFor() float64 {

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/pikopod/pikopod/internal/alert"
+	"github.com/pikopod/pikopod/internal/config"
 	"github.com/pikopod/pikopod/internal/drift"
 	"github.com/pikopod/pikopod/internal/proxy"
 )
@@ -260,5 +261,17 @@ func TestClientErrorNoteWarnsThatTheBodyIsRedacted(t *testing.T) {
 	note := stepOfType(t, pack, "NOTE")["config"].(map[string]any)["text"].(string)
 	if !strings.Contains(note, "THIS MATTERS HERE") {
 		t.Fatalf("client_error note does not warn that the body is redacted: %q", note)
+	}
+}
+
+// The floor exists so a single 4xx cannot clear the rate on its own. At 10 it
+// could: 1/10 is 10%, over the 5% default. This pins the arithmetic, not the
+// constant, so lowering the floor breaks the test that explains why.
+func TestClientErrorFloorCannotBeClearedByOneError(t *testing.T) {
+	floor := config.ClientErrorFloor()
+	const defaultRate = 0.05
+	if got := 1.0 / float64(floor); got > defaultRate {
+		t.Fatalf("one 4xx in %d requests is %.0f%%, which clears the %.0f%% default — the floor does not do its job",
+			floor, got*100, defaultRate*100)
 	}
 }
