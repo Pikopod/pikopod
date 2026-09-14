@@ -312,7 +312,7 @@ func newScenarioCmd() *cobra.Command {
 	create.Flags().Bool("yes", false, "save without the confirmation prompt")
 	create.Flags().String("model", "", "OpenRouter model (default "+nl.DefaultModel+")")
 
-	c.AddCommand(list, run, create, newFromDriftCmd(), newFromRecordingsCmd())
+	c.AddCommand(list, run, create, newFromDriftCmd(), newFromRecordingsCmd(), newReproduceCmd())
 	return c
 }
 

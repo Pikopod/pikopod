@@ -50,6 +50,9 @@ upstreams:
     spec_source: https://api.examplepay.com/openapi.json
     volatile_fields: [request_id, timestamp]
     mute: ["/health"]
+    incidents:
+      client_errors: false
+      client_error_rate: 0.05
 ```
 
 | Key | Meaning |
@@ -59,9 +62,49 @@ upstreams:
 | `volatile_fields` | Field names excluded from baseline learning, drift diffing, the replay CI gate, and replay tier-1 hashing. Matched by name at any depth, case-insensitive. |
 | `mute` | Endpoint templates whose alerts are suppressed. |
 | `spec_source` | Arms the declared-drift watcher. See [spec_watch](#spec_watch). |
+| `incidents` | Tunes failed-exchange capture. See [incidents](#incidents). |
 
 Use `pikopod volatile suggest <upstream>` to find noisy fields rather than
 guessing.
+
+## incidents
+
+An **incident** is an exchange that failed, as opposed to drift, which is a
+successful response whose shape changed. Incidents are facts about one request,
+so they need no baseline and fire from the first request — they are never
+subject to the warmup window.
+
+| Kind | Fires when | Level |
+|---|---|---|
+| `upstream_error` | The upstream answered 5xx. | ERR |
+| `upstream_unreachable` | pikopod could not reach the upstream and returned its own 502. Never retried. | ERR |
+| `rate_limited` | The upstream answered 429. | WARN |
+| `client_error` | The upstream answered 4xx. **Opt-in.** | WARN |
+
+`upstream_error`, `upstream_unreachable` and `rate_limited` are always captured
+and cannot be switched off. They are never normal.
+
+```yaml
+upstreams:
+  examplepay:
+    incidents:
+      client_errors: true       # default false
+      client_error_rate: 0.05   # default 0.05
+```
+
+| Key | Meaning |
+|---|---|
+| `client_errors` | Capture 4xx as incidents. Off by default. |
+| `client_error_rate` | Share of requests to one endpoint family that must be 4xx before one is reported. Default `0.05`. |
+
+**Why 4xx is opt-in.** A 4xx is usually the caller's own bug, which is exactly
+why an integration tool should be able to catch it — but an endpoint where a 401
+is the normal answer would page you all day. Below **20 requests** to an endpoint
+family no rate is claimed at all, because the first 4xx is a rate of 1.0 and
+means nothing.
+
+Every incident is reproducible: see `pikopod incidents` and
+`pikopod scenario reproduce <fingerprint>`.
 
 ## listen
 

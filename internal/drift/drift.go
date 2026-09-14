@@ -32,6 +32,30 @@ const (
 	ErrorShapeChanged Kind = "error_shape_changed"
 )
 
+// Incident kinds describe an exchange that FAILED, not a response that changed
+// shape. They are facts about one request, so they need no baseline.
+const (
+	// The upstream answered 5xx.
+	UpstreamError Kind = "upstream_error"
+	// pikopod could not reach the upstream at all and returned its own 502.
+	UpstreamUnreachable Kind = "upstream_unreachable"
+	// The upstream answered 429.
+	RateLimited Kind = "rate_limited"
+	// The upstream answered 4xx. Opt-in: usually the caller's own bug, and
+	// routine on endpoints where a 401 is the normal answer.
+	ClientError Kind = "client_error"
+)
+
+// IsIncident separates failed exchanges from shape changes. Incidents fire from
+// the first request; drift kinds wait for a frozen baseline.
+func (k Kind) IsIncident() bool {
+	switch k {
+	case UpstreamError, UpstreamUnreachable, RateLimited, ClientError:
+		return true
+	}
+	return false
+}
+
 // presenceFloor: a field only counts as "removed" if it was present in
 // (nearly) every reference sample — optional fields are not removals.
 const presenceFloor = 0.98

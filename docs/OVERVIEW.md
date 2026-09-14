@@ -25,10 +25,14 @@ cannot.
 |---|---|---|---|
 | **Tense** | Future / conditional | Present | Past |
 | **Answers** | What happens when they ship the new spec? When they decline? When they time out? | Did it actually happen, and is it on my wire now? | What exactly happened — prove the fix against it. |
-| **Needs** | A spec. Works on day one. | 48 hours of traffic. | It to have already broken. |
+| **Needs** | A spec. Works on day one. | Nothing for an incident — a failed request is a fact about itself. 48 hours of traffic before drift, which is a claim about what is *normal*. | It to have already broken. |
 
 The sandbox is where you rehearse. The drift agent is the smoke detector.
 Replay is the evidence.
+
+These are not three tools but one loop: rehearse in the sandbox, ship, observe,
+and when something fails, **reproduce it back in the sandbox** to fix it and
+keep it fixed.
 
 ## The parts
 
@@ -89,6 +93,43 @@ stops a gradual change from quietly becoming the new normal.
 Eight structural finding kinds: a field added or removed, a type changed, a new
 enum value, nullability, an exact status code, a status class, a restructured
 error body.
+
+### Incidents
+
+Drift is about a **successful** response whose shape changed, and it needs a
+baseline to be meaningful. A request that simply **failed** needs no baseline at
+all, so incidents fire from the very first request and are never subject to the
+warmup window.
+
+Four incident kinds: the upstream answered 5xx, it throttled you with a 429, it
+could not be reached at all, or it rejected your requests with 4xx above a
+configured rate. The first three are always on. The 4xx case is opt-in, because
+a 4xx is usually your own bug — which is exactly why it is worth catching, and
+also why an endpoint that answers 401 all day must not page you.
+
+An incident forces its recording to disk regardless of the sampling rate. That
+is deliberate: the recording **is** the reproduction, and sampling it away would
+leave you with an alert pointing at something you cannot run.
+
+### Reproduction
+
+`pikopod scenario reproduce <fingerprint>` turns an incident into a runnable
+scenario: it arms the same failure in your sandbox and replays the recorded
+request at it. The break happens on your laptop instead of in production, and
+the generated pack is an ordinary scenario you can commit.
+
+This is the thing no one else can do, and the reason the sandbox and the
+observer are one tool rather than two. You cannot ask a provider's sandbox to
+return that exact 503, with that body, at that point in your state machine.
+
+The honest limit: requests are rebuilt from **redacted** recordings. Identifiers
+are format-preserving tokens and anything the sanitizer could not classify was
+dropped before it reached disk, so the body is not byte-identical. Every
+generated pack says so. For a 5xx or a timeout it changes nothing, because the
+fault is armed on method and path. For a 4xx your own payload caused, it matters.
+
+For a shape change rather than a failure, `scenario from-drift` pins the old
+contract instead.
 
 ### Spec watcher and the join
 

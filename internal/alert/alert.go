@@ -20,7 +20,7 @@ import (
 )
 
 // SchemaVersion of DriftEvent — the versioned protocol.
-const SchemaVersion = "1"
+const SchemaVersion = "2"
 
 // DriftEvent is the one shape emitted everywhere (stdout, Slack, event log).
 // schema/drift-event.schema.json is its contract.
@@ -62,6 +62,12 @@ func ObservedLevel(f drift.Finding) string {
 	case drift.FieldAdded:
 		return "INFO"
 	case drift.EnumValueNew:
+		return "WARN"
+	// Incidents: the upstream failing is ERR; being throttled or rejecting our
+	// request is WARN — actionable, but not the provider breaking its contract.
+	case drift.UpstreamError, drift.UpstreamUnreachable:
+		return "ERR"
+	case drift.RateLimited, drift.ClientError:
 		return "WARN"
 	default:
 		return "ERR"
@@ -540,14 +546,18 @@ func Render(ev *DriftEvent) string {
 			ev.Fingerprint, ev.Upstream)
 	}
 	head := map[drift.Kind]string{
-		drift.FieldAdded:        "new field",
-		drift.FieldRemoved:      "field disappeared",
-		drift.TypeChanged:       "type changed",
-		drift.EnumValueNew:      "new value",
-		drift.StatusNew:         "new status class",
-		drift.FieldNullable:     "field went nullable",
-		drift.StatusCodeChanged: "status code changed",
-		drift.ErrorShapeChanged: "error format changed",
+		drift.FieldAdded:          "new field",
+		drift.FieldRemoved:        "field disappeared",
+		drift.TypeChanged:         "type changed",
+		drift.EnumValueNew:        "new value",
+		drift.StatusNew:           "new status class",
+		drift.FieldNullable:       "field went nullable",
+		drift.StatusCodeChanged:   "status code changed",
+		drift.ErrorShapeChanged:   "error format changed",
+		drift.UpstreamError:       "upstream failed",
+		drift.UpstreamUnreachable: "upstream unreachable",
+		drift.RateLimited:         "rate limited",
+		drift.ClientError:         "requests rejected",
 	}[ev.Kind]
 	var detail string
 	switch ev.Kind {
@@ -567,6 +577,14 @@ func Render(ev *DriftEvent) string {
 		detail = fmt.Sprintf("endpoint answered %s (known: %s) — exact-status matches will break", ev.After, ev.Before)
 	case drift.ErrorShapeChanged:
 		detail = fmt.Sprintf("error body restructured: [%s] → [%s] — error-handling paths parse the old shape", ev.Before, ev.After)
+	case drift.UpstreamError:
+		detail = fmt.Sprintf("upstream answered %s — reproduce it locally: `pikopod scenario reproduce %s`", ev.After, ev.Fingerprint)
+	case drift.UpstreamUnreachable:
+		detail = fmt.Sprintf("pikopod could not reach the upstream (answered %s itself) — no retry was attempted", ev.After)
+	case drift.RateLimited:
+		detail = fmt.Sprintf("upstream answered %s — reproduce the backoff path: `pikopod scenario reproduce %s`", ev.After, ev.Fingerprint)
+	case drift.ClientError:
+		detail = fmt.Sprintf("upstream rejected our requests with %s above the configured rate — usually our own payload", ev.After)
 	}
 	note := ""
 	if ev.Note != "" {
@@ -576,10 +594,16 @@ func Render(ev *DriftEvent) string {
 	if ev.Note != "" && ev.Level == "INFO" {
 		icon = ":memo:" // a documented change informs; it does not page
 	}
+	// An incident is a failed exchange, not a shape change, and it reproduces
+	// through a different command. Saying "drift" for both misroutes the reader.
+	word, replay := "drift", "from-drift"
+	if ev.Kind.IsIncident() {
+		word, replay = "incident", "reproduce"
+	}
 	return fmt.Sprintf(
-		"%s *pikopod drift — %s* on `%s %s` (%s)\n%s%s\nfingerprint `%s` · first seen %s · %d occurrence(s)\nreplay it: `pikopod scenario from-drift %s`",
-		icon, head, ev.Method, ev.Endpoint, ev.Upstream, detail, note,
-		ev.Fingerprint, ev.FirstSeen.Format(time.RFC3339), ev.Occurrences, ev.Fingerprint)
+		"%s *pikopod %s — %s* on `%s %s` (%s)\n%s%s\nfingerprint `%s` · first seen %s · %d occurrence(s)\nreplay it: `pikopod scenario %s %s`",
+		icon, word, head, ev.Method, ev.Endpoint, ev.Upstream, detail, note,
+		ev.Fingerprint, ev.FirstSeen.Format(time.RFC3339), ev.Occurrences, replay, ev.Fingerprint)
 }
 
 func (a *Alerter) persist() {

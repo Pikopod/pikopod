@@ -106,10 +106,19 @@ pikopod chaos examplepay --kind error --status 503 --method POST --path /v1/char
 ```
 
 **A drift agent at `:4700/examplepay`** — point production at it. It forwards
-everything untouched, learns what normal looks like, then tells you when the
-shape changes. It stays quiet for the first 50 samples / 48 hours on purpose,
-because a baseline built from five responses hasn't seen your optional fields
-yet.
+everything untouched and watches two different things:
+
+- **Incidents** — the upstream answered 5xx, throttled you with a 429, or could
+  not be reached at all. These are facts about one request, so they need no
+  baseline and fire from the very first one.
+- **Drift** — the shape of a successful response changed. This needs a baseline,
+  so it stays quiet for the first 50 samples / 48 hours on purpose: a reference
+  built from five responses hasn't seen your optional fields yet.
+
+```bash
+pikopod incidents                     # what has failed, newest first
+pikopod incidents --incidents-only --since 24h --format json
+```
 
 ## What makes it different
 
@@ -144,7 +153,25 @@ The drift agent is a reverse proxy in your production request path, so:
 See [docs/security.md](docs/security.md) for how redaction works and how to
 verify it.
 
-## Closing the loop
+## Closing the loop: reproduce it locally
+
+This is the part nothing else does. You cannot ask a provider's sandbox to
+return that exact 503, with that body, at that point in your state machine.
+pikopod can, because the same tool recorded it and owns the sandbox.
+
+```bash
+pikopod incidents                              # find the fingerprint
+pikopod scenario reproduce fp_14835fa32dfb     # a failure becomes a runnable scenario
+pikopod scenario run examplepay incident-14835fa32dfb
+```
+
+`reproduce` arms the same failure in your sandbox and replays the recorded
+request at it, so your retry logic fails on your laptop instead of in
+production. The generated pack is an ordinary scenario — commit it, and it
+guards that path forever.
+
+For a **shape change** rather than a failure, `from-drift` pins the old contract
+instead:
 
 ```bash
 pikopod scenario from-drift fp_385153d1776c   # the change becomes a test
@@ -154,6 +181,13 @@ pikopod fix fp_385153d1776c --check "go build ./..." --pr
 
 `pikopod fix` scans your repository for affected code and opens a PR with a
 patch from your own model, reverted in full if your check fails.
+
+> Reproduced requests are rebuilt from **redacted** recordings: identifiers are
+> format-preserving tokens and anything the sanitizer could not classify was
+> dropped before it reached disk. Every generated pack says so. For a 5xx or a
+> timeout that changes nothing — the fault is armed on method and path. For a
+> 4xx that your own payload caused, the body matters, so check the pack against
+> what your code actually sends.
 
 ## Documentation
 
