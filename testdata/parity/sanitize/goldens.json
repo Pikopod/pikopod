@@ -412,9 +412,9 @@
     },
     {
       "format": "prefixed-id",
-      "hash": "1f0f6da83ca3c3bafe573681f7c7acc17b19f56733b16609c7d1444e4401b3c9",
-      "input": "whsec_x7YmQ2nP4rT6vB8dF0hJ3kL5",
-      "token": "whsec_tfdweelqqxl32udgh3c191mn"
+      "hash": "0521186a6867e1eaf46ec9588d0f6b9eb1e334361419be773f02927f3c8cf49f",
+      "input": "hooksig_x7YmQ2nP4rT6vB8dF0hJ3kL5",
+      "token": "hooksig_xxd8vf89pcn0lh73eo836ea9"
     },
     {
       "format": "alnum",
