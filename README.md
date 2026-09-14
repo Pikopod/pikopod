@@ -43,10 +43,6 @@ failure stories bind themselves to *your* API from its specification, and the
 one that cannot bind says which fact was missing rather than guessing a test
 into existence.
 
-> **v0.x**, and three days old. Exit codes and the event schema are stable and
-> safe to script against; the CLI surface may still change between minor
-> releases. Accepting design partners for Q4 2026 — see [CONTRIBUTING.md](CONTRIBUTING.md).
-
 ## Install
 
 ```bash
