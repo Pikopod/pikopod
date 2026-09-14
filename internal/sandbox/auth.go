@@ -16,6 +16,10 @@ import (
 // SandboxCredentialPrefix marks issued test tokens — never a real secret.
 const SandboxCredentialPrefix = "pikopod_sbx_test_"
 
+// SandboxWebhookSecretPrefix marks issued signing secrets. Deliberately not a
+// provider's prefix: it must authenticate like one, never look like one.
+const SandboxWebhookSecretPrefix = "pikopod_sbx_whsec_"
+
 func hashToken(token string) string {
 	sum := sha256.Sum256([]byte(token))
 	return hex.EncodeToString(sum[:])

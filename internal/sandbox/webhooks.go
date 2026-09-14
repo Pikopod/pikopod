@@ -58,7 +58,7 @@ type SinkStats struct {
 // webhookSecretFor derives the sandbox's webhook signing secret from the run
 // seed.
 func webhookSecretFor(seed string) string {
-	return "whsec_" + NewPrng(seed+":webhook:secret").Hex(48)
+	return SandboxWebhookSecretPrefix + NewPrng(seed+":webhook:secret").Hex(48)
 }
 
 // WebhookSecret returns the secret a receiver verifies signatures against.
