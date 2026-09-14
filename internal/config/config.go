@@ -19,7 +19,6 @@ import (
 	"time"
 
 	"github.com/pikopod/pikopod/internal/errfmt"
-	"github.com/pikopod/pikopod/internal/scenario/nl"
 	"github.com/pikopod/pikopod/internal/store"
 	"gopkg.in/yaml.v3"
 )
@@ -140,6 +139,8 @@ const (
 	DefaultMinHours    = 48
 )
 
+const defaultLLMProvider = "openrouter"
+
 // SampleRate resolves sampling.rate (1.0 when unset — keep everything).
 func (c *Config) SampleRate() float64 {
 	if c.Sampling.Rate == nil {
@@ -205,10 +206,14 @@ func (c *Config) finish() error {
 
 	c.LLM.Provider = strings.ToLower(strings.TrimSpace(c.LLM.Provider))
 	if c.LLM.Provider == "" {
-		c.LLM.Provider = nl.DefaultProviderName
+		c.LLM.Provider = defaultLLMProvider
 	}
-	if err := nl.SetConfiguredProvider(c.LLM.Provider); err != nil {
-		return err
+	if c.LLM.Provider != defaultLLMProvider {
+		return errfmt.New(
+			"unknown llm provider",
+			fmt.Sprintf("%q is not registered; valid providers: %s", c.LLM.Provider, defaultLLMProvider),
+			"set llm.provider to one of: "+defaultLLMProvider,
+			"docs/config-reference.md#llm")
 	}
 
 	fileAPIKey := c.LLM.APIKey
@@ -220,16 +225,12 @@ func (c *Config) finish() error {
 			resolvedKey = v
 		}
 	}
-	if resolvedKey == "" {
-		if envs, ok := nl.ProviderKeyEnvs(c.LLM.Provider); ok {
-			for _, env := range envs {
-				if v := os.Getenv(env); v != "" {
-					resolvedKey = v
-					break
-				}
+	if resolvedKey == "" && c.LLM.Provider == defaultLLMProvider {
+		if v := os.Getenv("OPENROUTER_API_KEY"); v != "" {
+			resolvedKey = v
 		}
 	}
-	if resolvedKey == "" && c.LLM.Provider == nl.DefaultProviderName {
+	if resolvedKey == "" && c.LLM.Provider == defaultLLMProvider {
 		if v := os.Getenv("PIKOPOD_OPENROUTER_KEY"); v != "" {
 			resolvedKey = v
 		} else if fileLegacyOpenRouterKey != "" {
@@ -242,7 +243,7 @@ func (c *Config) finish() error {
 	// public configuration contract moves to llm.api_key.
 	c.LLM.OpenRouterKey = resolvedKey
 
-	if c.LLM.Provider == nl.DefaultProviderName {
+	if c.LLM.Provider == defaultLLMProvider {
 		if v := os.Getenv("PIKOPOD_OPENROUTER_MODEL"); v != "" {
 			c.LLM.Model = v
 		} else if v := os.Getenv("OPENROUTER_MODEL"); v != "" && c.LLM.Model == "" {
