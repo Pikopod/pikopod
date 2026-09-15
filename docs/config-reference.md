@@ -292,6 +292,12 @@ Bring your own key. pikopod never ships a key and never proxies your requests
 through anyone else. `openrouter` is currently the only registered provider;
 the `Provider` boundary is the extension point for additional providers.
 
+Adding one is two edits: a name and its key environment variables in
+`internal/llmprovider`, which is what this file's validation reads, and a
+`Provider` implementation registered against that name in
+`internal/scenario/nl`. A name in the table with no implementation fails the
+test suite rather than reaching a user.
+
 Key resolution is deterministic and stops at the first value found:
 
 1. `llm.api_key`

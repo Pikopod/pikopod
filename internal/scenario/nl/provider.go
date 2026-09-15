@@ -8,10 +8,11 @@ import (
 	"strings"
 
 	"github.com/pikopod/pikopod/internal/errfmt"
+	"github.com/pikopod/pikopod/internal/llmprovider"
 )
 
 // DefaultProviderName is used when llm.provider is unset.
-const DefaultProviderName = "openrouter"
+const DefaultProviderName = llmprovider.Default
 
 // Provider turns a system+user prompt into raw model text. Implementations
 // own the wire format and nothing else.
@@ -33,32 +34,24 @@ type ProviderOptions struct {
 
 type providerFactory func(ProviderOptions) Provider
 
-type providerRegistration struct {
-	factory providerFactory
-	keyEnvs []string
-}
-
 type configurableProvider interface {
 	configure(ProviderOptions)
 	providerOptions() ProviderOptions
 }
 
-var providerRegistry = map[string]providerRegistration{}
+var providerRegistry = map[string]providerFactory{}
 
-func registerProvider(name string, keyEnvs []string, factory providerFactory) {
-	providerRegistry[normalizeProviderName(name)] = providerRegistration{
-		factory: factory,
-		keyEnvs: append([]string(nil), keyEnvs...),
+// registerProvider binds an implementation to a name from the llmprovider
+// table. An unlisted name panics at init: config validates against that table
+// without importing this package, so a provider it cannot name is unreachable.
+func registerProvider(name string, factory providerFactory) {
+	if !llmprovider.Known(name) {
+		panic("nl: provider " + name + " is not in the llmprovider table")
 	}
+	providerRegistry[normalizeProviderName(name)] = factory
 }
 
-func normalizeProviderName(name string) string {
-	name = strings.ToLower(strings.TrimSpace(name))
-	if name == "" {
-		return DefaultProviderName
-	}
-	return name
-}
+func normalizeProviderName(name string) string { return llmprovider.Normalize(name) }
 
 // ProviderNames returns registered provider names in stable order.
 func ProviderNames() []string {
@@ -68,16 +61,6 @@ func ProviderNames() []string {
 	}
 	sort.Strings(names)
 	return names
-}
-
-// ProviderKeyEnvs returns the provider-native environment variables used at
-// key-resolution step 3.
-func ProviderKeyEnvs(name string) ([]string, bool) {
-	reg, ok := providerRegistry[normalizeProviderName(name)]
-	if !ok {
-		return nil, false
-	}
-	return append([]string(nil), reg.keyEnvs...), true
 }
 
 // ValidateProvider rejects unknown names with the repository error contract.
@@ -100,7 +83,7 @@ func NewProvider(name string, opts ProviderOptions) (Provider, error) {
 	if err := ValidateProvider(name); err != nil {
 		return nil, err
 	}
-	return providerRegistry[name].factory(opts), nil
+	return providerRegistry[name](opts), nil
 }
 
 type errorProvider struct {

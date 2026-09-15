@@ -33,7 +33,7 @@ type openRouterProvider struct {
 }
 
 func init() {
-	registerProvider(DefaultProviderName, []string{"OPENROUTER_API_KEY"}, func(opts ProviderOptions) Provider {
+	registerProvider(DefaultProviderName, func(opts ProviderOptions) Provider {
 		return newOpenRouterProvider(opts)
 	})
 }

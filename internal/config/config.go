@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/pikopod/pikopod/internal/errfmt"
+	"github.com/pikopod/pikopod/internal/llmprovider"
 	"github.com/pikopod/pikopod/internal/store"
 	"gopkg.in/yaml.v3"
 )
@@ -139,7 +140,7 @@ const (
 	DefaultMinHours    = 48
 )
 
-const defaultLLMProvider = "openrouter"
+const defaultLLMProvider = llmprovider.Default
 
 // SampleRate resolves sampling.rate (1.0 when unset — keep everything).
 func (c *Config) SampleRate() float64 {
@@ -204,15 +205,13 @@ func (c *Config) finish() error {
 		c.DataDir = v
 	}
 
-	c.LLM.Provider = strings.ToLower(strings.TrimSpace(c.LLM.Provider))
-	if c.LLM.Provider == "" {
-		c.LLM.Provider = defaultLLMProvider
-	}
-	if c.LLM.Provider != defaultLLMProvider {
+	c.LLM.Provider = llmprovider.Normalize(c.LLM.Provider)
+	if !llmprovider.Known(c.LLM.Provider) {
+		valid := strings.Join(llmprovider.Names(), ", ")
 		return errfmt.New(
 			"unknown llm provider",
-			fmt.Sprintf("%q is not registered; valid providers: %s", c.LLM.Provider, defaultLLMProvider),
-			"set llm.provider to one of: "+defaultLLMProvider,
+			fmt.Sprintf("%q is not registered; valid providers: %s", c.LLM.Provider, valid),
+			"set llm.provider to one of: "+valid,
 			"docs/config-reference.md#llm")
 	}
 
@@ -225,18 +224,22 @@ func (c *Config) finish() error {
 			resolvedKey = v
 		}
 	}
-	if resolvedKey == "" && c.LLM.Provider == defaultLLMProvider {
-		if v := os.Getenv("OPENROUTER_API_KEY"); v != "" {
+	// Provider-native key variables, in the table's priority order. Reading
+	// them from llmprovider is what keeps a new provider's key discoverable
+	// here without editing this function.
+	for _, env := range llmprovider.KeyEnvs(c.LLM.Provider) {
+		if resolvedKey != "" {
+			break
+		}
+		if v := os.Getenv(env); v != "" {
 			resolvedKey = v
 		}
 	}
-	if resolvedKey == "" && c.LLM.Provider == defaultLLMProvider {
-		if v := os.Getenv("PIKOPOD_OPENROUTER_KEY"); v != "" {
-			resolvedKey = v
-		} else if fileLegacyOpenRouterKey != "" {
-			resolvedKey = fileLegacyOpenRouterKey
-			keyFromFile = true
-		}
+	// llm.openrouter_key is an OpenRouter-named field, so it stays last and
+	// stays provider-specific.
+	if resolvedKey == "" && c.LLM.Provider == defaultLLMProvider && fileLegacyOpenRouterKey != "" {
+		resolvedKey = fileLegacyOpenRouterKey
+		keyFromFile = true
 	}
 	c.LLM.APIKey = resolvedKey
 	// Keep the old field populated for existing internal callers while the

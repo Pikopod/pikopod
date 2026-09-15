@@ -4,6 +4,8 @@ import (
 	"context"
 	"strings"
 	"testing"
+
+	"github.com/pikopod/pikopod/internal/llmprovider"
 )
 
 type stubProvider struct {
@@ -54,7 +56,21 @@ func TestProviderRegistryDefaultsToOpenRouter(t *testing.T) {
 	if p.Name() != "openrouter" {
 		t.Fatalf("default provider = %q, want openrouter", p.Name())
 	}
-	if envs, ok := ProviderKeyEnvs("openrouter"); !ok || len(envs) != 1 || envs[0] != "OPENROUTER_API_KEY" {
-		t.Fatalf("OpenRouter key env metadata wrong: %v, %v", envs, ok)
+}
+
+// config validates against the llmprovider table and cannot import this
+// package; a tabled name with no factory would fail at the first completion.
+func TestEveryTabledProviderHasAnImplementation(t *testing.T) {
+	tabled := llmprovider.Names()
+	if len(tabled) != len(providerRegistry) {
+		t.Fatalf("llmprovider table %v and nl registry %v disagree", tabled, ProviderNames())
+	}
+	for _, name := range tabled {
+		if _, ok := providerRegistry[name]; !ok {
+			t.Errorf("provider %q is in the llmprovider table with no implementation", name)
+		}
+		if envs := llmprovider.KeyEnvs(name); len(envs) == 0 {
+			t.Errorf("provider %q declares no key environment variable", name)
+		}
 	}
 }
