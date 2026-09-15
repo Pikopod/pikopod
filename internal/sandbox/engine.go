@@ -299,8 +299,8 @@ func (e *Engine) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// disconnect so held goroutines never outlive their connections.
 	ctx := r.Context()
 	if wf.sleepMs > 0 {
-		// Target-latency semantics (Microcks): the delay is the TOTAL observed
-		// latency, so sleep only the remainder after real processing.
+		// The delay is the TOTAL observed latency, so sleep only the
+		// remainder after real processing.
 		remaining := wf.sleepMs - time.Since(started).Milliseconds()
 		if remaining > 0 && !sleepCtx(ctx, remaining) {
 			return // client gone mid-delay
@@ -321,7 +321,7 @@ func (e *Engine) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	if wf.malformed {
 		// A valid status line, then garbage — the response that breaks HTTP
-		// parsers, not error handlers (WireMock's MALFORMED_RESPONSE_CHUNK).
+		// parsers, not error handlers.
 		if hj, ok := w.(http.Hijacker); ok {
 			if conn, _, err := hj.Hijack(); err == nil {
 				conn.Write([]byte("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\nlskdu018973t09sylgasjkfg1][]'./.sdlv"))

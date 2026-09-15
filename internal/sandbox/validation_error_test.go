@@ -37,9 +37,9 @@ func loadSpecDef(t *testing.T, raw string) *ir.ApiDefinition {
 	return def
 }
 
-// Provider-shaped validation errors (Prism's ladder): a declared 422
-// schema wins over the neutral shape, the
-// exact violations ride the header, and the body is seed-deterministic.
+// Provider-shaped validation errors: a declared 422 schema wins over the
+// neutral shape, the exact violations ride the header, and the body is
+// seed-deterministic.
 func TestValidationErrorUsesDeclaredSchema(t *testing.T) {
 	e := newEngine(t, loadSpecDef(t, declaredErrorSpec), Config{ID: "sbx_ve", Seed: "ve-1"})
 	got := do(t, e, "POST", "/charges", `{"currency":"NGN"}`, nil)
@@ -91,7 +91,7 @@ func TestValidationErrorFallsBackToNeutralShape(t *testing.T) {
 }
 
 // The violations header is capped: a pathological schema with thousands of
-// failures must never blow the header limit (Prism's 8KB rule).
+// failures must never blow the header limit.
 func TestViolationsHeaderCap(t *testing.T) {
 	errs := make([]string, 4000)
 	for i := range errs {

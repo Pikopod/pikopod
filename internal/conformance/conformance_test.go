@@ -67,7 +67,7 @@ func TestConformanceViolations(t *testing.T) {
 		t.Fatalf("type violation wrong: %+v", report.Violations)
 	}
 	if v := byCode["status_undeclared"]; v.Severity != "error" {
-		t.Fatalf("undeclared SUCCESS must be error severity (Prism's asymmetry): %+v", report.Violations)
+		t.Fatalf("undeclared SUCCESS must be error severity: %+v", report.Violations)
 	}
 	// A clean record adds nothing.
 	clean := Check(def, []*proxy.Record{rec(200, map[string]any{"id": "x", "status": "success"})})

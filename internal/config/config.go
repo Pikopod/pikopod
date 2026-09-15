@@ -241,9 +241,6 @@ func (c *Config) finish() error {
 			resolvedKey = v
 		}
 	}
-	// Provider-native key variables, in the table's priority order. Reading
-	// them from llmprovider is what keeps a new provider's key discoverable
-	// here without editing this function.
 	for _, env := range llmprovider.KeyEnvs(c.LLM.Provider) {
 		if resolvedKey != "" {
 			break
@@ -252,8 +249,7 @@ func (c *Config) finish() error {
 			resolvedKey = v
 		}
 	}
-	// llm.openrouter_key is an OpenRouter-named field, so it stays last and
-	// stays provider-specific.
+	// Provider-specific because the field itself is OpenRouter-named.
 	if resolvedKey == "" && c.LLM.Provider == defaultLLMProvider && fileLegacyOpenRouterKey != "" {
 		resolvedKey = fileLegacyOpenRouterKey
 		keyFromFile = true

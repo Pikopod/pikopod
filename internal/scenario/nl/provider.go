@@ -41,9 +41,8 @@ type configurableProvider interface {
 
 var providerRegistry = map[string]providerFactory{}
 
-// registerProvider binds an implementation to a name from the llmprovider
-// table. An unlisted name panics at init: config validates against that table
-// without importing this package, so a provider it cannot name is unreachable.
+// Panics at init on an unlisted name: config validates against the table
+// without importing this package, so a name it lacks is unreachable.
 func registerProvider(name string, factory providerFactory) {
 	if !llmprovider.Known(name) {
 		panic("nl: provider " + name + " is not in the llmprovider table")

@@ -86,8 +86,8 @@ func (c *checker) checkRecord(def *ir.ApiDefinition, rec *proxy.Record) {
 	if resp == nil {
 		severity, code := "warning", "status_undeclared"
 		if rec.Status >= 200 && rec.Status < 300 {
-			// Prism's asymmetry: an undocumented SUCCESS has no contract behind
-			// it; an undocumented error code is tolerable reality.
+			// An undocumented SUCCESS has no contract behind it; an
+			// undocumented error code is tolerable reality.
 			severity = "error"
 		}
 		c.add(endpoint, rec.Status, "", code, severity,

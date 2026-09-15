@@ -58,8 +58,8 @@ func TestProviderRegistryDefaultsToOpenRouter(t *testing.T) {
 	}
 }
 
-// config validates against the llmprovider table and cannot import this
-// package; a tabled name with no factory would fail at the first completion.
+// config validates against the table and cannot import this package, so a
+// tabled name with no factory would only fail at the first completion.
 func TestEveryTabledProviderHasAnImplementation(t *testing.T) {
 	tabled := llmprovider.Names()
 	if len(tabled) != len(providerRegistry) {

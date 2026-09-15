@@ -8,16 +8,13 @@ import (
 	"strings"
 )
 
-// Default is used when llm.provider is unset.
 const Default = "openrouter"
 
-// keyEnvs lists each provider's native key variables in priority order. They
-// rank below the provider-neutral PIKOPOD_LLM_KEY.
+// Priority order within a provider. These rank below PIKOPOD_LLM_KEY.
 var keyEnvs = map[string][]string{
 	Default: {"OPENROUTER_API_KEY", "PIKOPOD_OPENROUTER_KEY"},
 }
 
-// Normalize lowercases and trims a configured name, defaulting an empty one.
 func Normalize(name string) string {
 	name = strings.ToLower(strings.TrimSpace(name))
 	if name == "" {
@@ -26,13 +23,11 @@ func Normalize(name string) string {
 	return name
 }
 
-// Known reports whether name is a provider pikopod can talk to.
 func Known(name string) bool {
 	_, ok := keyEnvs[Normalize(name)]
 	return ok
 }
 
-// Names returns every known provider in stable order.
 func Names() []string {
 	out := make([]string, 0, len(keyEnvs))
 	for name := range keyEnvs {
@@ -42,8 +37,7 @@ func Names() []string {
 	return out
 }
 
-// KeyEnvs returns the provider's native key variables in priority order.
-// An empty result means the name is unknown.
+// Empty when the name is unknown.
 func KeyEnvs(name string) []string {
 	return append([]string(nil), keyEnvs[Normalize(name)]...)
 }

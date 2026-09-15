@@ -395,7 +395,7 @@ func (e *Engine) validationErrorResponse(ctx *storeCtx, errs []string) *RawRespo
 // violationsHeader carries the violation list whatever body shape was negotiated.
 const violationsHeader = "x-pikopod-violations"
 
-// Prism's 8KB rule — oversized headers silently 502 behind proxies.
+// Oversized headers silently 502 behind proxies.
 const maxViolationsHeaderBytes = 8*1024 - 100
 
 func renderViolations(errs []string) string {
