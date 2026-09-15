@@ -77,7 +77,7 @@ func packDirs(cfg *config.Config) []string {
 	return []string{"scenarios", filepath.Join(cfg.DataDir, "scenarios")}
 }
 
-func scenarioList(cfg *config.Config, sandboxName string, out io.Writer) error {
+func scenarioList(cfg *config.Config, sandboxName string, verbose bool, out io.Writer) error {
 	_, def, err := loadSandboxDef(cfg, sandboxName)
 	if err != nil {
 		return err
@@ -89,6 +89,15 @@ func scenarioList(cfg *config.Config, sandboxName string, out io.Writer) error {
 		b := archetype.Bind(a, def)
 		if b.Applicable {
 			fmt.Fprintf(out, "  ✓ %-26s %s  (%d candidate binding(s))\n", a.ID, a.Title, len(b.Candidates))
+			if verbose {
+				for _, c := range b.Candidates {
+					for _, r := range a.Requires {
+						if opID, ok := c.Bindings[r.Role]; ok {
+							fmt.Fprintf(out, "      %s=%s\n", r.Role, opID)
+						}
+					}
+				}
+			}
 		} else {
 			fmt.Fprintf(out, "  ✗ %-26s %s\n      %s\n", a.ID, a.Title, b.Reason)
 		}

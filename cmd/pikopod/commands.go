@@ -295,8 +295,10 @@ func newScenarioCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return scenarioList(cfg, args[0], cmd.OutOrStdout())
+			verbose, _ := cmd.Flags().GetBool("verbose")
+			return scenarioList(cfg, args[0], verbose, cmd.OutOrStdout())
 		}}
+	list.Flags().BoolP("verbose", "v", false, "show which operations each archetype bound to")
 
 	run := &cobra.Command{Use: "run <sandbox> <scenarios...>", Short: "Bind, expand, and run scenarios (exit 0 pass / 1 fail / 2 error)", Args: cobra.MinimumNArgs(2),
 		RunE: scenarioRun}
