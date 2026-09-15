@@ -76,10 +76,10 @@ type Client struct {
 	HTTPClient *http.Client
 }
 
-// NewClient preserves the historical constructor while using the provider
-// selected by configuration. Without a loaded config it defaults to OpenRouter.
+// NewClient preserves the historical OpenRouter constructor. Callers with an
+// explicit llm.provider use NewClientForProvider instead.
 func NewClient(apiKey, model string) *Client {
-	return NewClientForProvider(configuredProviderName(), apiKey, model)
+	return NewClientForProvider(DefaultProviderName, apiKey, model)
 }
 
 // NewClientForProvider builds a client over a registered provider. Invalid

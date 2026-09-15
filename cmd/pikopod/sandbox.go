@@ -116,7 +116,7 @@ func loadSpec(cfg *config.Config, source string, out io.Writer) ([]byte, string,
 	head := strings.ToLower(string(raw[:min(len(raw), 512)]))
 	if isURL && (strings.Contains(head, "<!doctype html") || strings.Contains(head, "<html")) {
 		var llm *nl.Client
-		if cfg != nil && cfg.LLM.OpenRouterKey != "" {
+		if cfg != nil && cfg.LLM.APIKey != "" {
 			llm = newLLMClient(cfg, "")
 		}
 		res, err := docimport.FromDocsURL(source, raw, loadSpecOnce, llm)

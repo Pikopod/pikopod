@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/pikopod/pikopod/internal/config"
@@ -57,5 +58,18 @@ func TestNewLLMClientBaseURLOverrides(t *testing.T) {
 	}
 	if got := client.BaseURL; got != legacy.URL {
 		t.Fatalf("effective legacy OpenRouter base override = %q, want %q", got, legacy.URL)
+	}
+}
+
+func TestNewLLMClientUsesConfiguredProvider(t *testing.T) {
+	cfg := &config.Config{LLM: config.LLM{
+		Provider: "not-registered",
+		APIKey:   "test-key",
+	}}
+
+	client := newLLMClient(cfg, "")
+	if _, err := client.CompleteJSON(context.Background(), "return ok", "payload"); err == nil ||
+		!strings.Contains(err.Error(), "not-registered") {
+		t.Fatalf("configured provider was not selected, got error %v", err)
 	}
 }

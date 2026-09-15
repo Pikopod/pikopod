@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"sort"
 	"strings"
-	"sync"
 
 	"github.com/pikopod/pikopod/internal/errfmt"
 )
@@ -45,11 +44,6 @@ type configurableProvider interface {
 }
 
 var providerRegistry = map[string]providerRegistration{}
-
-var configuredProvider = struct {
-	sync.RWMutex
-	name string
-}{name: DefaultProviderName}
 
 func registerProvider(name string, keyEnvs []string, factory providerFactory) {
 	providerRegistry[normalizeProviderName(name)] = providerRegistration{
@@ -98,28 +92,6 @@ func ValidateProvider(name string) error {
 		fmt.Sprintf("%q is not registered; valid providers: %s", name, valid),
 		"set llm.provider to one of: "+valid,
 		"docs/config-reference.md#llm")
-}
-
-// SetConfiguredProvider selects the provider used by the historical NewClient
-// constructor. The CLI loads one configuration per process; keeping this seam
-// here lets existing callers remain source-compatible while provider-specific
-// construction lives behind Provider.
-func SetConfiguredProvider(name string) error {
-	name = normalizeProviderName(name)
-	if err := ValidateProvider(name); err != nil {
-		return err
-	}
-	configuredProvider.Lock()
-	configuredProvider.name = name
-	configuredProvider.Unlock()
-	return nil
-}
-
-func configuredProviderName() string {
-	configuredProvider.RLock()
-	name := configuredProvider.name
-	configuredProvider.RUnlock()
-	return name
 }
 
 // NewProvider builds a registered provider, defaulting to OpenRouter.
