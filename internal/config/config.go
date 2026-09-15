@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/pikopod/pikopod/internal/errfmt"
+	"github.com/pikopod/pikopod/internal/llmprovider"
 	"github.com/pikopod/pikopod/internal/store"
 	"gopkg.in/yaml.v3"
 )
@@ -75,10 +76,12 @@ type Slack struct {
 }
 
 type LLM struct {
-	// BYOK: the user's own OpenRouter key. Absent → NL scenario drafting is
-	// disabled with a clear message; deterministic packs always work.
+	Provider string `yaml:"provider,omitempty"`
+	APIKey   string `yaml:"api_key,omitempty"`
+	Model    string `yaml:"model,omitempty"`
+	// OpenRouterKey is the deprecated OpenRouter-only alias for APIKey. finish
+	// also mirrors the resolved key here for existing internal callers.
 	OpenRouterKey string `yaml:"openrouter_key,omitempty"`
-	Model         string `yaml:"model,omitempty"`
 }
 
 // Refine controls contract refinement from observed traffic, keeping one
@@ -154,6 +157,8 @@ const (
 	DefaultMinHours    = 48
 )
 
+const defaultLLMProvider = llmprovider.Default
+
 // SampleRate resolves sampling.rate (1.0 when unset — keep everything).
 func (c *Config) SampleRate() float64 {
 	if c.Sampling.Rate == nil {
@@ -216,15 +221,54 @@ func (c *Config) finish() error {
 	if v := os.Getenv("PIKOPOD_DATA_DIR"); v != "" {
 		c.DataDir = v
 	}
-	if v := os.Getenv("PIKOPOD_OPENROUTER_KEY"); v != "" {
-		c.LLM.OpenRouterKey = v
-	} else if v := os.Getenv("OPENROUTER_API_KEY"); v != "" && c.LLM.OpenRouterKey == "" {
-		c.LLM.OpenRouterKey = v // the ecosystem-standard name works too
+
+	c.LLM.Provider = llmprovider.Normalize(c.LLM.Provider)
+	if !llmprovider.Known(c.LLM.Provider) {
+		valid := strings.Join(llmprovider.Names(), ", ")
+		return errfmt.New(
+			"unknown llm provider",
+			fmt.Sprintf("%q is not registered; valid providers: %s", c.LLM.Provider, valid),
+			"set llm.provider to one of: "+valid,
+			"docs/config-reference.md#llm")
 	}
-	if v := os.Getenv("PIKOPOD_OPENROUTER_MODEL"); v != "" {
-		c.LLM.Model = v
-	} else if v := os.Getenv("OPENROUTER_MODEL"); v != "" && c.LLM.Model == "" {
-		c.LLM.Model = v
+
+	fileAPIKey := c.LLM.APIKey
+	fileLegacyOpenRouterKey := c.LLM.OpenRouterKey
+	resolvedKey := fileAPIKey
+	keyFromFile := resolvedKey != ""
+	if resolvedKey == "" {
+		if v := os.Getenv("PIKOPOD_LLM_KEY"); v != "" {
+			resolvedKey = v
+		}
+	}
+	// Provider-native key variables, in the table's priority order. Reading
+	// them from llmprovider is what keeps a new provider's key discoverable
+	// here without editing this function.
+	for _, env := range llmprovider.KeyEnvs(c.LLM.Provider) {
+		if resolvedKey != "" {
+			break
+		}
+		if v := os.Getenv(env); v != "" {
+			resolvedKey = v
+		}
+	}
+	// llm.openrouter_key is an OpenRouter-named field, so it stays last and
+	// stays provider-specific.
+	if resolvedKey == "" && c.LLM.Provider == defaultLLMProvider && fileLegacyOpenRouterKey != "" {
+		resolvedKey = fileLegacyOpenRouterKey
+		keyFromFile = true
+	}
+	c.LLM.APIKey = resolvedKey
+	// Keep the old field populated for existing internal callers while the
+	// public configuration contract moves to llm.api_key.
+	c.LLM.OpenRouterKey = resolvedKey
+
+	if c.LLM.Provider == defaultLLMProvider {
+		if v := os.Getenv("PIKOPOD_OPENROUTER_MODEL"); v != "" {
+			c.LLM.Model = v
+		} else if v := os.Getenv("OPENROUTER_MODEL"); v != "" && c.LLM.Model == "" {
+			c.LLM.Model = v
+		}
 	}
 	if c.Listen == "" {
 		c.Listen = "127.0.0.1"
@@ -363,14 +407,14 @@ func (c *Config) finish() error {
 			}
 		}
 	}
-	// A BYOK key in a world/group-readable pikopod.yaml is a leaked key —
-	// enforced only when the FILE carries it, not env-provided keys.
-	if c.LLM.OpenRouterKey != "" && os.Getenv("PIKOPOD_OPENROUTER_KEY") == "" && os.Getenv("OPENROUTER_API_KEY") == "" && c.sourcePath != "" {
+	// A BYOK key selected from pikopod.yaml must be private — the same posture
+	// token_file takes. Environment-selected keys do not make the file secret.
+	if keyFromFile && c.sourcePath != "" {
 		if info, err := os.Stat(c.sourcePath); err == nil && store.PermTooOpen(info.Mode()) {
 			return errfmt.New(
-				"pikopod.yaml contains llm.openrouter_key but is readable by other users",
+				"pikopod.yaml contains an llm API key but is readable by other users",
 				fmt.Sprintf("%s has mode %o; group/other access leaks the key", c.sourcePath, info.Mode().Perm()),
-				"chmod 600 "+c.sourcePath+" (or move the key to the PIKOPOD_OPENROUTER_KEY env var)",
+				"chmod 600 "+c.sourcePath+" (or move the key to PIKOPOD_LLM_KEY or the provider's standard env var)",
 				"docs/config-reference.md#llm")
 		}
 	}

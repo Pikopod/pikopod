@@ -42,11 +42,7 @@ func newLLMClient(cfg *config.Config, model string) *nl.Client {
 	if model == "" {
 		model = cfg.LLM.Model
 	}
-	c := nl.NewClient(cfg.LLM.OpenRouterKey, model)
-	if base := os.Getenv("PIKOPOD_OPENROUTER_BASE"); base != "" {
-		c.BaseURL = base
-	}
-	return c
+	return nl.NewClientForProvider(cfg.LLM.Provider, cfg.LLM.APIKey, model)
 }
 
 func newDemoCmd() *cobra.Command {

@@ -369,7 +369,7 @@ func scenarioCreate(cmd *cobra.Command, args []string) error {
 	}
 	inv := nl.BuildInventory(def, applicable)
 
-	key := cfg.LLM.OpenRouterKey
+	key := cfg.LLM.APIKey
 	if key == "" {
 		return nl.ErrNoKey()
 	}

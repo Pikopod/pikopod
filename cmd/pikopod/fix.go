@@ -59,11 +59,11 @@ func newFixCmd() *cobra.Command {
 				fmt.Fprintf(out, "  %s\n", im.File)
 			}
 
-			key := cfg.LLM.OpenRouterKey
+			key := cfg.LLM.APIKey
 			if key == "" {
 				return errfmt.New(
 					"drift-to-code fixing needs your LLM key",
-					"no OpenRouter key is configured (llm.openrouter_key / PIKOPOD_OPENROUTER_KEY)",
+					"no LLM API key is configured (llm.api_key / PIKOPOD_LLM_KEY / provider-native env)",
 					"add your own key; the impact scan above is the deterministic half and already ran",
 					"docs/config-reference.md#llm")
 			}
