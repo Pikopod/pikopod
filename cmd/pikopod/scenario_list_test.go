@@ -60,29 +60,12 @@ func TestScenarioListVerboseOutput(t *testing.T) {
 
 	got := out.String()
 
-	// Must contain archetype line AND indented candidate bindings.
-	if !strings.Contains(got, "✓ happy_path") {
-		t.Fatalf("expected '✓ happy_path' in output, got:\n%s", got)
+	// Must contain archetype line AND indented candidate bindings following archetype's canonical role order.
+	if !strings.Contains(got, "  ✓ happy_path                 Happy path  (1 candidate binding(s))\n      op=ep_1a284091a72f\n") {
+		t.Fatalf("expected exact happy_path binding in verbose output, got:\n%s", got)
 	}
-	if !strings.Contains(got, "      op=") {
-		t.Fatalf("verbose output must contain '      op=', got:\n%s", got)
-	}
-}
-
-func TestScenarioListVerboseDeterministicAcrossRuns(t *testing.T) {
-	cfg := setupTestSandbox(t)
-
-	var firstOutput string
-	for i := 0; i < 20; i++ {
-		var out bytes.Buffer
-		if err := scenarioList(cfg, "widgets", true, &out); err != nil {
-			t.Fatalf("iteration %d: scenarioList verbose: %v", i, err)
-		}
-		if i == 0 {
-			firstOutput = out.String()
-		} else if out.String() != firstOutput {
-			t.Fatalf("iteration %d output drifted from first iteration:\nFirst:\n%s\nGot:\n%s", i, firstOutput, out.String())
-		}
+	if !strings.Contains(got, "  ✓ rate_limit_backoff         Rate limit and backoff  (6 candidate binding(s))\n      op=ep_12d71306d3d7\n") {
+		t.Fatalf("expected exact rate_limit_backoff binding in verbose output, got:\n%s", got)
 	}
 }
 

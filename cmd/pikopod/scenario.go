@@ -10,7 +10,6 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
-	"sort"
 	"strconv"
 	"strings"
 
@@ -92,13 +91,10 @@ func scenarioList(cfg *config.Config, sandboxName string, verbose bool, out io.W
 			fmt.Fprintf(out, "  ✓ %-26s %s  (%d candidate binding(s))\n", a.ID, a.Title, len(b.Candidates))
 			if verbose {
 				for _, c := range b.Candidates {
-					roles := make([]string, 0, len(c.Bindings))
-					for r := range c.Bindings {
-						roles = append(roles, r)
-					}
-					sort.Strings(roles)
-					for _, r := range roles {
-						fmt.Fprintf(out, "      %s=%s\n", r, c.Bindings[r])
+					for _, r := range a.Requires {
+						if opID, ok := c.Bindings[r.Role]; ok {
+							fmt.Fprintf(out, "      %s=%s\n", r.Role, opID)
+						}
 					}
 				}
 			}
