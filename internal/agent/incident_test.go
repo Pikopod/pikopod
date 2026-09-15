@@ -37,8 +37,29 @@ func incidentAgent(t *testing.T, target string, tune func(*config.Upstream)) (*A
 	}
 	go a.Recorder.Run(a.Proxy.Captures())
 	front := httptest.NewServer(a.Proxy)
-	t.Cleanup(front.Close)
+	// Ordered teardown, registered after t.TempDir so it runs before the
+	// directory is removed: stop new requests, let the recorder finish what
+	// it queued, then stop the alerter writing into the temp dir.
+	t.Cleanup(func() {
+		front.Close()
+		quiesce(a)
+		a.Alerter.Close()
+	})
 	return a, front, dir
+}
+
+// quiesce waits for the recorder to finish every capture the proxy queued.
+// Bounded and non-fatal: it runs during cleanup, where t.Fatal cannot.
+func quiesce(a *Agent) {
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		m := a.Metrics
+		done := m.RecordingsWritten.Load() + m.RecordingsSampledOut.Load() + m.RecordingErrors.Load()
+		if done >= m.CapturesQueued.Load() {
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
 }
 
 func scriptedUpstream(t *testing.T, h http.HandlerFunc) string {
@@ -67,12 +88,24 @@ func readEvents(t *testing.T, dir string) []alert.DriftEvent {
 	return out
 }
 
-// eventsOfKind waits until at least one event of a kind is on disk.
+// drained blocks until the recorder has finished observing want records.
+// Report, and the synchronous event-log append inside it, both complete
+// before either counter moves, so the log is readable once this returns.
+func drained(t *testing.T, a *Agent, want int64) {
+	t.Helper()
+	waitFor(t, func() bool {
+		return a.Metrics.RecordingsWritten.Load()+a.Metrics.RecordingsSampledOut.Load() >= want
+	})
+}
+
+// eventsOfKind waits until at least one event of a kind is on disk. It must
+// NOT call Alerter.Flush: that waits on the delivery WaitGroup while the
+// recorder goroutine can still Add to it, which is a race, and the event log
+// is written synchronously anyway.
 func eventsOfKind(t *testing.T, a *Agent, kind string) []alert.DriftEvent {
 	t.Helper()
 	var got []alert.DriftEvent
 	waitFor(t, func() bool {
-		a.Alerter.Flush()
 		got = nil
 		for _, ev := range readEvents(t, a.Cfg.DataDir) {
 			if string(ev.Kind) == kind {
@@ -191,7 +224,7 @@ func TestClientErrorsOffByDefault(t *testing.T) {
 	for i := 0; i < config.ClientErrorFloor()+10; i++ {
 		post(t, front.URL+"/examplepay/charges", `{}`)
 	}
-	a.Alerter.Flush()
+	drained(t, a, int64(config.ClientErrorFloor()+10))
 	for _, ev := range readEvents(t, dir) {
 		if ev.Kind == "client_error" {
 			t.Fatal("4xx produced a client_error with incidents.client_errors unset")
@@ -211,7 +244,7 @@ func TestClientErrorNotClaimedBelowSampleFloor(t *testing.T) {
 	for i := 0; i < config.ClientErrorFloor()-1; i++ {
 		post(t, front.URL+"/examplepay/charges", `{}`)
 	}
-	a.Alerter.Flush()
+	drained(t, a, int64(config.ClientErrorFloor()-1))
 	for _, ev := range readEvents(t, dir) {
 		if ev.Kind == "client_error" {
 			t.Fatalf("client_error claimed below the %d-request floor", config.ClientErrorFloor())
@@ -275,7 +308,7 @@ func TestHealthyUpstreamProducesNoIncidents(t *testing.T) {
 	for i := 0; i < 30; i++ {
 		post(t, front.URL+"/examplepay/charges", `{}`)
 	}
-	a.Alerter.Flush()
+	drained(t, a, 30)
 	for _, ev := range readEvents(t, dir) {
 		if ev.Kind.IsIncident() {
 			t.Fatalf("healthy upstream produced incident %s", ev.Kind)
