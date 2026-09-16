@@ -95,9 +95,10 @@ type chatRequest struct {
 	ResponseFormat struct {
 		Type string `json:"type"`
 	} `json:"response_format"`
-	Temperature float64 `json:"temperature"`
-	MaxTokens   int     `json:"max_tokens"`
-	Stream      bool    `json:"stream,omitempty"`
+	Temperature         float64 `json:"temperature"`
+	MaxTokens           int     `json:"max_tokens,omitempty"`
+	MaxCompletionTokens int     `json:"max_completion_tokens,omitempty"`
+	Stream              bool    `json:"stream,omitempty"`
 }
 
 type chatResponse struct {
@@ -168,9 +169,13 @@ func (p *openRouterProvider) Complete(ctx context.Context, systemPrompt, userPro
 // readStream accumulates SSE deltas into the completion text. A server that
 // ignored stream:true and answered plain JSON is parsed as a normal completion.
 func (p *openRouterProvider) readStream(body io.Reader) (string, error) {
+	return readChatStream(body, "OpenRouter")
+}
+
+func readChatStream(body io.Reader, provider string) (string, error) {
 	raw, err := io.ReadAll(io.LimitReader(body, 16<<20))
 	if err != nil {
-		return "", errfmt.Newf("OpenRouter stream broke mid-response", "retry; the connection dropped", "docs/config-reference.md#llm", "%v", err)
+		return "", errfmt.Newf(provider+" stream broke mid-response", "retry; the connection dropped", "docs/config-reference.md#llm", "%v", err)
 	}
 	if !bytes.Contains(raw, []byte("data: ")) {
 		var parsed chatResponse
@@ -205,10 +210,10 @@ func (p *openRouterProvider) readStream(body io.Reader) (string, error) {
 		}
 	}
 	if err := scanner.Err(); err != nil {
-		return "", errfmt.Newf("OpenRouter stream broke mid-response", "retry; the connection dropped", "docs/config-reference.md#llm", "%v", err)
+		return "", errfmt.Newf(provider+" stream broke mid-response", "retry; the connection dropped", "docs/config-reference.md#llm", "%v", err)
 	}
 	if out.Len() == 0 {
-		return "", errfmt.New("OpenRouter stream carried no content", "the model produced no output", "retry, or try another llm.model", "docs/config-reference.md#llm")
+		return "", errfmt.New(provider+" stream carried no content", "the model produced no output", "retry, or try another llm.model", "docs/config-reference.md#llm")
 	}
 	return out.String(), nil
 }

@@ -11,6 +11,7 @@ func clearLLMEnv(t *testing.T) {
 	for _, name := range []string{
 		"PIKOPOD_LLM_KEY",
 		"OPENROUTER_API_KEY",
+		"OPENAI_API_KEY",
 		"PIKOPOD_OPENROUTER_KEY",
 		"PIKOPOD_OPENROUTER_MODEL",
 		"OPENROUTER_MODEL",
@@ -87,6 +88,45 @@ func TestLLMKeyResolutionPrecedence(t *testing.T) {
 	}
 	if cfg.LLM.APIKey != "provider-env" {
 		t.Fatalf("provider env must beat legacy env, got %q", cfg.LLM.APIKey)
+	}
+}
+
+func TestOpenAIKeyResolutionPrecedence(t *testing.T) {
+	clearLLMEnv(t)
+	t.Setenv("PIKOPOD_LLM_KEY", "generic-env")
+	t.Setenv("OPENAI_API_KEY", "provider-env")
+
+	path := writeCfg(t, "upstreams: {}\nllm:\n  provider: openai\n  api_key: file-key\n")
+	if err := os.Chmod(path, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.LLM.APIKey != "file-key" {
+		t.Fatalf("llm.api_key must win for OpenAI, got %q", cfg.LLM.APIKey)
+	}
+
+	clearLLMEnv(t)
+	t.Setenv("PIKOPOD_LLM_KEY", "generic-env")
+	t.Setenv("OPENAI_API_KEY", "provider-env")
+	cfg, err = Load(writeCfg(t, "upstreams: {}\nllm:\n  provider: openai\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.LLM.APIKey != "generic-env" {
+		t.Fatalf("PIKOPOD_LLM_KEY must beat OPENAI_API_KEY, got %q", cfg.LLM.APIKey)
+	}
+
+	clearLLMEnv(t)
+	t.Setenv("OPENAI_API_KEY", "provider-env")
+	cfg, err = Load(writeCfg(t, "upstreams: {}\nllm:\n  provider: openai\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.LLM.APIKey != "provider-env" {
+		t.Fatalf("OPENAI_API_KEY = %q, want provider-env", cfg.LLM.APIKey)
 	}
 }
 

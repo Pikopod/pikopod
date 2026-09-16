@@ -17,6 +17,7 @@ Environment variables override the file. The full set:
 | `PIKOPOD_TOKEN` | the listener token (never passed as an argument — argv is visible in `ps`) |
 | `PIKOPOD_LLM_KEY` | `llm.api_key` (provider-neutral) |
 | `OPENROUTER_API_KEY` | OpenRouter's provider-native key environment variable |
+| `OPENAI_API_KEY` | OpenAI's provider-native key environment variable |
 | `PIKOPOD_OPENROUTER_KEY` | deprecated OpenRouter-only key alias |
 | `PIKOPOD_OPENROUTER_MODEL` / `OPENROUTER_MODEL` | `llm.model` for OpenRouter |
 | `PIKOPOD_LLM_BASE` | configured LLM provider base URL override (testing/staging) |
@@ -325,15 +326,16 @@ and each degradation explains which fields missed.
 
 ```yaml
 llm:
-  provider: openrouter          # default when unset
+  provider: openrouter          # openrouter (default) or openai
   api_key: sk-or-...            # provider-neutral key
-  model: openai/gpt-4o-mini     # OpenRouter default when unset
+  model: openai/gpt-4o-mini     # optional; this is the OpenRouter default
   # openrouter_key: sk-or-...   # deprecated alias, still honoured
 ```
 
 Bring your own key. pikopod never ships a key and never proxies your requests
-through anyone else. `openrouter` is currently the only registered provider;
-the `Provider` boundary is the extension point for additional providers.
+through anyone else. The registered providers are `openrouter` and `openai`.
+OpenRouter defaults to `openai/gpt-4o-mini`; OpenAI defaults to `gpt-4o-mini`.
+The `Provider` boundary is the extension point for additional providers.
 
 Adding one is two edits: a name and its key environment variables in
 `internal/llmprovider`, which is what this file's validation reads, and a
@@ -345,7 +347,7 @@ Key resolution is deterministic and stops at the first value found:
 
 1. `llm.api_key`
 2. `PIKOPOD_LLM_KEY`
-3. the provider's standard environment variable (`OPENROUTER_API_KEY` today)
+3. the provider's standard environment variable (`OPENROUTER_API_KEY` or `OPENAI_API_KEY`)
 4. for OpenRouter only, deprecated `PIKOPOD_OPENROUTER_KEY` or
    `llm.openrouter_key`
 
