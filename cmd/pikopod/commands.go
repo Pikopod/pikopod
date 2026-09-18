@@ -308,7 +308,7 @@ func newScenarioCmd() *cobra.Command {
 	create := &cobra.Command{Use: "create <sandbox> <description...>", Short: "Compile a plain-English scenario, grounded against your API (BYOK LLM)", Args: cobra.MinimumNArgs(2),
 		RunE: scenarioCreate}
 	create.Flags().Bool("yes", false, "save without the confirmation prompt")
-	create.Flags().String("model", "", "OpenRouter model (default "+nl.DefaultModel+")")
+	create.Flags().String("model", "", "LLM model override (provider default when unset)")
 
 	c.AddCommand(list, run, create, newFromDriftCmd(), newFromRecordingsCmd(), newReproduceCmd())
 	return c

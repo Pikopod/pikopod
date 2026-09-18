@@ -12,7 +12,8 @@ const Default = "openrouter"
 
 // Priority order within a provider. These rank below PIKOPOD_LLM_KEY.
 var keyEnvs = map[string][]string{
-	Default: {"OPENROUTER_API_KEY", "PIKOPOD_OPENROUTER_KEY"},
+	Default:  {"OPENROUTER_API_KEY", "PIKOPOD_OPENROUTER_KEY"},
+	"openai": {"OPENAI_API_KEY"},
 }
 
 func Normalize(name string) string {
