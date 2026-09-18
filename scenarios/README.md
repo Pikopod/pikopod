@@ -168,8 +168,10 @@ type-specific lives under `config`:
 
 Fault `kind` is one of `error`, `latency`, `hang`, `slow_body`,
 `connection_reset`, `malformed_response`, `wrong_content_length`, `rate_limit`,
-`duplicate_webhook`, `drop_webhook`, `reorder_webhook`, `delay_webhook`. The
-webhook kinds are armed here, in a scenario step — not by `pikopod chaos`.
+`duplicate_webhook`, `drop_webhook`, `reorder_webhook`, `delay_webhook`. Every
+one of them is also armable on a running sandbox with `pikopod chaos`; the
+webhook kinds match on the event (`--event`, default any) rather than on a
+method and path. `rate_limit` is sugar: the engine arms it as a 429 `error`.
 `times: N` fires the fault for the first N matching requests and then recovers
 deterministically; `per` scopes that window to `global`, `idempotency-key`, or
 `resource`.

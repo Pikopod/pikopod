@@ -133,6 +133,47 @@ func isWebhookFaultKind(kind string) bool {
 	return kind == FaultDuplicateWebhook || kind == FaultDropWebhook || kind == FaultReorderWebhook || kind == FaultDelayWebhook
 }
 
+// IsWebhookFaultKind reports whether a kind acts on a delivery rather than a
+// response, so callers can require the target event.
+func IsWebhookFaultKind(kind string) bool { return isWebhookFaultKind(kind) }
+
+// faultKinds is the AUTHORING vocabulary: what a user writes in a scenario
+// step, in `chaos --kind`, or in a rule POSTed to the control plane.
+var faultKinds = []string{
+	"error", "latency", "hang", "slow_body", "rate_limit",
+	FaultConnectionReset, FaultMalformedResponse, FaultWrongContentLength,
+	FaultDuplicateWebhook, FaultDropWebhook, FaultReorderWebhook, FaultDelayWebhook,
+}
+
+// FaultKinds returns every armable kind, in a stable order.
+func FaultKinds() []string { return append([]string(nil), faultKinds...) }
+
+// ValidFaultKind is the one allowlist. Every surface consults it so none can
+// accept a smaller set than another.
+func ValidFaultKind(kind string) bool {
+	for _, k := range faultKinds {
+		if k == kind {
+			return true
+		}
+	}
+	return false
+}
+
+// ResolveFaultKind maps an authoring kind onto what the engine executes.
+// rate_limit is sugar for a 429 error; the engine never sees that name.
+func ResolveFaultKind(kind string, status int) (engineKind string, engineStatus int) {
+	switch kind {
+	case "rate_limit":
+		return "error", 429
+	case "error":
+		if status == 0 {
+			status = 500
+		}
+		return "error", status
+	}
+	return kind, status
+}
+
 const maxFaultDelayMs = int64(60_000)
 
 // Transport-fault kinds: lies at the HTTP/TCP layer, wire-only — virtualized

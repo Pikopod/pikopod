@@ -65,9 +65,15 @@ func TestChaosAdminSurface(t *testing.T) {
 		t.Fatalf("recovered create should echo: %v", created)
 	}
 
+	// Webhook kinds are armable here now: a kind reachable only from a scenario
+	// step runs on a throwaway engine and can never reach a user's application.
+	if resp := post(admin, `{"kind":"duplicate_webhook","probability":1}`); resp.StatusCode != 201 {
+		t.Fatalf("webhook fault kind must arm, got %d", resp.StatusCode)
+	}
+
 	// Leg 2: refusals — malformed rules and unknown targets die loudly.
-	if resp := post(admin, `{"method":"POST","path":"/widgets","kind":"duplicate_webhook"}`); resp.StatusCode != 400 {
-		t.Fatalf("webhook fault kind must be refused, got %d", resp.StatusCode)
+	if resp := post(admin, `{"method":"POST","path":"/widgets","kind":"not_a_kind"}`); resp.StatusCode != 400 {
+		t.Fatalf("unknown fault kind must be refused, got %d", resp.StatusCode)
 	}
 	if resp := post(admin, `{"kind":"error"}`); resp.StatusCode != 400 {
 		t.Fatalf("fault without method/path must be refused, got %d", resp.StatusCode)
