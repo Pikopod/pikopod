@@ -11,7 +11,7 @@ import (
 )
 
 type Options struct {
-	PackDirs []string
+	PackDirs      []string
 	BindOverrides map[string]string
 }
 
