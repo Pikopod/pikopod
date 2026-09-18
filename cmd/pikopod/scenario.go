@@ -20,6 +20,7 @@ import (
 	"github.com/pikopod/pikopod/internal/scenario"
 	"github.com/pikopod/pikopod/internal/scenario/archetype"
 	"github.com/pikopod/pikopod/internal/scenario/nl"
+	"github.com/pikopod/pikopod/internal/scenario/resolve"
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
 )
@@ -83,23 +84,18 @@ func scenarioList(cfg *config.Config, sandboxName string, verbose bool, out io.W
 		return err
 	}
 	fmt.Fprintf(out, "archetypes vs %s (%d endpoints):\n", sandboxName, len(def.Endpoints))
-	all := archetype.All()
-	for i := range all {
-		a := &all[i]
-		b := archetype.Bind(a, def)
+	for _, b := range resolve.ListBindings(def) {
 		if b.Applicable {
-			fmt.Fprintf(out, "  ✓ %-26s %s  (%d candidate binding(s))\n", a.ID, a.Title, len(b.Candidates))
+			fmt.Fprintf(out, "  ✓ %-26s %s  (%d candidate binding(s))\n", b.ID, b.Title, len(b.Candidates))
 			if verbose {
 				for _, c := range b.Candidates {
-					for _, r := range a.Requires {
-						if opID, ok := c.Bindings[r.Role]; ok {
-							fmt.Fprintf(out, "      %s=%s\n", r.Role, opID)
-						}
+					for _, rb := range c.Roles {
+						fmt.Fprintf(out, "      %s=%s\n", rb.Role, rb.OperationID)
 					}
 				}
 			}
 		} else {
-			fmt.Fprintf(out, "  ✗ %-26s %s\n      %s\n", a.ID, a.Title, b.Reason)
+			fmt.Fprintf(out, "  ✗ %-26s %s\n      %s\n", b.ID, b.Title, b.Reason)
 		}
 	}
 	packs, fails := scenario.ListPacks(packDirs(cfg)...)
@@ -118,84 +114,12 @@ func scenarioList(cfg *config.Config, sandboxName string, verbose bool, out io.W
 
 // resolveRunnable turns a name into a parsed, grounded definition.
 func resolveRunnable(cfg *config.Config, name string, def *ir.ApiDefinition, bindOverrides map[string]string) (*scenario.ScenarioDefinition, error) {
-	all := archetype.All()
-	for i := range all {
-		a := &all[i]
-		if a.ID != name {
-			continue
-		}
-		binding := archetype.Bind(a, def)
-		if !binding.Applicable {
-			return nil, errfmt.New("archetype does not apply", name+": "+binding.Reason, "run `pikopod scenario list <sandbox>` to see what binds", "scenarios/README.md")
-		}
-		// Candidates are ranked deterministically, but the first is not guaranteed
-		// to GROUND (its collection path may not be routable) — walk until one does.
-		var firstErr string
-		for _, cand := range binding.Candidates {
-			bindings := cand.Bindings
-			if len(bindOverrides) > 0 {
-				merged := map[string]string{}
-				for k, v := range bindings {
-					merged[k] = v
-				}
-				for k, v := range bindOverrides {
-					merged[k] = v
-				}
-				bindings = merged
-			}
-			exp, err := archetype.Expand(a, bindings, def)
-			if err != nil {
-				if firstErr == "" {
-					firstErr = err.Error()
-				}
-				continue
-			}
-			vr, parsed := scenario.ValidateScenario(exp.Definition, def)
-			if !vr.Valid {
-				if firstErr == "" {
-					firstErr = vr.Errors[0].Message
-				}
-				continue
-			}
-			return parsed, nil
-		}
-		return nil, errfmt.New("no candidate binding grounds", fmt.Sprintf("%s: %s", name, firstErr), "check --bind overrides name operations from `scenario list`", "scenarios/README.md")
-	}
-
-	// Not an archetype: a saved pack, by name or path.
-	if strings.HasSuffix(name, ".yaml") || strings.HasSuffix(name, ".yml") {
-		pack, err := scenario.LoadPack(name)
-		if err != nil {
-			return nil, err
-		}
-		return groundPack(pack, def)
-	}
-	packs, _ := scenario.ListPacks(packDirs(cfg)...)
-	for _, p := range packs {
-		if p.Name == name {
-			return groundPack(p, def)
-		}
-	}
-	return nil, errfmt.New("unknown scenario", fmt.Sprintf("%q is neither an archetype nor a saved pack", name), "see `pikopod scenario list <sandbox>` for archetypes, scenarios/ for packs", "scenarios/README.md")
+	return resolve.Resolve(def, name, resolve.Options{PackDirs: packDirs(cfg), BindOverrides: bindOverrides})
 }
 
 // packFor finds a saved pack by name (nil for archetypes/paths).
 func packFor(cfg *config.Config, name string) *scenario.Pack {
-	packs, _ := scenario.ListPacks(packDirs(cfg)...)
-	for _, p := range packs {
-		if p.Name == name {
-			return p
-		}
-	}
-	return nil
-}
-
-func groundPack(pack *scenario.Pack, def *ir.ApiDefinition) (*scenario.ScenarioDefinition, error) {
-	vr, parsed := scenario.ValidateScenario(pack.RawDefinition, def)
-	if !vr.Valid {
-		return nil, errfmt.New("pack does not ground against this sandbox's API", fmt.Sprintf("%s: %s", pack.Name, vr.Errors[0].Message), "the pack was authored for a different API shape; regenerate it with `scenario create`", "scenarios/README.md")
-	}
-	return parsed, nil
+	return resolve.PackByName(name, packDirs(cfg))
 }
 
 // coerceInputs converts --input k=v strings per the declared input types.
@@ -358,15 +282,7 @@ func scenarioCreate(cmd *cobra.Command, args []string) error {
 	}
 	out := cmd.OutOrStdout()
 
-	// Applicable archetypes only — an inapplicable one cannot bind, so
-	// offering it to the model would only invite an intent that fails.
-	var applicable []archetype.Archetype
-	all := archetype.All()
-	for i := range all {
-		if archetype.Bind(&all[i], def).Applicable {
-			applicable = append(applicable, all[i])
-		}
-	}
+	applicable := resolve.Applicable(def)
 	inv := nl.BuildInventory(def, applicable)
 
 	key := cfg.LLM.APIKey
@@ -384,34 +300,11 @@ func scenarioCreate(cmd *cobra.Command, args []string) error {
 		return errfmt.New("the described scenario could not be grounded", errs[0].Message, "rephrase using operations the API actually has (`pikopod scenario list "+sandboxName+"`)", "scenarios/README.md")
 	}
 
-	var chosen *archetype.Archetype
-	for i := range all {
-		if all[i].ID == intent.ArchetypeID {
-			chosen = &all[i]
-			break
-		}
-	}
+	chosen := resolve.Find(intent.ArchetypeID)
 	if chosen == nil {
 		return errfmt.New("the model chose an unknown archetype", intent.ArchetypeID, "retry; if it persists, file an issue with the description you used", "")
 	}
-	// The bindings must be a real candidate the deterministic binder produced.
-	binding := archetype.Bind(chosen, def)
-	valid := false
-	usesInferred := false
-	for _, c := range binding.Candidates {
-		match := true
-		for _, r := range chosen.Requires {
-			if c.Bindings[r.Role] != intent.Bindings[r.Role] {
-				match = false
-				break
-			}
-		}
-		if match {
-			valid = true
-			usesInferred = c.UsesInferred
-			break
-		}
-	}
+	usesInferred, valid := resolve.CandidateMatch(chosen, def, intent.Bindings)
 	if !valid {
 		return errfmt.New("the model's bindings are not a valid candidate", "the named operations do not satisfy the archetype's requirements", "rephrase, or run the archetype directly with --bind overrides", "scenarios/README.md")
 	}
