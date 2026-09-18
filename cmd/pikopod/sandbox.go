@@ -23,6 +23,7 @@ import (
 	"github.com/pikopod/pikopod/internal/errfmt"
 	"github.com/pikopod/pikopod/internal/importer"
 	"github.com/pikopod/pikopod/internal/ir"
+	"github.com/pikopod/pikopod/internal/mode"
 	"github.com/pikopod/pikopod/internal/replay"
 	"github.com/pikopod/pikopod/internal/sandbox"
 	"github.com/pikopod/pikopod/internal/scenario/nl"
@@ -411,6 +412,8 @@ type sandboxServer struct {
 
 	mu      sync.Mutex
 	entries map[string]sandboxEntry
+	// modes is the standing state each sandbox was put into, by name.
+	modes map[string]*mode.Spec
 	// handlers caches built engines. Tests may pre-register any http.Handler
 	// (e.g. a panicking one) to exercise the recovery boundary.
 	handlers map[string]http.Handler
@@ -542,8 +545,9 @@ func (s *sandboxServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // engine, so chaos applies to the traffic your app is sending RIGHT NOW.
 func (s *sandboxServer) serveAdmin(w http.ResponseWriter, r *http.Request) {
 	parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
-	// _pikopod / sandboxes / <name> / faults|requests
-	if len(parts) != 4 || parts[1] != "sandboxes" || (parts[3] != "faults" && parts[3] != "requests") {
+	// _pikopod / sandboxes / <name> / faults|requests|mode
+	if len(parts) != 4 || parts[1] != "sandboxes" ||
+		(parts[3] != "faults" && parts[3] != "requests" && parts[3] != "mode") {
 		writeSandboxJSONError(w, http.StatusNotFound, "Not Found")
 		return
 	}
@@ -558,6 +562,10 @@ func (s *sandboxServer) serveAdmin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("content-type", "application/json; charset=utf-8")
+	if parts[3] == "mode" {
+		s.serveMode(w, r, parts[2], engine)
+		return
+	}
 	if parts[3] == "requests" {
 		// The request journal (P1): what the CLIENT sent this sandbox —
 		// GET lists (newest last, ?limit=), DELETE resets.
