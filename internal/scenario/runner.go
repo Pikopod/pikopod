@@ -497,20 +497,11 @@ func (r *runner) injectFault(step *Step) (stepOutcome, error) {
 			summary: "fault skipped (not a standing condition)",
 		}, nil
 	}
-	kind := "error"
-	status := 0
-	switch cfg.Kind {
-	case "error":
-		status = 500
-		if cfg.Status != nil {
-			status = *cfg.Status
-		}
-	case "rate_limit":
-		status = 429
-	case "latency", "hang", "slow_body",
-		sandbox.FaultConnectionReset, sandbox.FaultMalformedResponse, sandbox.FaultWrongContentLength:
-		kind = cfg.Kind
+	declared := 0
+	if cfg.Status != nil {
+		declared = *cfg.Status
 	}
+	kind, status := sandbox.ResolveFaultKind(cfg.Kind, declared)
 	rule := sandbox.FaultRule{Method: *cfg.Method, Path: *cfg.Path, Kind: kind, Probability: 1, ID: r.nextFaultID(), Wallclock: cfg.Wallclock}
 	if status != 0 {
 		rule.Status = status

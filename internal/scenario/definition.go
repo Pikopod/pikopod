@@ -6,6 +6,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"regexp"
+	"strings"
+
+	"github.com/pikopod/pikopod/internal/sandbox"
 )
 
 // Limits on a scenario definition.
@@ -39,13 +42,6 @@ var validOps = map[string]bool{
 }
 
 var validHTTPMethods = map[string]bool{"GET": true, "POST": true, "PUT": true, "PATCH": true, "DELETE": true}
-
-var validFaultKinds = map[string]bool{
-	"error": true, "latency": true, "hang": true, "slow_body": true,
-	"duplicate_webhook": true, "delay_webhook": true,
-	"drop_webhook": true, "reorder_webhook": true, "rate_limit": true,
-	"connection_reset": true, "malformed_response": true, "wrong_content_length": true,
-}
 
 var (
 	stepKeyRe   = regexp.MustCompile(`^[A-Za-z0-9_.-]+$`)
@@ -518,8 +514,8 @@ func (p *parser) parseConfig(pointer, stepType string, cfg map[string]any) any {
 		}
 		out.Path = p.optStr(pointer+"/path", cfg, "path", 2000)
 		out.Kind = p.str(pointer+"/kind", cfg, "kind", true, 40)
-		if out.Kind != "" && !validFaultKinds[out.Kind] {
-			p.fail(pointer+"/kind", "kind must be one of error, latency, hang, slow_body, connection_reset, malformed_response, wrong_content_length, duplicate_webhook, drop_webhook, reorder_webhook, delay_webhook, rate_limit")
+		if out.Kind != "" && !sandbox.ValidFaultKind(out.Kind) {
+			p.fail(pointer+"/kind", "kind must be one of %s", strings.Join(sandbox.FaultKinds(), ", "))
 		}
 		if v, has := cfg["status"]; has {
 			if n, ok := p.intIn(pointer+"/status", v, 100, 599); ok {

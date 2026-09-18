@@ -586,17 +586,16 @@ func (s *sandboxServer) serveAdmin(w http.ResponseWriter, r *http.Request) {
 			writeSandboxJSONError(w, http.StatusBadRequest, "body must be a FaultRule JSON object")
 			return
 		}
-		switch rule.Kind {
-		case "error", "latency", "hang", "slow_body",
-			sandbox.FaultConnectionReset, sandbox.FaultMalformedResponse, sandbox.FaultWrongContentLength:
-		default:
-			writeSandboxJSONError(w, http.StatusBadRequest, "kind must be error, latency, hang, slow_body, connection_reset, malformed_response, or wrong_content_length")
+		if !sandbox.ValidFaultKind(rule.Kind) {
+			writeSandboxJSONError(w, http.StatusBadRequest, "kind must be one of "+strings.Join(sandbox.FaultKinds(), ", "))
 			return
 		}
-		if rule.Method == "" || rule.Path == "" {
+		// Webhook rules match on the event, never method/path.
+		if !sandbox.IsWebhookFaultKind(rule.Kind) && (rule.Method == "" || rule.Path == "") {
 			writeSandboxJSONError(w, http.StatusBadRequest, "method and path are required")
 			return
 		}
+		rule.Kind, rule.Status = sandbox.ResolveFaultKind(rule.Kind, rule.Status)
 		if rule.Probability == 0 {
 			rule.Probability = 1
 		}

@@ -10,6 +10,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"strings"
 	"time"
 
 	"github.com/pikopod/pikopod/internal/config"
@@ -96,27 +97,21 @@ func newChaosCmd() *cobra.Command {
 			}
 			wallclock, _ := cmd.Flags().GetBool("wallclock")
 
-			rule := sandbox.FaultRule{Method: method, Path: path, Probability: probability, Wallclock: wallclock}
+			if !sandbox.ValidFaultKind(kind) {
+				return errfmt.New("unknown fault kind", fmt.Sprintf("%q is not a fault kind", kind), "use one of: "+strings.Join(sandbox.FaultKinds(), ", "), "scenarios/README.md")
+			}
+			event, _ := cmd.Flags().GetString("event")
+			rule := sandbox.FaultRule{Method: method, Path: path, Probability: probability, Wallclock: wallclock, Event: event}
+			rule.Kind, rule.Status = sandbox.ResolveFaultKind(kind, status)
 			switch kind {
-			case "error":
-				rule.Kind = "error"
-				rule.Status = status
-				if rule.Status == 0 {
-					rule.Status = 500
-				}
-			case "rate_limit":
-				rule.Kind = "error"
-				rule.Status = 429
-			case "latency", "hang", "slow_body":
-				rule.Kind = kind
+			case "latency", "hang", "slow_body", sandbox.FaultDelayWebhook:
 				rule.DelayMs = delayMs
 				if rule.DelayMs == 0 && kind == "latency" {
 					rule.DelayMs = 30000
 				}
-			default:
-				return errfmt.New("unknown fault kind", fmt.Sprintf("%q is not error, latency, hang, slow_body, or rate_limit", kind), "webhook fault kinds (duplicate/drop/reorder_webhook) are armed by scenario INJECT_FAULT steps, not chaos", "scenarios/README.md")
 			}
-			if rule.Method == "" || rule.Path == "" {
+			// Webhook rules match on the event, never method/path.
+			if !sandbox.IsWebhookFaultKind(kind) && (rule.Method == "" || rule.Path == "") {
 				return errfmt.New("chaos needs a target operation", "pass --method and --path (the endpoint's path template)", "e.g. pikopod chaos "+sandboxName+" --kind error --status 503 --method POST --path /transaction", "")
 			}
 			resp, err := chaosClientReq(cfg, http.MethodPost, sandboxName, nil, rule)
@@ -132,7 +127,8 @@ func newChaosCmd() *cobra.Command {
 		}}
 	c.Flags().Bool("list", false, "show standing faults")
 	c.Flags().Bool("clear", false, "clear matching faults (all when no --method/--path)")
-	c.Flags().String("kind", "error", "fault kind: error, latency, hang, slow_body, or rate_limit")
+	c.Flags().String("kind", "error", "fault kind: "+strings.Join(sandbox.FaultKinds(), ", "))
+	c.Flags().String("event", "", "webhook event a webhook-kind fault matches (default: any)")
 	c.Flags().Bool("wallclock", false, "REAL wire delay (default is virtualized/instant; hang and slow_body only act with this or `up --wallclock-faults`)")
 	c.Flags().String("method", "", "HTTP method of the target operation")
 	c.Flags().String("path", "", "path template of the target operation (as in the spec)")
