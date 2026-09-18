@@ -466,43 +466,31 @@ func (r *runner) wait(step *Step) (stepOutcome, error) {
 	}, nil
 }
 
-func (r *runner) injectFault(step *Step) (stepOutcome, error) {
-	cfg := step.Config.(*InjectFaultConfig)
-	switch cfg.Kind {
-	case sandbox.FaultDuplicateWebhook, sandbox.FaultDropWebhook, sandbox.FaultReorderWebhook, sandbox.FaultDelayWebhook:
+// FaultRuleFor maps a validated INJECT_FAULT config onto the rule the engine
+// arms. ok is false when the step names no standing condition to arm.
+func FaultRuleFor(cfg *InjectFaultConfig, id string) (rule sandbox.FaultRule, ok bool) {
+	if sandbox.IsWebhookFaultKind(cfg.Kind) {
 		// The engine owns the outbox, so the rule arms for real, keyed by the
 		// webhook EVENT (config.target; absent = any event). See faults.go.
 		event := ""
 		if cfg.Target != nil {
 			event = *cfg.Target
 		}
-		rule := sandbox.FaultRule{Kind: cfg.Kind, Event: event, Probability: 1, ID: r.nextFaultID()}
+		rule = sandbox.FaultRule{Kind: cfg.Kind, Event: event, Probability: 1, ID: id}
 		if cfg.DelayMs != nil {
 			rule.DelayMs = *cfg.DelayMs
 		}
-		r.eng.ArmFault(rule)
-		label := event
-		if label == "" {
-			label = "any event"
-		}
-		return stepOutcome{
-			status: StatusNotEvaluated, virtualEndMs: r.virtualClockMs,
-			summary: fmt.Sprintf("armed %s on %s", cfg.Kind, label),
-		}, nil
+		return rule, true
 	}
-	// materializeArmedFault: only standing sandbox conditions arm.
 	if cfg.Method == nil || cfg.Path == nil {
-		return stepOutcome{
-			status: StatusNotEvaluated, virtualEndMs: r.virtualClockMs,
-			summary: "fault skipped (not a standing condition)",
-		}, nil
+		return sandbox.FaultRule{}, false
 	}
 	declared := 0
 	if cfg.Status != nil {
 		declared = *cfg.Status
 	}
 	kind, status := sandbox.ResolveFaultKind(cfg.Kind, declared)
-	rule := sandbox.FaultRule{Method: *cfg.Method, Path: *cfg.Path, Kind: kind, Probability: 1, ID: r.nextFaultID(), Wallclock: cfg.Wallclock}
+	rule = sandbox.FaultRule{Method: *cfg.Method, Path: *cfg.Path, Kind: kind, Probability: 1, ID: id, Wallclock: cfg.Wallclock}
 	if status != 0 {
 		rule.Status = status
 	}
@@ -521,7 +509,30 @@ func (r *runner) injectFault(step *Step) (stepOutcome, error) {
 	if dd := cfg.DelayDistribution; dd != nil {
 		rule.Delay = delayDistributionFromConfig(dd)
 	}
+	return rule, true
+}
+
+func (r *runner) injectFault(step *Step) (stepOutcome, error) {
+	cfg := step.Config.(*InjectFaultConfig)
+	rule, ok := FaultRuleFor(cfg, r.nextFaultID())
+	if !ok {
+		// materializeArmedFault: only standing sandbox conditions arm.
+		return stepOutcome{
+			status: StatusNotEvaluated, virtualEndMs: r.virtualClockMs,
+			summary: "fault skipped (not a standing condition)",
+		}, nil
+	}
 	r.eng.ArmFault(rule)
+	if sandbox.IsWebhookFaultKind(cfg.Kind) {
+		label := rule.Event
+		if label == "" {
+			label = "any event"
+		}
+		return stepOutcome{
+			status: StatusNotEvaluated, virtualEndMs: r.virtualClockMs,
+			summary: fmt.Sprintf("armed %s on %s", cfg.Kind, label),
+		}, nil
+	}
 	return stepOutcome{
 		status: StatusNotEvaluated, virtualEndMs: r.virtualClockMs,
 		summary: fmt.Sprintf("armed %s on %s %s", rule.Kind, rule.Method, rule.Path),

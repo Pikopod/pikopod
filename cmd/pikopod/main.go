@@ -39,6 +39,7 @@ func main() {
 		newVolatileCmd(),
 		newReplayCmd(),
 		newChaosCmd(),
+		newModeCmd(),
 		newBaselineCmd(),
 		newAckCmd(),
 		newAcceptCmd(),
