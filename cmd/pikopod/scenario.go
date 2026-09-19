@@ -63,13 +63,19 @@ func scenarioEngine(cfg *config.Config, entry *sandboxEntry, def *ir.ApiDefiniti
 	if !persist {
 		id = entry.ID + "_ephemeral"
 	}
+	signingKey, err := webhookSigningKey(def)
+	if err != nil {
+		st.Close()
+		return nil, nil, err
+	}
 	eng, err := sandbox.NewEngine(def, sandbox.Config{
 		ID: id, Seed: entry.Seed, Mode: entry.Mode, VirtualClockMs: entry.CreatedClockMs,
 		Effective: effectiveFor(cfg, entry, contractVersion),
 		// Without these a scenario that arms a webhook fault delivers nothing,
 		// and one that needs the recordings tier answers 404.
-		WebhookURL: entry.WebhookURL,
-		Recordings: recordingsFor(cfg, entry),
+		WebhookURL:        entry.WebhookURL,
+		WebhookSigningKey: signingKey,
+		Recordings:        recordingsFor(cfg, entry),
 	}, st)
 	if err != nil {
 		st.Close()

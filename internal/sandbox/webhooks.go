@@ -414,16 +414,31 @@ func (e *Engine) deliverToSink(client *http.Client, d *WebhookDelivery) {
 			atomic.AddInt64(&e.sinkFailed, 1)
 		}
 	}()
-	req, err := http.NewRequest(http.MethodPost, e.webhookURL, bytes.NewReader(d.Payload))
+	body := d.Payload
+	headers := map[string]string{
+		"content-type":                "application/json",
+		"x-pikopod-webhook-id":        d.ID,
+		"x-pikopod-webhook-event":     d.Event,
+		"x-pikopod-webhook-timestamp": strconv.FormatInt(d.VirtualTimeMs/1000, 10),
+		"x-pikopod-webhook-signature": "sha256=" + d.Signature,
+	}
+	if e.envelope != nil {
+		wire, err := e.envelope.render(d)
+		if err != nil {
+			e.tracef("webhook", "envelope for %s: %v", d.Event, err)
+			atomic.AddInt64(&e.sinkFailed, 1)
+			return
+		}
+		body, headers = wire.Body, wire.Headers
+	}
+	req, err := http.NewRequest(http.MethodPost, e.webhookURL, bytes.NewReader(body))
 	if err != nil {
 		atomic.AddInt64(&e.sinkFailed, 1)
 		return
 	}
-	req.Header.Set("content-type", "application/json")
-	req.Header.Set("x-pikopod-webhook-id", d.ID)
-	req.Header.Set("x-pikopod-webhook-event", d.Event)
-	req.Header.Set("x-pikopod-webhook-timestamp", strconv.FormatInt(d.VirtualTimeMs/1000, 10))
-	req.Header.Set("x-pikopod-webhook-signature", "sha256="+d.Signature)
+	for k, v := range headers {
+		req.Header.Set(k, v)
+	}
 	resp, err := client.Do(req)
 	if err != nil {
 		atomic.AddInt64(&e.sinkFailed, 1)

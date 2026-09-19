@@ -27,10 +27,13 @@ type Config struct {
 	MaxRequestBytes int64
 	Credential      string
 	WebhookURL      string
-	Quota           QuotaLimits
-	WallclockFaults bool
-	Effective       *contract.Effective
-	Recordings      *replay.Set
+	// WebhookSigningKey is the provider-issued key named by the declared
+	// envelope's keyEnv; required only when deliveries leave for a sink.
+	WebhookSigningKey []byte
+	Quota             QuotaLimits
+	WallclockFaults   bool
+	Effective         *contract.Effective
+	Recordings        *replay.Set
 }
 
 type Engine struct {
@@ -65,6 +68,7 @@ type Engine struct {
 	webhookSeq    int64
 	webhookLog    []WebhookDelivery
 	webhookSecret string
+	envelope      *envelopeRenderer
 	journalTok    *sanitize.Tokenizer
 	webhookURL    string
 	sinkCh        chan WebhookDelivery
@@ -138,6 +142,15 @@ func NewEngine(def *ir.ApiDefinition, cfg Config, store *Store) (*Engine, error)
 	// The secret is always derived so the accessor stays truthful; the sink
 	// goroutine starts only with a URL and lives for the engine's lifetime.
 	e.webhookSecret = webhookSecretFor(cfg.Seed)
+	if env := def.WebhookEnvelope; env != nil {
+		if err := env.Validate(); err != nil {
+			return nil, errfmt.New("sandbox engine", err.Error(), "fix x-pikopod-webhook-envelope in the spec and re-import", "scenarios/README.md#webhook-envelope")
+		}
+		if env.Signature != nil && cfg.WebhookURL != "" && len(cfg.WebhookSigningKey) == 0 {
+			return nil, errfmt.New("webhook signing key missing", "the spec signs deliveries with the key in $"+env.Signature.KeyEnv+", which is unset", "export "+env.Signature.KeyEnv+"=<the key the provider issued> and start again", "scenarios/README.md#webhook-envelope")
+		}
+		e.envelope = &envelopeRenderer{spec: env, key: cfg.WebhookSigningKey, seed: cfg.Seed}
+	}
 	e.journalTok = sanitize.NewTokenizer(cfg.Seed, "sandbox-journal", 1)
 	if cfg.WebhookURL != "" {
 		e.webhookURL = cfg.WebhookURL

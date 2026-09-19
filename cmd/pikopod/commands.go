@@ -117,11 +117,18 @@ func newImportCmd() *cobra.Command {
 			webhookURL, _ := cmd.Flags().GetString("webhook-url")
 			upstreamLink, _ := cmd.Flags().GetString("upstream")
 			recFallback, _ := cmd.Flags().GetBool("recordings-fallback")
-			return sandboxAdd(cfg, args[0], spec, seed, webhookURL, upstreamLink, recFallback, cmd.OutOrStdout())
+			if err := sandboxAdd(cfg, args[0], spec, seed, webhookURL, upstreamLink, recFallback, cmd.OutOrStdout()); err != nil {
+				return err
+			}
+			if sidecar, _ := cmd.Flags().GetString("webhooks"); sidecar != "" {
+				return applyWebhookSidecar(cfg, args[0], sidecar, cmd.OutOrStdout())
+			}
+			return nil
 		}}
 	c.Flags().String("spec", "", "spec source (local file or http(s) URL): OpenAPI 3.x, Swagger 2.0, Postman collection, or GraphQL schema")
 	c.Flags().String("seed", "", "run seed (default: random; pin one for reproducible transcripts)")
 	c.Flags().String("webhook-url", "", "optional HTTP(S) sink: webhook deliveries POST here (signed)")
+	c.Flags().String("webhooks", "", "YAML/JSON file describing how the provider wraps and signs deliveries (for specs without x-pikopod-webhook-envelope)")
 	c.Flags().String("upstream", "", "link to a drift-agent upstream so its traffic refines this contract (auto when names match)")
 	c.Flags().Bool("recordings-fallback", false, "serve the linked upstream's recordings for requests neither the spec nor admitted traffic can answer (final tier; X-Pikopod-Replay-Tier)")
 	c.Flags().Bool("update", false, "re-import an existing provider's spec and refresh the declared-drift pin (accepts the standing spec-diff findings)")

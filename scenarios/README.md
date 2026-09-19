@@ -223,6 +223,55 @@ handler from a real delivery, which makes it worse than silence. `data` is
 overlaid onto the documented payload shape, so the values you pass reach a
 nested payload rather than being replaced by synthesis.
 
+### Webhook envelope
+
+A delivery is only useful if your handler accepts it, and handlers verify the
+provider's signature over the provider's wire shape. Declare that shape once
+and every delivery to `--webhook-url` is wrapped and signed the way the
+provider documents, so the same handler serves pikopod and production.
+
+Put it in the spec as a top-level `x-pikopod-webhook-envelope`, or, for a spec
+you do not control, in a sidecar file passed as `--webhooks`:
+
+```yaml
+# examplepay-webhooks.yaml
+wrap:
+  timestamp: "{{now_rfc3339}}"
+  payload: "{{json_string body}}"
+signature:
+  algorithm: hmac-sha256        # or hmac-sha512
+  content: "{{timestamp}}{{payload}}"
+  keyEnv: EXAMPLEPAY_WEBHOOK_KEY
+  keyEncoding: base64           # raw (default), base64 or hex
+  output: base64                # base64 (default) or hex
+  in: body                      # body or header
+  name: signature
+```
+
+```bash
+export EXAMPLEPAY_WEBHOOK_KEY=<the key the provider issued>
+pikopod import examplepay --spec examplepay.yaml --webhooks examplepay-webhooks.yaml --webhook-url http://localhost:3000/hooks/examplepay
+```
+
+`wrap` builds the body: each field is a template, and a field that is exactly
+`{{body}}` embeds the documented payload as JSON. Without `wrap` the body is
+the payload itself. `headers` adds request headers the same way. `signature`
+signs the rendered `content` with the key in `$keyEnv` and places the result in
+a body field or a header; `format` (for example `v1={{signature}}`) shapes the
+value.
+
+Templates are a closed set: `{{body}}`, `{{json_string body}}`, `{{event}}`,
+`{{id}}`, `{{timestamp}}` (unix seconds), `{{timestamp_ms}}`, `{{now_rfc3339}}`,
+`{{uuid}}`, plus the `wrap` field names inside `headers` and `content`. Time is
+the sandbox's virtual clock and `{{uuid}}` derives from the seed, so a run
+replays byte for byte. Anything else is refused at import, naming the field.
+
+The key is never stored: `pikopod up` reads it from the named variable and
+refuses to start without it when a sink is configured. The signing secret
+printed at import and the `x-pikopod-webhook-*` headers belong to the default
+format and are not sent once an envelope is declared. The outbox, `EXPECT_WEBHOOK`
+and `webhook.delivery` assertions keep seeing the documented payload.
+
 ### Assertions
 
 An assertion is `{target, op}` plus optional `subject` (`SANDBOX` — the default

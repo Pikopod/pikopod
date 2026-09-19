@@ -35,6 +35,10 @@ func normalizeOpenAPIValue(parsed any, limits ParseLimits, status string) (*ir.A
 	if err != nil {
 		return nil, err
 	}
+	envelope, err := normalizeWebhookEnvelope(doc)
+	if err != nil {
+		return nil, err
+	}
 
 	return &ir.ApiDefinition{
 		IrVersion:         ir.IRVersion,
@@ -48,6 +52,7 @@ func normalizeOpenAPIValue(parsed any, limits ParseLimits, status string) (*ir.A
 		Endpoints:         endpoints,
 		Schemas:           schemas,
 		Webhooks:          webhooks,
+		WebhookEnvelope:   envelope,
 		// Heuristic collections — populated by the analysis increment.
 		Resources:        []ir.Resource{},
 		ApiStyle:         nil,
