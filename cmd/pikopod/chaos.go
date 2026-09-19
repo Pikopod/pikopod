@@ -122,7 +122,11 @@ func newChaosCmd() *cobra.Command {
 			if err := chaosRelay(resp, out, "armed"); err != nil {
 				return err
 			}
-			fmt.Fprintf(out, "clear it with: pikopod chaos %s --clear --method %s --path %s\n", sandboxName, rule.Method, rule.Path)
+			if sandbox.IsWebhookFaultKind(kind) {
+				fmt.Fprintf(out, "clear it with: pikopod chaos %s --clear   (webhook faults clear with every standing fault)\n", sandboxName)
+			} else {
+				fmt.Fprintf(out, "clear it with: pikopod chaos %s --clear --method %s --path %s\n", sandboxName, rule.Method, rule.Path)
+			}
 			return nil
 		}}
 	c.Flags().Bool("list", false, "show standing faults")

@@ -2,6 +2,7 @@ package resolve
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/pikopod/pikopod/internal/errfmt"
@@ -30,6 +31,25 @@ type Binding struct {
 	Applicable bool        `json:"applicable"`
 	Reason     string      `json:"reason,omitempty"`
 	Candidates []Candidate `json:"candidates,omitempty"`
+	// Inferred lists candidates refused only because every fact is extracted;
+	// the user can assert one with --bind.
+	Inferred []Candidate `json:"inferred,omitempty"`
+}
+
+// Info says what a resolved archetype rests on, so the caller can tell the user.
+type Info struct {
+	UsesInferred bool
+	Asserted     []string
+}
+
+func candidateRoles(a *archetype.Archetype, c archetype.Candidate) Candidate {
+	cand := Candidate{}
+	for _, r := range a.Requires {
+		if opID, ok := c.Bindings[r.Role]; ok {
+			cand.Roles = append(cand.Roles, RoleBinding{Role: r.Role, OperationID: opID})
+		}
+	}
+	return cand
 }
 
 func ListBindings(def *ir.ApiDefinition) []Binding {
@@ -41,13 +61,11 @@ func ListBindings(def *ir.ApiDefinition) []Binding {
 		entry := Binding{ID: a.ID, Title: a.Title, Applicable: b.Applicable, Reason: b.Reason}
 		if b.Applicable {
 			for _, c := range b.Candidates {
-				cand := Candidate{}
-				for _, r := range a.Requires {
-					if opID, ok := c.Bindings[r.Role]; ok {
-						cand.Roles = append(cand.Roles, RoleBinding{Role: r.Role, OperationID: opID})
-					}
-				}
-				entry.Candidates = append(entry.Candidates, cand)
+				entry.Candidates = append(entry.Candidates, candidateRoles(a, c))
+			}
+		} else {
+			for _, c := range b.InferredOnly {
+				entry.Inferred = append(entry.Inferred, candidateRoles(a, c))
 			}
 		}
 		out = append(out, entry)
@@ -103,15 +121,25 @@ func PackByName(name string, packDirs []string) *scenario.Pack {
 }
 
 func Resolve(def *ir.ApiDefinition, name string, opts Options) (*scenario.ScenarioDefinition, error) {
+	parsed, _, err := ResolveDetailed(def, name, opts)
+	return parsed, err
+}
+
+func ResolveDetailed(def *ir.ApiDefinition, name string, opts Options) (*scenario.ScenarioDefinition, *Info, error) {
+	info := &Info{}
+	for role := range opts.BindOverrides {
+		info.Asserted = append(info.Asserted, role)
+	}
+	sort.Strings(info.Asserted)
 	all := archetype.All()
 	for i := range all {
 		a := &all[i]
 		if a.ID != name {
 			continue
 		}
-		binding := archetype.Bind(a, def)
+		binding := archetype.BindWith(a, def, opts.BindOverrides)
 		if !binding.Applicable {
-			return nil, errfmt.New("archetype does not apply", name+": "+binding.Reason, "run `pikopod scenario list <sandbox>` to see what binds", "scenarios/README.md")
+			return nil, nil, errfmt.New("archetype does not apply", name+": "+binding.Reason, "run `pikopod scenario list <sandbox>` to see what binds", "scenarios/README.md")
 		}
 		var firstErr string
 		for _, cand := range binding.Candidates {
@@ -140,23 +168,38 @@ func Resolve(def *ir.ApiDefinition, name string, opts Options) (*scenario.Scenar
 				}
 				continue
 			}
-			return parsed, nil
+			info.UsesInferred = cand.UsesInferred
+			return parsed, info, nil
 		}
-		return nil, errfmt.New("no candidate binding grounds", fmt.Sprintf("%s: %s", name, firstErr), "check --bind overrides name operations from `scenario list`", "scenarios/README.md")
+		return nil, nil, errfmt.New("no candidate binding grounds", fmt.Sprintf("%s: %s", name, firstErr), "check --bind overrides name operations from `scenario list`", "scenarios/README.md")
 	}
 
 	// Not an archetype: a saved pack, by name or path.
 	if strings.HasSuffix(name, ".yaml") || strings.HasSuffix(name, ".yml") {
 		pack, err := scenario.LoadPack(name)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
-		return GroundPack(pack, def)
+		parsed, err := GroundPack(pack, def)
+		return parsed, info, err
 	}
 	if p := PackByName(name, opts.PackDirs); p != nil {
-		return GroundPack(p, def)
+		parsed, err := GroundPack(p, def)
+		return parsed, info, err
 	}
-	return nil, errfmt.New("unknown scenario", fmt.Sprintf("%q is neither an archetype nor a saved pack", name), "see `pikopod scenario list <sandbox>` for archetypes, scenarios/ for packs", "scenarios/README.md")
+	return nil, nil, errfmt.New("unknown scenario", fmt.Sprintf("%q is neither an archetype nor a saved pack", name), "see `pikopod scenario list <sandbox>` for archetypes, scenarios/ for packs", "scenarios/README.md")
+}
+
+// Note is the short clause a caller prints when a run rests on facts the user
+// asserted rather than the spec declared; empty when nothing was inferred.
+func (i *Info) Note() string {
+	if i == nil || !i.UsesInferred {
+		return ""
+	}
+	if len(i.Asserted) == 0 {
+		return "rests partly on extracted facts"
+	}
+	return "rests on extracted facts; you asserted " + strings.Join(i.Asserted, ", ")
 }
 
 func GroundPack(pack *scenario.Pack, def *ir.ApiDefinition) (*scenario.ScenarioDefinition, error) {

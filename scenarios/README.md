@@ -68,6 +68,21 @@ spec** (`operationId` in your OpenAPI document). If an override names something
 the API does not have, the expansion fails to ground rather than running a test
 that cannot mean anything.
 
+A sandbox imported from a documentation URL has only **extracted** facts, and
+an archetype never binds on extracted facts alone: it would be a test resting
+on a guess. `scenario list` prints the candidate it would have chosen as a
+ready `--bind` line; passing it is you asserting that the operation plays that
+role, and the run says so:
+
+```
+  ✗ declines                   Declines
+      every candidate rests on extracted facts only; assert a role with --bind
+      assert it: pikopod scenario run examplepay declines --bind op=createIntent
+```
+
+An asserted operation must still have the role's shape (a `CREATE` role needs
+a create); what you vouch for is the fact the docs left out, not the shape.
+
 ## Writing a pack by hand
 
 A pack is YAML: `name`, `provider`, optional `description`, and a `definition`
@@ -177,6 +192,12 @@ method and path. `rate_limit` is sugar: the engine arms it as a 429 `error`.
 `times: N` fires the fault for the first N matching requests and then recovers
 deterministically; `per` scopes that window to `global`, `idempotency-key`, or
 `resource`.
+
+Delivery ids derive from the sandbox seed and the delivery sequence, so a
+restarted sandbox re-issues the same ids in the same order. That is what makes
+a transcript replay byte for byte; it also means a handler that dedupes on the
+id across restarts treats the fresh deliveries as replays. Change the seed
+(`sandbox add --seed`) when you want a fresh id stream.
 
 ### VERIFY_SEQUENCE
 

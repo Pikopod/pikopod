@@ -69,7 +69,8 @@ func decodeMode(resp *http.Response) (*mode.Spec, error) {
 		if body.Message == "" {
 			body.Message = string(bytes.TrimSpace(raw))
 		}
-		return nil, errfmt.New("the sandbox refused this mode", body.Message, "run `pikopod scenario list <sandbox>` to see what binds", "scenarios/README.md")
+		why, _, _ := strings.Cut(body.Message, " → ")
+		return nil, errfmt.New("the sandbox refused this mode", why, "run `pikopod scenario list <sandbox>` to see what binds", "scenarios/README.md")
 	}
 	var body struct {
 		Mode *mode.Spec `json:"mode"`

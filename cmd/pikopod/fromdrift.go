@@ -52,7 +52,7 @@ func newFromDriftCmd() *cobra.Command {
 				fmt.Fprintf(out, "no sandbox to replay against (%v)\nrun it later: pikopod scenario run <sandbox> %s\n", err, name)
 				return nil
 			}
-			parsed, err := resolveRunnable(cfg, name, def, nil)
+			parsed, _, err := resolveRunnable(cfg, name, def, nil)
 			if err != nil {
 				return err
 			}
