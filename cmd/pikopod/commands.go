@@ -66,7 +66,7 @@ slack:
   # webhook_url: https://hooks.slack.com/services/…   # alerts land here
 
 llm:
-  # openrouter_key: sk-or-…   # BYOK for plain-English scenarios and pikopod fix; or PIKOPOD_OPENROUTER_KEY
+  # api_key: sk-or-…   # BYOK for docs import, plain-English scenarios and pikopod fix; or OPENROUTER_API_KEY
 
 # warmup:                    # eval-only overrides; defaults 50 samples / 48h
 #   min_samples: 50

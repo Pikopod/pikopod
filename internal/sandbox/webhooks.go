@@ -8,6 +8,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -51,9 +52,10 @@ type WebhookDelivery struct {
 
 // SinkStats counts sink outcomes (best-effort delivery; never fatal).
 type SinkStats struct {
-	Delivered int64 `json:"delivered"`
-	Failed    int64 `json:"failed"`
-	Dropped   int64 `json:"dropped"`
+	Delivered int64  `json:"delivered"`
+	Failed    int64  `json:"failed"`
+	Dropped   int64  `json:"dropped"`
+	LastError string `json:"lastError,omitempty"`
 }
 
 // webhookSecretFor derives the sandbox's webhook signing secret from the run
@@ -144,6 +146,11 @@ func (e *Engine) buildProviderDelivery(w *ir.Webhook, data any) *WebhookDelivery
 	seq := e.webhookSeq
 	synth := makeContext(e.seed+":webhook:"+w.Event.Value+":"+strconv.FormatInt(seq, 10), e.virtualClockMs, e.namedSchemas)
 	payload := synthesize(w.PayloadSchema, synth, 0, "")
+	if _, isObject := payload.(*JSONObject); !isObject {
+		e.tracef("webhook", "%s's documented payload is not an object; using the event envelope", w.Event.Value)
+		e.webhookSeq--
+		return e.buildDelivery(w.Event.Value, data)
+	}
 	if !overlayResourceData(payload, data) {
 		e.tracef("webhook", "no field of %s overlaps the resource; payload is synthesized", w.Event.Value)
 	}
@@ -390,11 +397,18 @@ func (e *Engine) DeliveriesDueBy(eventFilter string, horizonMs int64) (out []Web
 
 // WebhookSinkStats snapshots sink outcome counters (tests poll Delivered).
 func (e *Engine) WebhookSinkStats() SinkStats {
+	last, _ := e.sinkLastErr.Load().(string)
 	return SinkStats{
 		Delivered: atomic.LoadInt64(&e.sinkDelivered),
 		Failed:    atomic.LoadInt64(&e.sinkFailed),
 		Dropped:   atomic.LoadInt64(&e.sinkDropped),
+		LastError: last,
 	}
+}
+
+func (e *Engine) sinkFailure(d *WebhookDelivery, reason string) {
+	atomic.AddInt64(&e.sinkFailed, 1)
+	e.sinkLastErr.Store(d.Event + " (" + d.ID + "): " + reason)
 }
 
 // sinkLoop drains the queue with one bounded-timeout attempt per delivery and
@@ -410,8 +424,8 @@ func (e *Engine) sinkLoop() {
 // propagated anywhere near a request.
 func (e *Engine) deliverToSink(client *http.Client, d *WebhookDelivery) {
 	defer func() {
-		if recover() != nil {
-			atomic.AddInt64(&e.sinkFailed, 1)
+		if r := recover(); r != nil {
+			e.sinkFailure(d, fmt.Sprint("panic: ", r))
 		}
 	}()
 	body := d.Payload
@@ -426,14 +440,14 @@ func (e *Engine) deliverToSink(client *http.Client, d *WebhookDelivery) {
 		wire, err := e.envelope.render(d)
 		if err != nil {
 			e.tracef("webhook", "envelope for %s: %v", d.Event, err)
-			atomic.AddInt64(&e.sinkFailed, 1)
+			e.sinkFailure(d, "envelope: "+err.Error())
 			return
 		}
 		body, headers = wire.Body, wire.Headers
 	}
 	req, err := http.NewRequest(http.MethodPost, e.webhookURL, bytes.NewReader(body))
 	if err != nil {
-		atomic.AddInt64(&e.sinkFailed, 1)
+		e.sinkFailure(d, err.Error())
 		return
 	}
 	for k, v := range headers {
@@ -441,13 +455,13 @@ func (e *Engine) deliverToSink(client *http.Client, d *WebhookDelivery) {
 	}
 	resp, err := client.Do(req)
 	if err != nil {
-		atomic.AddInt64(&e.sinkFailed, 1)
+		e.sinkFailure(d, err.Error())
 		return
 	}
 	resp.Body.Close()
 	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
 		atomic.AddInt64(&e.sinkDelivered, 1)
 	} else {
-		atomic.AddInt64(&e.sinkFailed, 1)
+		e.sinkFailure(d, "sink answered "+strconv.Itoa(resp.StatusCode))
 	}
 }

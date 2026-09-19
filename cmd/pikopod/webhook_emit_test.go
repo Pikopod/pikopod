@@ -111,3 +111,25 @@ func TestControlPlaneEmitFiresDeclaredEvent(t *testing.T) {
 		t.Fatalf("declared emit = %d: %v", res.StatusCode, readJSON(t, res)["message"])
 	}
 }
+
+func TestControlPlaneListsDeliveriesAndSinkOutcome(t *testing.T) {
+	srv := emitServer(t)
+	if _, err := http.Post(srv.URL+"/_pikopod/sandboxes/bank/webhooks/emit", "application/json", strings.NewReader(`{"event":"settlement.report"}`)); err != nil {
+		t.Fatal(err)
+	}
+	res, err := http.Get(srv.URL + "/_pikopod/sandboxes/bank/webhooks")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := readJSON(t, res)
+	deliveries, _ := body["deliveries"].([]any)
+	if res.StatusCode != http.StatusOK || len(deliveries) != 1 {
+		t.Fatalf("want one listed delivery, got %d (status %d): %v", len(deliveries), res.StatusCode, body)
+	}
+	if first, _ := deliveries[0].(map[string]any); first["event"] != "settlement.report" {
+		t.Fatalf("listed delivery must name the event: %v", deliveries[0])
+	}
+	if _, ok := body["sink"].(map[string]any); !ok {
+		t.Fatalf("sink stats missing: %v", body)
+	}
+}

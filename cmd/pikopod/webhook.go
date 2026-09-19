@@ -90,11 +90,43 @@ at your handler it would be indistinguishable from a real delivery.`,
 				json.Unmarshal(raw, &body)
 				return errfmt.New("the sandbox refused to emit "+args[1], body.Message, "declare the event in the spec; see `pikopod sandbox list` for what is declared", "scenarios/README.md")
 			}
-			fmt.Fprintf(cmd.OutOrStdout(), "emitted %s on %s (signed delivery queued)\n", args[1], args[0])
+			fmt.Fprintf(cmd.OutOrStdout(), "emitted %s on %s (signed delivery queued; `pikopod webhook list %s` shows whether the sink took it)\n", args[1], args[0], args[0])
 			return nil
 		}}
 	emit.Flags().String("data", "", "JSON object to overlay onto the documented payload, inline or @file")
 
-	c.AddCommand(emit)
+	list := &cobra.Command{Use: "list <sandbox>", Short: "Show a RUNNING sandbox's webhook deliveries and how the sink answered", Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cfg, err := loadConfig(cmd)
+			if err != nil {
+				return err
+			}
+			resp, err := adminReq(cfg, http.MethodGet, args[0], "webhooks", nil)
+			if err != nil {
+				return err
+			}
+			defer resp.Body.Close()
+			if resp.StatusCode != http.StatusOK {
+				return errfmt.New("unknown sandbox "+args[0], fmt.Sprintf("the sandbox server answered %d", resp.StatusCode), "run `pikopod sandbox list`", "")
+			}
+			var body struct {
+				Deliveries []sandbox.WebhookDelivery `json:"deliveries"`
+				Sink       sandbox.SinkStats         `json:"sink"`
+			}
+			if err := json.NewDecoder(io.LimitReader(resp.Body, 8<<20)).Decode(&body); err != nil {
+				return err
+			}
+			out := cmd.OutOrStdout()
+			for _, d := range body.Deliveries {
+				fmt.Fprintf(out, "%-4d %-32s %s  t=%d\n", d.Seq, d.Event, d.ID, d.VirtualTimeMs/1000)
+			}
+			fmt.Fprintf(out, "%d delivered, sink: %d delivered, %d failed, %d dropped\n", len(body.Deliveries), body.Sink.Delivered, body.Sink.Failed, body.Sink.Dropped)
+			if body.Sink.LastError != "" {
+				fmt.Fprintf(out, "last sink failure: %s\n", body.Sink.LastError)
+			}
+			return nil
+		}}
+
+	c.AddCommand(emit, list)
 	return c
 }

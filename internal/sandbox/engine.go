@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/pikopod/pikopod/internal/contract"
@@ -75,6 +76,7 @@ type Engine struct {
 	sinkDelivered int64 // atomics
 	sinkFailed    int64
 	sinkDropped   int64
+	sinkLastErr   atomic.Value
 }
 
 // NewEngine builds an engine over a pinned ApiDefinition and a resource store.

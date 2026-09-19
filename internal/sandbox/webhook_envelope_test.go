@@ -220,3 +220,103 @@ func TestDecodeSigningKey(t *testing.T) {
 		t.Fatal("a malformed key must be refused, not silently signed with")
 	}
 }
+
+// A prose-extracted spec often types the payload "unknown"; the delivery must
+// still be an object the envelope can carry, not a synthesized scalar.
+const unknownPayloadSpec = `{"openapi":"3.1.0","info":{"title":"Pay","version":"1"},
+"paths":{"/transactions":{"post":{"responses":{"201":{"description":"created"}}}}},
+"x-pikopod-webhook-envelope":{
+  "wrap":{"timestamp":"{{now_rfc3339}}","payload":"{{json_string body}}"},
+  "signature":{"algorithm":"hmac-sha256","content":"{{timestamp}}{{payload}}","keyEnv":"EXAMPLEPAY_WEBHOOK_KEY",
+               "keyEncoding":"base64","output":"base64","in":"body","name":"signature"}},
+"webhooks":{"transaction.created":{"post":{
+  "x-pikopod-trigger":{"method":"post","path":"/transactions"},
+  "requestBody":{"content":{"application/json":{"schema":{}}}},
+  "responses":{"200":{"description":"ack"}}}}}}`
+
+func TestUnknownPayloadSchemaStillDeliversAnObject(t *testing.T) {
+	def, err := importer.NormalizeOpenAPI([]byte(unknownPayloadSpec))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := def.Webhooks[0].PayloadSchema.Type.Value; got != "unknown" {
+		t.Fatalf("test spec must produce an unknown-typed payload, got %q", got)
+	}
+	srv, hits := captureSink(t)
+	e := newEngine(t, def, Config{ID: "sbx_unknown", Seed: "s", WebhookURL: srv.URL, WebhookSigningKey: decodedKey(t)})
+	do(t, e, "POST", "/transactions", `{"amount":71717,"currency":"TZS"}`, nil)
+	awaitDelivered(t, e, 1)
+	var env struct {
+		Payload string `json:"payload"`
+	}
+	if err := json.Unmarshal(hits()[0].body, &env); err != nil {
+		t.Fatal(err)
+	}
+	var inner map[string]any
+	if err := json.Unmarshal([]byte(env.Payload), &inner); err != nil {
+		t.Fatalf("payload must be an object: %s", env.Payload)
+	}
+	data, _ := inner["data"].(map[string]any)
+	if inner["event"] != "transaction.created" || data == nil || data["amount"] != 71717.0 {
+		t.Fatalf("fallback envelope must carry the event and the resource: %s", env.Payload)
+	}
+}
+
+func TestSinkRecordsTheLastFailure(t *testing.T) {
+	def, err := importer.NormalizeOpenAPI([]byte(nestedHookSpec))
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(500) }))
+	t.Cleanup(srv.Close)
+	e := newEngine(t, def, Config{ID: "sbx_sinkfail", Seed: "s", WebhookURL: srv.URL})
+	do(t, e, "POST", "/transactions", `{"amount":1,"currency":"TZS"}`, nil)
+	deadline := time.Now().Add(5 * time.Second)
+	for e.WebhookSinkStats().Failed < 1 {
+		if time.Now().After(deadline) {
+			t.Fatal("sink failure never counted")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	if got := e.WebhookSinkStats().LastError; !strings.Contains(got, "sink answered 500") || !strings.Contains(got, "transaction.created") {
+		t.Fatalf("the last failure must say what happened to which event: %q", got)
+	}
+}
+
+// Without wrap, the bytes on the wire are the outbox payload verbatim, so a
+// handler signing over what it received agrees with the sandbox.
+func TestUnwrappedBodyIsSentVerbatim(t *testing.T) {
+	spec := strings.Replace(unknownPayloadSpec, `"wrap":{"timestamp":"{{now_rfc3339}}","payload":"{{json_string body}}"},`, `"headers":{"x-examplepay-timestamp":"{{timestamp}}"},`, 1)
+	spec = strings.Replace(spec, `"content":"{{timestamp}}{{payload}}"`, `"content":"{{timestamp}}.{{body}}"`, 1)
+	spec = strings.Replace(spec, `"keyEncoding":"base64","output":"base64","in":"body","name":"signature"`, `"output":"hex","in":"header","name":"x-examplepay-signature"`, 1)
+	def, err := importer.NormalizeOpenAPI([]byte(spec))
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv, hits := captureSink(t)
+	e := newEngine(t, def, Config{ID: "sbx_verbatim", Seed: "s", WebhookURL: srv.URL, WebhookSigningKey: []byte("raw-key")})
+	do(t, e, "POST", "/transactions", `{"amount":71717,"currency":"TZS"}`, nil)
+	awaitDelivered(t, e, 1)
+	hit := hits()[0]
+	if want := e.Deliveries("")[0].Payload; string(hit.body) != string(want) {
+		t.Fatalf("wire body re-encoded:\n got %s\nwant %s", hit.body, want)
+	}
+	mac := hmac.New(sha256.New, []byte("raw-key"))
+	mac.Write([]byte(hit.headers.Get("x-examplepay-timestamp") + "." + string(hit.body)))
+	if got := hit.headers.Get("x-examplepay-signature"); got != hex.EncodeToString(mac.Sum(nil)) {
+		t.Fatalf("signature over the received bytes does not verify: %s", got)
+	}
+}
+
+func TestInjectFieldKeepsBytes(t *testing.T) {
+	got, err := injectField([]byte(`{"b":1,"a":[2]}`), "sig", "x")
+	if err != nil || string(got) != `{"sig":"x","b":1,"a":[2]}` {
+		t.Fatalf("got %s %v", got, err)
+	}
+	if got, _ := injectField([]byte(`{ }`), "sig", "x"); string(got) != `{"sig":"x"}` {
+		t.Fatalf("empty object: %s", got)
+	}
+	if _, err := injectField([]byte(`"scalar"`), "sig", "x"); err == nil {
+		t.Fatal("a scalar payload must be refused")
+	}
+}
