@@ -60,11 +60,11 @@ func TestCriticalFailOpen_ByteIdenticalUnderObserverPressure(t *testing.T) {
 		if upstreamDrops > want {
 			t.Fatalf("upstream dropped mid-response %d times; the environment is too unstable to assert on", upstreamDrops)
 		}
+		before := s.Metrics.UpstreamBodyErrors.Load()
 		resp, err := client.Post(front.URL+"/examplepay/transaction", "application/json", bytes.NewReader([]byte(`{"amount":1}`)))
 		if err != nil {
 			t.Fatal(err)
 		}
-		before := s.Metrics.UpstreamBodyErrors.Load()
 		got, readErr := io.ReadAll(resp.Body)
 		resp.Body.Close()
 		if readErr != nil {
@@ -86,6 +86,9 @@ func TestCriticalFailOpen_ByteIdenticalUnderObserverPressure(t *testing.T) {
 	}
 	if compared != want {
 		t.Fatalf("test invalid: compared %d responses, want %d", compared, want)
+	}
+	if upstreamDrops > 0 {
+		t.Logf("tolerated %d upstream drop(s), each counted by UpstreamBodyErrors", upstreamDrops)
 	}
 	if s.Metrics.CapturesDropped.Load() == 0 {
 		t.Fatal("test invalid: expected drops to have occurred")
