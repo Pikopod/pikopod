@@ -452,7 +452,7 @@ func (e *Engine) serve(req *ingressRequest, innerPath string) (*RawResponse, err
 	e.tracef("operation", "kind=%v resource=%s", op.kind, op.typ)
 	// Unrecognized shapes never touch state — the generic success shell stands.
 	if op.kind == opPassthrough {
-		return buildSuccessResponse(result.endpoint), nil
+		return e.buildSuccessResponse(result.endpoint), nil
 	}
 
 	// An endpoint is an ACTION when its success response is a DIFFERENT named

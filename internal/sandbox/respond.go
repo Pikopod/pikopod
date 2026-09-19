@@ -120,14 +120,28 @@ func jsonResponse(status int, value any, extraHeaders map[string]string) *RawRes
 	return &RawResponse{Status: status, Headers: headers, Body: body}
 }
 
-// buildSuccessResponse: the lowest declared 2xx, empty-bodied. For passthrough.
-func buildSuccessResponse(endpoint *ir.Endpoint) *RawResponse {
+// buildSuccessResponse answers a passthrough from the highest declared fact:
+// a spec example, then the response schema, then the empty shell.
+func (e *Engine) buildSuccessResponse(endpoint *ir.Endpoint) *RawResponse {
 	status := pickSuccessStatus(endpoint, 200)
 	if status == 204 {
 		return &RawResponse{Status: status, Headers: map[string]string{}, Body: nil}
 	}
+	if resp := successResponse(endpoint, status); resp != nil {
+		if value, ok := e.declaredExample(resp.ID); ok {
+			e.tracef("response", "declared example for %d", status)
+			return jsonResponse(status, value, nil)
+		}
+	}
+	schema := successSchema(endpoint, status)
+	ctx := e.synthCtx("passthrough", endpoint.ID, strconv.Itoa(status))
+	if resolved := derefSchema(schema, ctx, 0); resolved != nil && (resolved.Type.Value == "object" || resolved.Type.Value == "array") {
+		e.tracef("response", "synthesized from the %d response schema", status)
+		return jsonResponse(status, synthesize(schema, ctx, 0, ""), nil)
+	}
+	e.tracef("response", "nothing declared for %d; empty shell", status)
 	body := "{}"
-	if schema := successSchema(endpoint, status); schema != nil && schema.Type.Value == "array" {
+	if schema != nil && schema.Type.Value == "array" {
 		body = "[]"
 	}
 	return &RawResponse{Status: status, Headers: map[string]string{"content-type": jsonContentType}, Body: []byte(body)}
