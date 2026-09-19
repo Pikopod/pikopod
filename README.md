@@ -171,10 +171,18 @@ pikopod up                                      # sandbox :4600 · agent :4700
 
 `--spec` takes OpenAPI 3.0/3.1, Swagger 2.0, a Postman collection, or a GraphQL
 schema, from a URL or a local path. A documentation *page* also works: pikopod
-looks for an embedded or linked spec first, and only falls back to extracting
-one with a model if you have configured your own key. See
+looks for an embedded or linked spec first, then the platform's well-known
+spec paths, and only falls back to extracting one with a model if you have
+configured your own key. See
 [docs/security.md](docs/security.md#what-leaves-the-machine) for exactly what
 that sends.
+
+Pass `--emit-spec <path>` to keep the spec the import used. An extracted one
+is written with an `x-pikopod-origin: llm-extracted` marker and a list of any
+indexed pages that did not fit the extraction budget; review it, bind its
+webhook events, commit it, and import from the file from then on, with no
+model in the loop. It stays DRAFT until you delete the marker, which says the
+facts are now yours.
 
 That gives you two things.
 
