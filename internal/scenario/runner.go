@@ -256,6 +256,8 @@ func (r *runner) dispatch(step *Step) (stepOutcome, error) {
 		return r.verifyRequests(step)
 	case "VERIFY_SEQUENCE":
 		return r.verifySequence(step)
+	case "EMIT_WEBHOOK":
+		return r.emitWebhook(step)
 	case "SNAPSHOT":
 		cfg := step.Config.(*SnapshotConfig)
 		return r.note(fmt.Sprintf("snapshot '%s'", cfg.Label)), nil
@@ -861,4 +863,27 @@ func unprovable(m *SequenceMatcher, entry *sandbox.JournalEntry) string {
 		return "the request carried more query values than the journal caps"
 	}
 	return ""
+}
+
+// emitWebhook fires a declared event; an undeclared one is a pack error, not
+// a failed assertion, because the pack asked for something the spec lacks.
+func (r *runner) emitWebhook(step *Step) (stepOutcome, error) {
+	cfg := step.Config.(*EmitWebhookConfig)
+	var raw json.RawMessage
+	if cfg.HasData {
+		data, err := interpolateDeep(cfg.Data, r.tpl())
+		if err != nil {
+			return stepOutcome{}, err
+		}
+		if raw, err = json.Marshal(data); err != nil {
+			return stepOutcome{}, err
+		}
+	}
+	if err := r.eng.EmitWebhook(cfg.Event, raw); err != nil {
+		return stepOutcome{}, err
+	}
+	return stepOutcome{
+		status: StatusNotEvaluated, virtualEndMs: r.virtualClockMs,
+		summary: "emitted " + cfg.Event,
+	}, nil
 }

@@ -27,6 +27,7 @@ type Target interface {
 	JournalCount(method, template string) (count int, evicted bool)
 	JournalLast(method, template string) (entry *sandbox.JournalEntry, found, evicted bool)
 	JournalEntries(limit int) (entries []sandbox.JournalEntry, evicted int64)
+	EmitWebhook(event string, data json.RawMessage) error
 }
 
 // remoteAllowedSteps is the step subset that is meaningful against a real
@@ -138,6 +139,10 @@ func (t *RemoteTarget) JournalCount(string, string) (int, bool) { return 0, fals
 // A real endpoint keeps no journal; VERIFY_SEQUENCE is refused before a run
 // reaches here (remoteAllowedSteps).
 func (t *RemoteTarget) JournalEntries(int) ([]sandbox.JournalEntry, int64) { return nil, 0 }
+
+func (t *RemoteTarget) EmitWebhook(event string, _ json.RawMessage) error {
+	return errfmt.New("a real endpoint cannot be told to emit "+event, "only the sandbox owns an outbox", "run this scenario against the local sandbox", "scenarios/README.md")
+}
 
 func (t *RemoteTarget) JournalLast(string, string) (*sandbox.JournalEntry, bool, bool) {
 	return nil, false, false

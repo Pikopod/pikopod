@@ -127,6 +127,14 @@ type SequenceMatcher struct {
 	MaxGapMs *int64            `json:"maxGapMs,omitempty"`
 }
 
+// EmitWebhookConfig fires a DECLARED event on demand, for events no API call
+// causes. Data overlays the documented payload; undeclared names are refused.
+type EmitWebhookConfig struct {
+	Event   string `json:"event"`
+	Data    any    `json:"data,omitempty"`
+	HasData bool   `json:"-"`
+}
+
 type ClearFaultConfig struct {
 	Method *string `json:"method,omitempty"`
 	Path   *string `json:"path,omitempty"`
@@ -176,6 +184,7 @@ var StepClass = map[string]string{
 	"EXPECT_WEBHOOK":  "driving",
 	"VERIFY_REQUESTS": "driving",
 	"VERIFY_SEQUENCE": "driving",
+	"EMIT_WEBHOOK":    "driving",
 	"ASSERT_STATE":    "driving",
 	"SNAPSHOT":        "driving",
 	"NOTE":            "driving",
@@ -673,6 +682,16 @@ func (p *parser) parseConfig(pointer, stepType string, cfg map[string]any) any {
 				p.fail(ptr, "minGapMs must not exceed maxGapMs")
 			}
 			out.Requests = append(out.Requests, m)
+		}
+		return out
+	case "EMIT_WEBHOOK":
+		p.checkKeys(pointer, cfg, "event", "data")
+		out := &EmitWebhookConfig{Event: p.str(pointer+"/event", cfg, "event", true, 200)}
+		if v, has := cfg["data"]; has {
+			if _, ok := v.(map[string]any); !ok {
+				p.fail(pointer+"/data", "data must be a JSON object")
+			}
+			out.Data, out.HasData = v, true
 		}
 		return out
 	case "ASSERT_STATE":

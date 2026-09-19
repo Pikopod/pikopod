@@ -158,6 +158,8 @@ type Webhook struct {
 	// Trigger comes from the x-pikopod-trigger extension; absent on sources
 	// that predate it, so goldens stay byte-identical.
 	Trigger *WebhookTrigger `json:"trigger,omitempty"`
+	// EmitOnly marks an event no API call causes; it fires only on demand.
+	EmitOnly bool `json:"emitOnly,omitempty"`
 }
 
 // WebhookTrigger names the operation whose success fires a webhook event.

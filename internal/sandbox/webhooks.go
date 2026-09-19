@@ -14,6 +14,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/pikopod/pikopod/internal/errfmt"
 	"github.com/pikopod/pikopod/internal/ir"
 )
 
@@ -93,7 +94,6 @@ func (e *Engine) enqueueWebhookFor(endpoint *ir.Endpoint, action, slug string, d
 	defer e.webhookMu.Unlock()
 
 	var ds []*WebhookDelivery
-	matched := false
 	for i := range e.def.Webhooks {
 		w := &e.def.Webhooks[i]
 		byTrigger := endpoint != nil && w.Trigger != nil &&
@@ -104,7 +104,6 @@ func (e *Engine) enqueueWebhookFor(endpoint *ir.Endpoint, action, slug string, d
 		if !byTrigger && !byName {
 			continue
 		}
-		matched = true
 		if d := e.buildProviderDelivery(w, data); d != nil {
 			ds = append(ds, d)
 		}
@@ -114,10 +113,10 @@ func (e *Engine) enqueueWebhookFor(endpoint *ir.Endpoint, action, slug string, d
 			break
 		}
 	}
-	if !matched {
-		if d := e.buildDelivery(fallback, data); d != nil {
-			ds = append(ds, d)
-		}
+	// No declared event for this change means nothing is sent. The sandbox
+	// never invents one: at the handler it would look exactly like a real one.
+	if len(ds) == 0 {
+		e.tracef("webhook", "no declared event for %s %s; nothing sent", slug, action)
 	}
 	for _, d := range ds {
 		e.emitThroughFaults(d)
@@ -145,7 +144,9 @@ func (e *Engine) buildProviderDelivery(w *ir.Webhook, data any) *WebhookDelivery
 	seq := e.webhookSeq
 	synth := makeContext(e.seed+":webhook:"+w.Event.Value+":"+strconv.FormatInt(seq, 10), e.virtualClockMs, e.namedSchemas)
 	payload := synthesize(w.PayloadSchema, synth, 0, "")
-	overlayResourceData(payload, data)
+	if !overlayResourceData(payload, data) {
+		e.tracef("webhook", "no field of %s overlaps the resource; payload is synthesized", w.Event.Value)
+	}
 	body, err := json.Marshal(payload)
 	if err != nil {
 		e.webhookSeq--
@@ -160,30 +161,81 @@ func (e *Engine) buildProviderDelivery(w *ir.Webhook, data any) *WebhookDelivery
 	}
 }
 
-// overlayResourceData grafts real resource attributes into the synthesized
-// payload (top level or one "data"/"object" envelope down) so ids correlate.
-func overlayResourceData(payload, data any) {
+// overlayResourceData grafts real resource attributes into whichever object in
+// the synthesized payload shares the most keys with them; false when none do.
+func overlayResourceData(payload, data any) bool {
 	attrs := toPlainMap(data)
-	if attrs == nil {
-		return
+	if len(attrs) == 0 {
+		return false
 	}
-	target, ok := payload.(*JSONObject)
-	if !ok {
-		return
-	}
-	for _, envelope := range []string{"data", "object"} {
-		if inner, ok := target.Get(envelope); ok {
-			if innerObj, ok := inner.(*JSONObject); ok {
-				target = innerObj
-				break
+	var best *JSONObject
+	bestScore := 0
+	var walk func(v any)
+	walk = func(v any) {
+		switch x := v.(type) {
+		case *JSONObject:
+			score := 0
+			for _, k := range x.Keys() {
+				if _, ok := attrs[k]; ok {
+					score++
+				}
+			}
+			if score > bestScore {
+				best, bestScore = x, score
+			}
+			for _, k := range x.Keys() {
+				if inner, ok := x.Get(k); ok {
+					walk(inner)
+				}
+			}
+		case []any:
+			for _, item := range x {
+				walk(item)
 			}
 		}
 	}
-	for _, k := range target.Keys() {
+	walk(payload)
+	if best == nil {
+		return false
+	}
+	for _, k := range best.Keys() {
 		if v, ok := attrs[k]; ok {
-			target.Set(k, v)
+			best.Set(k, v)
 		}
 	}
+	return true
+}
+
+// EmitWebhook fires a DECLARED event on demand, for events no API call causes
+// (money landing, a chargeback). Undeclared names are refused, never invented.
+func (e *Engine) EmitWebhook(event string, data json.RawMessage) error {
+	var w *ir.Webhook
+	for i := range e.def.Webhooks {
+		if e.def.Webhooks[i].Event.Value == event {
+			w = &e.def.Webhooks[i]
+			break
+		}
+	}
+	if w == nil {
+		return errfmt.New("webhook event is not declared",
+			event+" is not in this sandbox's spec, and pikopod never invents an event",
+			"declare it under webhooks in the spec, with x-pikopod-emit-only: true if no API call causes it",
+			"scenarios/README.md")
+	}
+	var payload any
+	if len(data) > 0 {
+		if err := json.Unmarshal(data, &payload); err != nil {
+			return errfmt.Newf("webhook data is not valid JSON", "pass a JSON object", "scenarios/README.md", "%v", err)
+		}
+	}
+	e.webhookMu.Lock()
+	defer e.webhookMu.Unlock()
+	d := e.buildProviderDelivery(w, payload)
+	if d == nil {
+		return errfmt.New("could not build the "+event+" delivery", "the documented payload did not serialize", "check the webhook's schema in the spec", "scenarios/README.md")
+	}
+	e.emitThroughFaults(d)
+	return nil
 }
 
 func toPlainMap(data any) map[string]any {

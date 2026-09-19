@@ -40,6 +40,7 @@ func main() {
 		newReplayCmd(),
 		newChaosCmd(),
 		newModeCmd(),
+		newWebhookCmd(),
 		newBaselineCmd(),
 		newAckCmd(),
 		newAcceptCmd(),
