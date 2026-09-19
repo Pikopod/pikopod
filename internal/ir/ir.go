@@ -239,6 +239,7 @@ type ApiDefinition struct {
 	Resources         []Resource         `json:"resources"`
 	ApiStyle          *Prov[ApiStyle]    `json:"apiStyle"`
 	Webhooks          []Webhook          `json:"webhooks"`
+	WebhookEnvelope   *WebhookEnvelope   `json:"webhookEnvelope,omitempty"`
 	ErrorCatalogue    []ErrorEntry       `json:"errorCatalogue"`
 	Relationships     []Relationship     `json:"relationships"`
 	StateTransitions  []StateTransition  `json:"stateTransitions"`

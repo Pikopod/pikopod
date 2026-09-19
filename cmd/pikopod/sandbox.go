@@ -248,6 +248,7 @@ func sandboxAdd(cfg *config.Config, name, specSource, seed, webhookURL, upstream
 				"    add x-pikopod-trigger {method, path} to bind an event to the call that causes it,\n"+
 				"    or x-pikopod-emit-only: true for an event no API call causes (fire it with `pikopod webhook emit`)\n", untriggered)
 		}
+		printEnvelope(out, def)
 	}
 	fmt.Fprintf(out, "serve it with `pikopod up` → http://%s:%d/%s/...\n", cfg.Listen, cfg.SandboxPort, name)
 	fmt.Fprintf(out, "test credential (send it the way the spec's auth scheme expects, e.g. the Authorization header):\n  %s\n", sandbox.IssuedCredential(entry.Seed))
@@ -290,6 +291,9 @@ func sandboxUpdate(cfg *config.Config, name, specSource string, out io.Writer) e
 	if oldRaw, rErr := os.ReadFile(irAbs); rErr == nil {
 		var oldDef ir.ApiDefinition
 		if json.Unmarshal(oldRaw, &oldDef) == nil {
+			if def.WebhookEnvelope == nil {
+				def.WebhookEnvelope = oldDef.WebhookEnvelope
+			}
 			findings := specdiff.Diff(&oldDef, def)
 			if len(findings) > 0 {
 				fmt.Fprintf(out, "accepting %d declared change(s):\n", len(findings))
@@ -346,6 +350,9 @@ func sandboxList(cfg *config.Config, out io.Writer) error {
 			line := fmt.Sprintf("  webhooks: %d declared, %d triggered, %d emit-only", declared, triggered, emitOnly)
 			if untriggered > 0 {
 				line += fmt.Sprintf(", %d never fire", untriggered)
+			}
+			if summary := envelopeSummary(def); summary != "" {
+				line += "; " + summary
 			}
 			fmt.Fprintln(out, line)
 		}
@@ -458,6 +465,10 @@ func newSandboxServer(cfg *config.Config) (*sandboxServer, error) {
 	if err != nil {
 		return nil, err
 	}
+	if err := checkSigningKeys(cfg, entries); err != nil {
+		st.Close()
+		return nil, err
+	}
 	byName := make(map[string]sandboxEntry, len(entries))
 	for _, e := range entries {
 		byName[e.Name] = e
@@ -496,15 +507,20 @@ func (s *sandboxServer) handlerFor(name string) (http.Handler, error) {
 	if err := json.Unmarshal(raw, &def); err != nil {
 		return nil, errfmt.Newf("persisted IR for "+name+" is corrupt", "re-add the sandbox with `pikopod sandbox add`", "docs/config-reference.md#data_dir", "%v", err)
 	}
+	signingKey, err := webhookSigningKey(&def)
+	if err != nil {
+		return nil, err
+	}
 	engine, err := sandbox.NewEngine(&def, sandbox.Config{
-		ID:              entry.ID,
-		Seed:            entry.Seed,
-		Mode:            entry.Mode,
-		VirtualClockMs:  entry.CreatedClockMs,
-		WallclockFaults: s.wallclockFaults,
-		Effective:       effectiveFor(s.cfg, &entry, 0),
-		Recordings:      recordingsFor(s.cfg, &entry),
-		WebhookURL:      entry.WebhookURL,
+		ID:                entry.ID,
+		Seed:              entry.Seed,
+		Mode:              entry.Mode,
+		VirtualClockMs:    entry.CreatedClockMs,
+		WallclockFaults:   s.wallclockFaults,
+		Effective:         effectiveFor(s.cfg, &entry, 0),
+		Recordings:        recordingsFor(s.cfg, &entry),
+		WebhookURL:        entry.WebhookURL,
+		WebhookSigningKey: signingKey,
 	}, s.store)
 	if err != nil {
 		return nil, err
@@ -685,11 +701,18 @@ func newSandboxAddCmd() *cobra.Command {
 			webhookURL, _ := cmd.Flags().GetString("webhook-url")
 			upstreamLink, _ := cmd.Flags().GetString("upstream")
 			recFallback, _ := cmd.Flags().GetBool("recordings-fallback")
-			return sandboxAdd(cfg, args[0], spec, seed, webhookURL, upstreamLink, recFallback, cmd.OutOrStdout())
+			if err := sandboxAdd(cfg, args[0], spec, seed, webhookURL, upstreamLink, recFallback, cmd.OutOrStdout()); err != nil {
+				return err
+			}
+			if sidecar, _ := cmd.Flags().GetString("webhooks"); sidecar != "" {
+				return applyWebhookSidecar(cfg, args[0], sidecar, cmd.OutOrStdout())
+			}
+			return nil
 		}}
 	c.Flags().String("spec", "", "spec source (local file or http(s) URL): OpenAPI 3.x, Swagger 2.0, Postman collection, or GraphQL schema")
 	c.Flags().String("seed", "", "run seed (default: random; pin one for reproducible transcripts)")
 	c.Flags().String("webhook-url", "", "optional HTTP(S) sink: webhook deliveries POST here (signed)")
+	c.Flags().String("webhooks", "", "YAML/JSON file describing how the provider wraps and signs deliveries (for specs without x-pikopod-webhook-envelope)")
 	c.Flags().String("upstream", "", "link to a drift-agent upstream so its traffic refines this contract (auto when names match)")
 	c.Flags().Bool("recordings-fallback", false, "serve the linked upstream's recordings for requests neither the spec nor admitted traffic can answer (final tier; X-Pikopod-Replay-Tier)")
 	return c
