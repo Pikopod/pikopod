@@ -20,17 +20,17 @@ import (
 const SandboxBaseEpochMs int64 = 1735689600000
 
 type Config struct {
-	ID string
-	Seed string
-	Mode string
-	VirtualClockMs int64
+	ID              string
+	Seed            string
+	Mode            string
+	VirtualClockMs  int64
 	MaxRequestBytes int64
-	Credential string
-	WebhookURL string
-	Quota QuotaLimits
+	Credential      string
+	WebhookURL      string
+	Quota           QuotaLimits
 	WallclockFaults bool
-	Effective *contract.Effective
-	Recordings *replay.Set
+	Effective       *contract.Effective
+	Recordings      *replay.Set
 }
 
 type Engine struct {
@@ -55,11 +55,11 @@ type Engine struct {
 	faultMu         sync.Mutex
 	faults          []FaultRule
 	wallclockFaults bool
-	effective *contract.Effective
-	journal journal
-	mountPrefix string
-	trace func(stage, message string)
-	recordings *replay.Set
+	effective       *contract.Effective
+	journal         journal
+	mountPrefix     string
+	trace           func(stage, message string)
+	recordings      *replay.Set
 
 	webhookMu     sync.Mutex
 	webhookSeq    int64
