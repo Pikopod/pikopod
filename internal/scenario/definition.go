@@ -31,6 +31,7 @@ var validTargets = map[string]bool{
 	"response.latencyMs": true, "state.resource": true, "state.resourceCount": true,
 	"webhook.delivery": true, "webhook.count": true, "execution.faultApplied": true,
 	"sandbox.requestCount": true, "sandbox.request": true,
+	"sandbox.request.headers": true, "sandbox.request.query": true,
 }
 
 // Assertion operators.
@@ -109,6 +110,23 @@ type VerifyRequestsConfig struct {
 	Path   string `json:"path"`
 }
 
+// VerifySequenceConfig asserts an ORDERED subsequence of journaled requests.
+// Unmatched requests between matches are allowed; order is not.
+type VerifySequenceConfig struct {
+	Requests []SequenceMatcher `json:"requests"`
+}
+
+// SequenceMatcher is one expected request. All set fields must match; unset
+// fields are ignored.
+type SequenceMatcher struct {
+	Method   string            `json:"method,omitempty"`
+	Path     string            `json:"path,omitempty"`
+	Headers  map[string]string `json:"headers,omitempty"`
+	Query    map[string]string `json:"query,omitempty"`
+	MinGapMs *int64            `json:"minGapMs,omitempty"` // since the previous match
+	MaxGapMs *int64            `json:"maxGapMs,omitempty"`
+}
+
 type ClearFaultConfig struct {
 	Method *string `json:"method,omitempty"`
 	Path   *string `json:"path,omitempty"`
@@ -157,6 +175,7 @@ var StepClass = map[string]string{
 	"WAIT":            "driving",
 	"EXPECT_WEBHOOK":  "driving",
 	"VERIFY_REQUESTS": "driving",
+	"VERIFY_SEQUENCE": "driving",
 	"ASSERT_STATE":    "driving",
 	"SNAPSHOT":        "driving",
 	"NOTE":            "driving",
@@ -365,6 +384,21 @@ func (p *parser) intIn(pointer string, v any, min, max int64) (int64, bool) {
 		return 0, false
 	}
 	return n, true
+}
+
+// optGapMs reads a non-negative millisecond gap; absent stays nil.
+func (p *parser) optGapMs(pointer string, obj map[string]any, key string) *int64 {
+	v, has := obj[key]
+	if !has {
+		return nil
+	}
+	f, ok := v.(float64)
+	if !ok || f < 0 || f != float64(int64(f)) {
+		p.fail(pointer, "%s must be a non-negative whole number of milliseconds", key)
+		return nil
+	}
+	ms := int64(f)
+	return &ms
 }
 
 func (p *parser) stringMap(pointer string, v any) map[string]string {
@@ -595,6 +629,51 @@ func (p *parser) parseConfig(pointer, stepType string, cfg map[string]any) any {
 			out.Method = m
 		}
 		out.Path = p.str(pointer+"/path", cfg, "path", true, 2000)
+		return out
+	case "VERIFY_SEQUENCE":
+		p.checkKeys(pointer, cfg, "requests")
+		out := &VerifySequenceConfig{}
+		raw, ok := cfg["requests"].([]any)
+		if !ok || len(raw) == 0 {
+			p.fail(pointer+"/requests", "requests must be a non-empty array of matchers")
+			return out
+		}
+		if len(raw) > MaxSteps {
+			p.fail(pointer+"/requests", "at most %d matchers", MaxSteps)
+			return out
+		}
+		for i, item := range raw {
+			ptr := fmt.Sprintf("%s/requests/%d", pointer, i)
+			obj, ok := item.(map[string]any)
+			if !ok {
+				p.fail(ptr, "matcher must be an object")
+				continue
+			}
+			p.checkKeys(ptr, obj, "method", "path", "headers", "query", "minGapMs", "maxGapMs")
+			m := SequenceMatcher{}
+			if _, has := obj["method"]; has {
+				mth := p.str(ptr+"/method", obj, "method", false, 10)
+				if !validHTTPMethods[mth] {
+					p.fail(ptr+"/method", "method must be one of GET, POST, PUT, PATCH, DELETE")
+				}
+				m.Method = mth
+			}
+			if v := p.optStr(ptr+"/path", obj, "path", 2000); v != nil {
+				m.Path = *v
+			}
+			if v, has := obj["headers"]; has {
+				m.Headers = p.stringMap(ptr+"/headers", v)
+			}
+			if v, has := obj["query"]; has {
+				m.Query = p.stringMap(ptr+"/query", v)
+			}
+			m.MinGapMs = p.optGapMs(ptr+"/minGapMs", obj, "minGapMs")
+			m.MaxGapMs = p.optGapMs(ptr+"/maxGapMs", obj, "maxGapMs")
+			if m.MinGapMs != nil && m.MaxGapMs != nil && *m.MinGapMs > *m.MaxGapMs {
+				p.fail(ptr, "minGapMs must not exceed maxGapMs")
+			}
+			out.Requests = append(out.Requests, m)
+		}
 		return out
 	case "ASSERT_STATE":
 		p.checkKeys(pointer, cfg, "resourceType", "resourceId")

@@ -1,5 +1,3 @@
-// Package sandbox serves a simulated provider from a pinned ApiDefinition:
-// route match → auth → operation → CRUD/synthesis, never leaking internals.
 package sandbox
 
 import (
@@ -16,45 +14,25 @@ import (
 	"github.com/pikopod/pikopod/internal/errfmt"
 	"github.com/pikopod/pikopod/internal/ir"
 	"github.com/pikopod/pikopod/internal/replay"
+	"github.com/pikopod/pikopod/internal/sanitize"
 )
 
-// SandboxBaseEpochMs is the virtual clock a sandbox starts at:
-// 2025-01-01T00:00:00Z.
 const SandboxBaseEpochMs int64 = 1735689600000
 
-// Config configures one sandbox engine.
 type Config struct {
-	// ID namespaces rows in the shared store.
 	ID string
-	// Seed is the run seed every deterministic derivation starts from.
 	Seed string
-	// Mode is "deterministic" (default) or "nondeterministic".
 	Mode string
-	// VirtualClockMs is the fixed virtual clock (0 ⇒ SandboxBaseEpochMs).
 	VirtualClockMs int64
-	// MaxRequestBytes caps request bodies (0 ⇒ 1 MiB, the platform default).
 	MaxRequestBytes int64
-	// Credential overrides the issued test token (empty ⇒ derived from Seed);
-	// transcript replays inject a captured token here.
 	Credential string
-	// WebhookURL is an optional HTTP(S) sink for signed delivery POSTs;
-	// delivery is async and best-effort so a wedged sink never slows requests.
 	WebhookURL string
-	// Quota zero-fields fall back to the platform defaults.
 	Quota QuotaLimits
-	// WallclockFaults makes EVERY armed fault delay on the real wire; default
-	// false keeps faults virtualized, deterministic and transcript-stable.
 	WallclockFaults bool
-	// Effective attaches the resolved traffic contract; nil keeps spec-only
-	// behavior byte-identical.
 	Effective *contract.Effective
-	// Recordings is the FINAL resolution tier, consulted only when no spec
-	// route and no traffic-admitted endpoint matches; nil 404s the request.
 	Recordings *replay.Set
 }
 
-// Engine simulates the modelled provider for one sandbox. It implements
-// http.Handler.
 type Engine struct {
 	def             *ir.ApiDefinition
 	store           *Store
@@ -74,28 +52,20 @@ type Engine struct {
 	idemMu sync.Mutex
 	idem   map[string]idemRecord
 
-	// Standing fault rules armed by the scenario engine (faults.go), evaluated
-	// before serve().
 	faultMu         sync.Mutex
 	faults          []FaultRule
 	wallclockFaults bool
-	// effective is the resolved traffic contract (contract_render.go).
 	effective *contract.Effective
-	// journal remembers what the client sent (journal.go).
 	journal journal
-	// mountPrefix prefixes self-referential URLs (diagnostics.go).
 	mountPrefix string
-	// trace narrates the pipeline for `pikopod why` (diagnostics.go).
 	trace func(stage, message string)
-	// recordings is the final resolution tier (replay_tier.go).
 	recordings *replay.Set
 
-	// Webhook outbox (webhooks.go). Lock order: webhookMu before faultMu,
-	// never the reverse.
 	webhookMu     sync.Mutex
 	webhookSeq    int64
 	webhookLog    []WebhookDelivery
 	webhookSecret string
+	journalTok    *sanitize.Tokenizer
 	webhookURL    string
 	sinkCh        chan WebhookDelivery
 	sinkDelivered int64 // atomics
@@ -168,6 +138,7 @@ func NewEngine(def *ir.ApiDefinition, cfg Config, store *Store) (*Engine, error)
 	// The secret is always derived so the accessor stays truthful; the sink
 	// goroutine starts only with a URL and lives for the engine's lifetime.
 	e.webhookSecret = webhookSecretFor(cfg.Seed)
+	e.journalTok = sanitize.NewTokenizer(cfg.Seed, "sandbox-journal", 1)
 	if cfg.WebhookURL != "" {
 		e.webhookURL = cfg.WebhookURL
 		e.sinkCh = make(chan WebhookDelivery, webhookSinkQueue)
@@ -290,17 +261,16 @@ func (e *Engine) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			entry.BodyTruncated = true
 		}
 	}
+	entry.AtMs = e.virtualClockMs
+	entry.Headers, entry.HeadersTruncated = e.journalHeaders(req.headers)
+	entry.Query, entry.QueryTruncated = e.journalQuery(req.query)
 	e.journal.record(entry)
 	if wf == nil {
 		writeRaw(w, resp)
 		return
 	}
-	// WALLCLOCK mode: the fault acts on the real wire. Sleeps abort on client
-	// disconnect so held goroutines never outlive their connections.
 	ctx := r.Context()
 	if wf.sleepMs > 0 {
-		// The delay is the TOTAL observed latency, so sleep only the
-		// remainder after real processing.
 		remaining := wf.sleepMs - time.Since(started).Milliseconds()
 		if remaining > 0 && !sleepCtx(ctx, remaining) {
 			return // client gone mid-delay
@@ -429,16 +399,12 @@ func parseRequestBody(req *ingressRequest, contentType string, raw []byte) {
 	req.bodyValue = text
 }
 
-// serve runs route match → auth → operation → CRUD/synthesis. Fault
-// evaluation wraps it in handleWire (faults.go).
 func (e *Engine) serve(req *ingressRequest, innerPath string) (*RawResponse, error) {
 	result := req.route
 	if result == nil {
 		result = matchRoute(e.def.Endpoints, req.method, innerPath)
 	}
 	if result.kind == matchNotFound {
-		// Near-miss diagnostics (diagnostics.go): the 404 names the closest
-		// declared operations on a header — the body is unchanged.
 		closest := closestOperations(e.def.Endpoints, req.method, innerPath)
 		e.tracef("route", "no declared route matches %s %s (closest: %s)", req.method, innerPath, strings.Join(closest, "; "))
 		headers := map[string]string{}

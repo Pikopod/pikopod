@@ -14,8 +14,6 @@ import (
 	"github.com/pikopod/pikopod/internal/sandbox"
 )
 
-// Target is the runner's view of the system under test. *sandbox.Engine
-// is the local implementation; RemoteTarget drives a real URL.
 type Target interface {
 	http.Handler
 	VirtualClockMs() int64
@@ -28,6 +26,7 @@ type Target interface {
 	DeliveriesDueBy(eventFilter string, horizonMs int64) ([]sandbox.WebhookDelivery, int64)
 	JournalCount(method, template string) (count int, evicted bool)
 	JournalLast(method, template string) (entry *sandbox.JournalEntry, found, evicted bool)
+	JournalEntries(limit int) (entries []sandbox.JournalEntry, evicted int64)
 }
 
 // remoteAllowedSteps is the step subset that is meaningful against a real
@@ -72,8 +71,6 @@ func NewRemoteTarget(baseURL string, headers map[string]string) (*RemoteTarget, 
 	}, nil
 }
 
-// ServeHTTP forwards to the real endpoint. Measured wall latency rides the same
-// header the runner maps into response.latencyMs, so latency claims are real.
 func (t *RemoteTarget) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	body, _ := io.ReadAll(io.LimitReader(r.Body, 4<<20))
 	req, err := http.NewRequest(r.Method, t.BaseURL+r.URL.RequestURI(), strings.NewReader(string(body)))
@@ -137,6 +134,11 @@ func (t *RemoteTarget) DeliveriesDueBy(string, int64) ([]sandbox.WebhookDelivery
 	return nil, 0
 }
 func (t *RemoteTarget) JournalCount(string, string) (int, bool) { return 0, false }
+
+// A real endpoint keeps no journal; VERIFY_SEQUENCE is refused before a run
+// reaches here (remoteAllowedSteps).
+func (t *RemoteTarget) JournalEntries(int) ([]sandbox.JournalEntry, int64) { return nil, 0 }
+
 func (t *RemoteTarget) JournalLast(string, string) (*sandbox.JournalEntry, bool, bool) {
 	return nil, false, false
 }

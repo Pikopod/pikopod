@@ -1,18 +1,21 @@
-// Request journal: a bounded drop-oldest ring of what the CLIENT did. Once
-// anything is evicted, upper-bound assertions must fail loudly, not pass silently.
 package sandbox
 
 import (
 	"encoding/json"
 	"strings"
 	"sync"
+
+	"github.com/pikopod/pikopod/internal/sanitize"
 )
 
 const maxJournalEntries = 1024
 
-// A larger body is journaled without its content (BodyTruncated) and body
-// assertions against it fail closed.
 const maxJournalBodyBytes = 16 * 1024
+
+const (
+	maxJournalHeaders     = 64
+	maxJournalQueryValues = 64
+)
 
 // JournalEntry is one request the sandbox received, as the client sent it.
 type JournalEntry struct {
@@ -23,8 +26,17 @@ type JournalEntry struct {
 	Status   int    `json:"status"`
 	// Body is the parsed JSON request body (nil when absent/non-JSON/too
 	// large — see BodyTruncated).
-	Body          any  `json:"body,omitempty"`
-	BodyTruncated bool `json:"bodyTruncated,omitempty"`
+	Body             any               `json:"body,omitempty"`
+	BodyTruncated    bool              `json:"bodyTruncated,omitempty"`
+	Headers          map[string]string `json:"headers,omitempty"`
+	HeadersTruncated bool              `json:"headersTruncated,omitempty"`
+	// Query is the parsed query string. Keys are case-sensitive, so nothing
+	// here is lower-cased.
+	Query          map[string][]string `json:"query,omitempty"`
+	QueryTruncated bool                `json:"queryTruncated,omitempty"`
+	// AtMs is the VIRTUAL clock when the request was journaled. Never the wall
+	// clock: transcript parity depends on it.
+	AtMs int64 `json:"atMs"`
 }
 
 type journal struct {
@@ -32,6 +44,71 @@ type journal struct {
 	entries []JournalEntry
 	seq     int64
 	evicted int64
+}
+
+// journalHeaders redacts BEFORE the journal, not on read: a scenario driven by
+// a real client journals Authorization, Cookie and signature headers.
+func (e *Engine) journalHeaders(h map[string]string) (map[string]string, bool) {
+	if len(h) == 0 {
+		return nil, false
+	}
+	if len(h) > maxJournalHeaders {
+		return nil, true
+	}
+	flat := make(map[string]any, len(h))
+	for k, v := range h {
+		flat[k] = v
+	}
+	res := sanitize.Sanitize(flat, e.journalTok, nil, true)
+	obj, _ := res.Sanitized.(map[string]any)
+	out := make(map[string]string, len(obj))
+	for k, v := range obj {
+		if s, ok := v.(string); ok {
+			out[k] = s
+		}
+	}
+	return out, false
+}
+
+// journalQuery redacts query values the same way, keeping keys case-sensitive.
+func (e *Engine) journalQuery(q map[string][]string) (map[string][]string, bool) {
+	if len(q) == 0 {
+		return nil, false
+	}
+	total := 0
+	for _, vs := range q {
+		total += len(vs)
+	}
+	if total > maxJournalQueryValues {
+		return nil, true
+	}
+	// One Sanitize walk rather than a hand-rolled mode switch: DROP must drop,
+	// not become a token that looks like data the client sent.
+	flat := make(map[string]any, len(q))
+	for k, vs := range q {
+		vals := make([]any, len(vs))
+		for i, v := range vs {
+			vals[i] = v
+		}
+		flat[k] = vals
+	}
+	res := sanitize.Sanitize(flat, e.journalTok, nil, false)
+	obj, _ := res.Sanitized.(map[string]any)
+	out := make(map[string][]string, len(obj))
+	for k, v := range obj {
+		vals, ok := v.([]any)
+		if !ok {
+			continue
+		}
+		kept := make([]string, 0, len(vals))
+		for _, item := range vals {
+			if s, ok := item.(string); ok {
+				kept = append(kept, s)
+			}
+		}
+		out[k] = kept
+	}
+	return out, false
 }
 
 // plainJSON normalizes the ingress parser's internal value types into plain Go
@@ -142,4 +219,37 @@ func (e *Engine) ResetJournal() {
 	defer e.journal.mu.Unlock()
 	e.journal.entries = nil
 	e.journal.evicted = 0
+}
+
+// SequenceFields is the subset of a matcher the journal compares against.
+type SequenceFields struct {
+	Method  string
+	Headers map[string]string
+	Query   map[string]string
+}
+
+// MatchesSequence reports whether this entry satisfies every SET field.
+func (entry *JournalEntry) MatchesSequence(f SequenceFields, path string) bool {
+	if !entry.matches(f.Method, path) {
+		return false
+	}
+	for k, want := range f.Headers {
+		if entry.Headers[strings.ToLower(k)] != want {
+			return false
+		}
+	}
+	for k, want := range f.Query {
+		vals := entry.Query[k]
+		hit := false
+		for _, v := range vals {
+			if v == want {
+				hit = true
+				break
+			}
+		}
+		if !hit {
+			return false
+		}
+	}
+	return true
 }
