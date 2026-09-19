@@ -592,7 +592,7 @@ func (s *sandboxServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 func (s *sandboxServer) serveAdmin(w http.ResponseWriter, r *http.Request) {
 	parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
 	// _pikopod / sandboxes / <name> / faults|requests|mode|webhooks/emit
-	admin := len(parts) == 4 && (parts[3] == "faults" || parts[3] == "requests" || parts[3] == "mode")
+	admin := len(parts) == 4 && (parts[3] == "faults" || parts[3] == "requests" || parts[3] == "mode" || parts[3] == "webhooks")
 	emit := len(parts) == 5 && parts[3] == "webhooks" && parts[4] == "emit"
 	if len(parts) < 4 || parts[1] != "sandboxes" || (!admin && !emit) {
 		writeSandboxJSONError(w, http.StatusNotFound, "Not Found")
@@ -615,6 +615,14 @@ func (s *sandboxServer) serveAdmin(w http.ResponseWriter, r *http.Request) {
 	}
 	if parts[3] == "mode" {
 		s.serveMode(w, r, parts[2], engine)
+		return
+	}
+	if parts[3] == "webhooks" {
+		if r.Method != http.MethodGet {
+			writeSandboxJSONError(w, http.StatusMethodNotAllowed, "Method Not Allowed")
+			return
+		}
+		json.NewEncoder(w).Encode(map[string]any{"deliveries": engine.Deliveries(""), "sink": engine.WebhookSinkStats()})
 		return
 	}
 	if parts[3] == "requests" {

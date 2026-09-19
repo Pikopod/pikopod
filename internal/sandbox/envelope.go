@@ -1,6 +1,7 @@
 package sandbox
 
 import (
+	"bytes"
 	"crypto/hmac"
 	"crypto/sha256"
 	"crypto/sha512"
@@ -39,12 +40,8 @@ func (r *envelopeRenderer) render(d *WebhookDelivery) (*wireDelivery, error) {
 		ir.EnvelopeRefNow:        time.UnixMilli(d.VirtualTimeMs).UTC().Format(time.RFC3339),
 		ir.EnvelopeRefUUID:       deterministicUUID(r.seed + ":webhook:uuid:" + d.ID),
 	}
+	wrapped := len(r.spec.Wrap) > 0
 	body := map[string]any{}
-	if len(r.spec.Wrap) == 0 {
-		if err := json.Unmarshal(d.Payload, &body); err != nil {
-			return nil, fmt.Errorf("payload for %s is not an object, so nothing can be added beside it", d.Event)
-		}
-	}
 	for name, tpl := range r.spec.Wrap {
 		if strings.TrimSpace(tpl) == "{{"+ir.EnvelopeRefBody+"}}" {
 			body[name] = json.RawMessage(d.Payload)
@@ -59,6 +56,7 @@ func (r *envelopeRenderer) render(d *WebhookDelivery) (*wireDelivery, error) {
 	for name, tpl := range r.spec.Headers {
 		headers[strings.ToLower(name)] = expand(tpl, vars)
 	}
+	var bodyField, bodyValue string
 	if sig := r.spec.Signature; sig != nil {
 		value, err := r.sign(sig, expand(sig.Content, vars))
 		if err != nil {
@@ -71,14 +69,43 @@ func (r *envelopeRenderer) render(d *WebhookDelivery) (*wireDelivery, error) {
 		if sig.In == "header" {
 			headers[strings.ToLower(sig.Name)] = value
 		} else {
-			body[sig.Name] = value
+			bodyField, bodyValue = sig.Name, value
 		}
+	}
+	if !wrapped {
+		raw, err := injectField(d.Payload, bodyField, bodyValue)
+		if err != nil {
+			return nil, fmt.Errorf("payload for %s: %w", d.Event, err)
+		}
+		return &wireDelivery{Body: raw, Headers: headers}, nil
+	}
+	if bodyField != "" {
+		body[bodyField] = bodyValue
 	}
 	raw, err := json.Marshal(body)
 	if err != nil {
 		return nil, err
 	}
 	return &wireDelivery{Body: raw, Headers: headers}, nil
+}
+
+// injectField adds one string field to a JSON object without re-encoding the
+// rest, so the bytes a signature covers are the bytes the sink receives.
+func injectField(payload []byte, name, value string) ([]byte, error) {
+	trimmed := bytes.TrimSpace(payload)
+	if len(trimmed) < 2 || trimmed[0] != '{' || trimmed[len(trimmed)-1] != '}' {
+		return nil, fmt.Errorf("is not an object, so nothing can be added beside it")
+	}
+	if name == "" {
+		return payload, nil
+	}
+	field, _ := json.Marshal(name)
+	val, _ := json.Marshal(value)
+	head := append(append(append([]byte{'{'}, field...), ':'), val...)
+	if len(bytes.TrimSpace(trimmed[1:len(trimmed)-1])) == 0 {
+		return append(head, '}'), nil
+	}
+	return append(append(head, ','), trimmed[1:]...), nil
 }
 
 func (r *envelopeRenderer) sign(sig *ir.WebhookSignature, content string) (string, error) {

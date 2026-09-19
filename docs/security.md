@@ -134,7 +134,7 @@ something you configured, using your own credentials:
 | A `spec_source` URL | The declared-drift watcher | Nothing — it fetches |
 | A documentation page and what it links to | `import --spec <docs-url>`, rungs 1–3 | Nothing — it fetches. See below. |
 
-Every model row requires **your own key** (`llm.openrouter_key`). With no key
+Every model row requires **your own key** (`llm.api_key`). With no key
 configured, none of those three paths runs at all: `fix` refuses, and a docs-URL
 import that needs rung 4 returns an error telling you so. pikopod is a
 bring-your-own-key tool and never proxies a request through infrastructure we
