@@ -19,14 +19,20 @@ type Candidate struct {
 }
 
 // Binding is one archetype's applicability plus its ranked candidates.
+// InferredOnly holds candidates refused solely because every fact they rest
+// on is extracted, so a caller can offer them for the user to assert.
 type Binding struct {
-	ArchetypeID string      `json:"archetypeId"`
-	Applicable  bool        `json:"applicable"`
-	Reason      string      `json:"reason,omitempty"`
-	Candidates  []Candidate `json:"candidates"`
+	ArchetypeID  string      `json:"archetypeId"`
+	Applicable   bool        `json:"applicable"`
+	Reason       string      `json:"reason,omitempty"`
+	Candidates   []Candidate `json:"candidates"`
+	InferredOnly []Candidate `json:"inferredOnly,omitempty"`
 }
 
-const maxCandidates = 25
+const (
+	maxCandidates   = 25
+	maxInferredOnly = 3
+)
 
 type opFact struct {
 	ref            string
@@ -203,6 +209,12 @@ func opMatches(fact *opFact, req *RoleRequirement, partial map[string]any) bool 
 
 // Bind returns zero or more candidate bindings, ranked deterministically.
 func Bind(a *Archetype, apiDef *ir.ApiDefinition) Binding {
+	return BindWith(a, apiDef, nil)
+}
+
+// BindWith treats each asserted role (from --bind) as an explicit fact: the
+// named operation must exist and fit the role's shape, and it alone fills it.
+func BindWith(a *Archetype, apiDef *ir.ApiDefinition, asserted map[string]string) Binding {
 	ops := buildOpFacts(apiDef)
 	sort.SliceStable(ops, func(i, j int) bool { return ops[i].ref < ops[j].ref })
 	var hooks []hookFact
@@ -212,7 +224,8 @@ func Bind(a *Archetype, apiDef *ir.ApiDefinition) Binding {
 	sort.SliceStable(hooks, func(i, j int) bool { return hooks[i].ref < hooks[j].ref })
 
 	var emptyRole *RoleRequirement
-	var candidates []Candidate
+	var candidates, inferredOnly []Candidate
+	assertErr := ""
 
 	var backtrack func(roleIdx int, partial map[string]any)
 	backtrack = func(roleIdx int, partial map[string]any) {
@@ -222,38 +235,43 @@ func Bind(a *Archetype, apiDef *ir.ApiDefinition) Binding {
 		if roleIdx == len(a.Requires) {
 			usesInferred := false
 			allInferred := len(partial) > 0
-			for _, f := range partial {
+			bindings := map[string]string{}
+			for role, f := range partial {
 				inf := false
 				switch t := f.(type) {
 				case *opFact:
 					inf = t.inferred
+					bindings[role] = t.ref
 				case hookFact:
 					inf = t.inferred
+					bindings[role] = t.ref
 				}
 				if inf {
 					usesInferred = true
-				} else {
+				}
+				if !inf || asserted[role] != "" {
 					allInferred = false
 				}
 			}
 			if allInferred {
-				return // reject a candidate resting SOLELY on inferred facts
-			}
-			bindings := map[string]string{}
-			for role, f := range partial {
-				switch t := f.(type) {
-				case *opFact:
-					bindings[role] = t.ref
-				case hookFact:
-					bindings[role] = t.ref
+				if len(inferredOnly) < maxInferredOnly {
+					inferredOnly = append(inferredOnly, Candidate{Bindings: bindings, UsesInferred: true})
 				}
+				return
 			}
 			candidates = append(candidates, Candidate{Bindings: bindings, UsesInferred: usesInferred})
 			return
 		}
 		req := &a.Requires[roleIdx]
 		var matches []any
-		if req.Bind == "webhookEvent" {
+		if ref, ok := asserted[req.Role]; ok {
+			fact, why := assertedFact(ref, req, partial, ops, hooks)
+			if fact == nil {
+				assertErr = why
+				return
+			}
+			matches = []any{fact}
+		} else if req.Bind == "webhookEvent" {
 			for _, h := range hooks {
 				matches = append(matches, h)
 			}
@@ -292,13 +310,55 @@ func Bind(a *Archetype, apiDef *ir.ApiDefinition) Binding {
 	sort.SliceStable(candidates, func(i, j int) bool { return key(candidates[i]) < key(candidates[j]) })
 
 	if len(candidates) > 0 {
-		return Binding{ArchetypeID: a.ID, Applicable: true, Candidates: candidates}
+		return Binding{ArchetypeID: a.ID, Applicable: true, Candidates: candidates, InferredOnly: inferredOnly}
 	}
 	reason := "no candidate binding rests on explicit facts"
-	if emptyRole != nil {
+	switch {
+	case assertErr != "":
+		reason = assertErr
+	case emptyRole != nil:
 		reason = fmt.Sprintf("no %s matching %s for role '%s'", emptyRole.Bind, matchJSONString(&emptyRole.Match), emptyRole.Role)
+	case len(inferredOnly) > 0:
+		reason = "every candidate rests on extracted facts only; assert a role with --bind"
 	}
-	return Binding{ArchetypeID: a.ID, Applicable: false, Reason: reason, Candidates: []Candidate{}}
+	return Binding{ArchetypeID: a.ID, Applicable: false, Reason: reason, Candidates: []Candidate{}, InferredOnly: inferredOnly}
+}
+
+// assertedFact finds the fact a --bind names and checks it can play the role;
+// the user vouches for what the docs left out, not for the operation's shape.
+func assertedFact(ref string, req *RoleRequirement, partial map[string]any, ops []opFact, hooks []hookFact) (any, string) {
+	if req.Bind == "webhookEvent" {
+		for _, h := range hooks {
+			if h.ref == ref {
+				return h, ""
+			}
+		}
+		return nil, fmt.Sprintf("--bind %s=%s: no declared webhook event %q", req.Role, ref, ref)
+	}
+	var fact *opFact
+	for i := range ops {
+		if ops[i].ref == ref {
+			fact = &ops[i]
+			break
+		}
+	}
+	if fact == nil {
+		return nil, fmt.Sprintf("--bind %s=%s: no operation with that id (operationId or ep_… from `scenario list`)", req.Role, ref)
+	}
+	m := &req.Match
+	if m.Crud != "" && fact.crud != m.Crud {
+		crud := fact.crud
+		if crud == "" {
+			crud = "not a CRUD operation"
+		}
+		return nil, fmt.Sprintf("--bind %s=%s: %s %s is %s; the role needs a %s operation", req.Role, ref, fact.method, fact.collectionPath, crud, m.Crud)
+	}
+	if m.SameResourceAs != "" {
+		if of, ok := partial[m.SameResourceAs].(*opFact); ok && of.collectionPath != fact.collectionPath {
+			return nil, fmt.Sprintf("--bind %s=%s: %s is not on the same resource as %s (%s)", req.Role, ref, fact.collectionPath, m.SameResourceAs, of.collectionPath)
+		}
+	}
+	return fact, ""
 }
 
 // matchJSONString serializes a match byte-stably: only the keys the archetype

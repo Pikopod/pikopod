@@ -39,7 +39,7 @@ func (s *sandboxServer) serveMode(w http.ResponseWriter, r *http.Request, name s
 			writeSandboxJSONError(w, http.StatusNotFound, "unknown sandbox "+name)
 			return
 		}
-		parsed, err := resolve.Resolve(def, req.Name, resolve.Options{
+		parsed, info, err := resolve.ResolveDetailed(def, req.Name, resolve.Options{
 			PackDirs:      packDirs(s.cfg),
 			BindOverrides: req.Binds,
 		})
@@ -47,7 +47,11 @@ func (s *sandboxServer) serveMode(w http.ResponseWriter, r *http.Request, name s
 			writeSandboxJSONError(w, http.StatusBadRequest, err.Error())
 			return
 		}
-		spec, err := mode.Compile(req.Name, "archetype or pack "+req.Name, parsed)
+		source := "archetype or pack " + req.Name
+		if note := info.Note(); note != "" {
+			source += "; " + note
+		}
+		spec, err := mode.Compile(req.Name, source, parsed)
 		if err != nil {
 			writeSandboxJSONError(w, http.StatusBadRequest, err.Error())
 			return

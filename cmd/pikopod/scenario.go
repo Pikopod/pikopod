@@ -106,6 +106,9 @@ func scenarioList(cfg *config.Config, sandboxName string, verbose bool, out io.W
 			}
 		} else {
 			fmt.Fprintf(out, "  ✗ %-26s %s\n      %s\n", b.ID, b.Title, b.Reason)
+			if len(b.Inferred) > 0 {
+				fmt.Fprintf(out, "      assert it: pikopod scenario run %s %s%s\n", sandboxName, b.ID, bindFlags(b.Inferred[0]))
+			}
 		}
 	}
 	packs, fails := scenario.ListPacks(packDirs(cfg)...)
@@ -123,8 +126,16 @@ func scenarioList(cfg *config.Config, sandboxName string, verbose bool, out io.W
 }
 
 // resolveRunnable turns a name into a parsed, grounded definition.
-func resolveRunnable(cfg *config.Config, name string, def *ir.ApiDefinition, bindOverrides map[string]string) (*scenario.ScenarioDefinition, error) {
-	return resolve.Resolve(def, name, resolve.Options{PackDirs: packDirs(cfg), BindOverrides: bindOverrides})
+func resolveRunnable(cfg *config.Config, name string, def *ir.ApiDefinition, bindOverrides map[string]string) (*scenario.ScenarioDefinition, *resolve.Info, error) {
+	return resolve.ResolveDetailed(def, name, resolve.Options{PackDirs: packDirs(cfg), BindOverrides: bindOverrides})
+}
+
+func bindFlags(c resolve.Candidate) string {
+	var b strings.Builder
+	for _, r := range c.Roles {
+		b.WriteString(" --bind " + r.Role + "=" + r.OperationID)
+	}
+	return b.String()
 }
 
 // packFor finds a saved pack by name (nil for archetypes/paths).
@@ -218,9 +229,12 @@ func scenarioRun(cmd *cobra.Command, args []string) error {
 
 	failed, errored := 0, 0
 	for _, name := range names {
-		parsed, err := resolveRunnable(cfg, name, def, bindOverrides)
+		parsed, info, err := resolveRunnable(cfg, name, def, bindOverrides)
 		if err != nil {
 			return err // config-class problem: exit 2, never conflated with a failing scenario
+		}
+		if note := info.Note(); note != "" {
+			fmt.Fprintf(out, "note: %s %s\n", name, note)
 		}
 		inputs, err := coerceInputs(parsed, inputKVs)
 		if err != nil {
