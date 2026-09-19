@@ -243,6 +243,11 @@ func sandboxAdd(cfg *config.Config, name, specSource, seed, webhookURL, upstream
 		} else {
 			fmt.Fprintf(out, "webhooks: %d declared event(s) — pass --webhook-url to receive deliveries over HTTP\n", len(def.Webhooks))
 		}
+		if _, _, _, untriggered := webhookCounts(def); untriggered > 0 {
+			fmt.Fprintf(out, "  ⚠ %d declared event(s) have no trigger and are not emit-only, so they will never fire.\n"+
+				"    add x-pikopod-trigger {method, path} to bind an event to the call that causes it,\n"+
+				"    or x-pikopod-emit-only: true for an event no API call causes (fire it with `pikopod webhook emit`)\n", untriggered)
+		}
 	}
 	fmt.Fprintf(out, "serve it with `pikopod up` → http://%s:%d/%s/...\n", cfg.Listen, cfg.SandboxPort, name)
 	fmt.Fprintf(out, "test credential (send it the way the spec's auth scheme expects, e.g. the Authorization header):\n  %s\n", sandbox.IssuedCredential(entry.Seed))
@@ -336,8 +341,33 @@ func sandboxList(cfg *config.Config, out io.Writer) error {
 			marking = "  origin=" + e.Origin
 		}
 		fmt.Fprintf(out, "%-20s %s  mode=%s seed=%s  route=/%s/  ir=%s%s\n  credential: %s\n", e.Name, e.ID, e.Mode, e.Seed, e.Name, e.IRFile, marking, sandbox.IssuedCredential(e.Seed))
+		if _, def, err := loadSandboxDef(cfg, e.Name); err == nil && len(def.Webhooks) > 0 {
+			declared, triggered, emitOnly, untriggered := webhookCounts(def)
+			line := fmt.Sprintf("  webhooks: %d declared, %d triggered, %d emit-only", declared, triggered, emitOnly)
+			if untriggered > 0 {
+				line += fmt.Sprintf(", %d never fire", untriggered)
+			}
+			fmt.Fprintln(out, line)
+		}
 	}
 	return nil
+}
+
+// webhookCounts splits declared events into the ones that can fire and the
+// ones that cannot, which import and list both report.
+func webhookCounts(def *ir.ApiDefinition) (declared, triggered, emitOnly, untriggered int) {
+	for i := range def.Webhooks {
+		declared++
+		switch {
+		case def.Webhooks[i].Trigger != nil:
+			triggered++
+		case def.Webhooks[i].EmitOnly:
+			emitOnly++
+		default:
+			untriggered++
+		}
+	}
+	return
 }
 
 func sandboxReset(cfg *config.Config, name string, out io.Writer) error {
@@ -545,9 +575,10 @@ func (s *sandboxServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // engine, so chaos applies to the traffic your app is sending RIGHT NOW.
 func (s *sandboxServer) serveAdmin(w http.ResponseWriter, r *http.Request) {
 	parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
-	// _pikopod / sandboxes / <name> / faults|requests|mode
-	if len(parts) != 4 || parts[1] != "sandboxes" ||
-		(parts[3] != "faults" && parts[3] != "requests" && parts[3] != "mode") {
+	// _pikopod / sandboxes / <name> / faults|requests|mode|webhooks/emit
+	admin := len(parts) == 4 && (parts[3] == "faults" || parts[3] == "requests" || parts[3] == "mode")
+	emit := len(parts) == 5 && parts[3] == "webhooks" && parts[4] == "emit"
+	if len(parts) < 4 || parts[1] != "sandboxes" || (!admin && !emit) {
 		writeSandboxJSONError(w, http.StatusNotFound, "Not Found")
 		return
 	}
@@ -562,6 +593,10 @@ func (s *sandboxServer) serveAdmin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("content-type", "application/json; charset=utf-8")
+	if emit {
+		s.serveWebhookEmit(w, r, engine)
+		return
+	}
 	if parts[3] == "mode" {
 		s.serveMode(w, r, parts[2], engine)
 		return

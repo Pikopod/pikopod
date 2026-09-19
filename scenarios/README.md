@@ -162,6 +162,7 @@ type-specific lives under `config`:
 | `CLEAR_FAULT` | `method`, `path` |
 | `VERIFY_REQUESTS` | `path`, `method` |
 | `VERIFY_SEQUENCE` | `requests` (ordered matchers) |
+| `EMIT_WEBHOOK` | `event`, `data` |
 | `ASSERT_STATE` | `resourceType`, `resourceId` |
 | `SEED_STATE` | `resources` |
 | `SNAPSHOT` | `label` |
@@ -204,6 +205,23 @@ rather than quietly not matching.
 Journaled headers and query values are redacted before storage, so an
 identifier arrives as a deterministic, collision-distinct token. That is what
 makes "both retries used the SAME key" provable without the key being readable.
+
+### EMIT_WEBHOOK
+
+Some events follow no API call: money landing in a collection account, a
+chargeback, a KYC decision. Declare them in the spec with
+`x-pikopod-emit-only: true` and fire them on demand, from a scenario, from the
+control plane (`POST /_pikopod/sandboxes/<name>/webhooks/emit`), or by hand:
+
+```bash
+pikopod webhook emit examplepay transaction.created --data @transaction.json
+```
+
+Only **declared** events can be emitted, and the sandbox never emits an event
+the spec does not declare. An invented event is indistinguishable at your
+handler from a real delivery, which makes it worse than silence. `data` is
+overlaid onto the documented payload shape, so the values you pass reach a
+nested payload rather than being replaced by synthesis.
 
 ### Assertions
 

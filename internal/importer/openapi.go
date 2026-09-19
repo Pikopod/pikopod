@@ -531,6 +531,7 @@ func normalizeWebhooks(doc *OrdMap, resolver *refResolver, limits ParseLimits) (
 				Description:   optionalString(op.GetOr("description"), ptr+"/description"),
 				SourcePointer: ptr,
 				Trigger:       webhookTriggerOf(pathItem, op),
+				EmitOnly:      webhookEmitOnlyOf(pathItem, op),
 			})
 		}
 	}
@@ -538,8 +539,15 @@ func normalizeWebhooks(doc *OrdMap, resolver *refResolver, limits ParseLimits) (
 	return out, nil
 }
 
-// webhookTriggerOf reads the x-pikopod-trigger extension ({method, path}),
-// emitted by the docs extractor when the docs name the call firing the event.
+func webhookEmitOnlyOf(pathItem, op *OrdMap) bool {
+	for _, holder := range []*OrdMap{op, pathItem} {
+		if v, ok := holder.GetOr("x-pikopod-emit-only").(bool); ok && v {
+			return true
+		}
+	}
+	return false
+}
+
 func webhookTriggerOf(pathItem, op *OrdMap) *ir.WebhookTrigger {
 	for _, holder := range []*OrdMap{op, pathItem} {
 		ext, ok := holder.GetOr("x-pikopod-trigger").(*OrdMap)
