@@ -3,6 +3,7 @@
 package contract
 
 import (
+	"sort"
 	"strings"
 	"time"
 
@@ -147,22 +148,54 @@ func endpointKeyOf(method, template string) string {
 	return strings.ToUpper(method) + "|" + template
 }
 
-// templateCanon maps traffic templates onto the spec's spelling: equal segment
-// count, statics must match literally, spec params accept anything.
+// templateCanon maps traffic templates onto the spec's spelling, scanning
+// most-specific-first so a literal segment beats a parameter regardless of order.
 type templateCanon struct {
 	byMethod map[string][][]string // METHOD → list of spec-template segments
 	joined   map[string][]string   // METHOD → joined templates (parallel)
 }
 
 func newTemplateCanon(def *ir.ApiDefinition) *templateCanon {
-	c := &templateCanon{byMethod: map[string][][]string{}, joined: map[string][]string{}}
+	type candidate struct {
+		segs   []string
+		joined string
+	}
+	grouped := map[string][]candidate{}
 	for i := range def.Endpoints {
 		e := &def.Endpoints[i]
 		m := strings.ToUpper(e.Method.Value)
-		c.byMethod[m] = append(c.byMethod[m], strings.Split(strings.Trim(e.PathTemplate.Value, "/"), "/"))
-		c.joined[m] = append(c.joined[m], e.PathTemplate.Value)
+		grouped[m] = append(grouped[m], candidate{
+			segs:   strings.Split(strings.Trim(e.PathTemplate.Value, "/"), "/"),
+			joined: e.PathTemplate.Value,
+		})
+	}
+	c := &templateCanon{byMethod: map[string][][]string{}, joined: map[string][]string{}}
+	for m, cands := range grouped {
+		// More literal segments first; the joined string breaks ties totally,
+		// so two specs listing the same endpoints in any order agree.
+		sort.SliceStable(cands, func(i, j int) bool {
+			li, lj := literalSegments(cands[i].segs), literalSegments(cands[j].segs)
+			if li != lj {
+				return li > lj
+			}
+			return cands[i].joined < cands[j].joined
+		})
+		for _, cd := range cands {
+			c.byMethod[m] = append(c.byMethod[m], cd.segs)
+			c.joined[m] = append(c.joined[m], cd.joined)
+		}
 	}
 	return c
+}
+
+func literalSegments(segs []string) int {
+	n := 0
+	for _, seg := range segs {
+		if !strings.Contains(seg, "{") {
+			n++
+		}
+	}
+	return n
 }
 
 func (c *templateCanon) canonical(method, trafficTemplate string) string {

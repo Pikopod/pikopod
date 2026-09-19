@@ -178,6 +178,9 @@ func normalizeAuthSchemes(doc *OrdMap) []ir.AuthScheme {
 		var parameterName *ir.Prov[string]
 		if kind == "apiKey" {
 			parameterName = optionalString(s.GetOr("name"), ptr+"/name")
+			if parameterName != nil && location.Value == "header" {
+				parameterName.Value = canonicalHeaderName(parameterName.Value)
+			}
 		}
 		out = append(out, ir.AuthScheme{
 			ID:            ir.AuthSchemeID(name),
@@ -326,6 +329,9 @@ func normalizeParameters(rawParams []any, epID, opPointer string, resolver *refR
 		if name == "" || location == "" {
 			continue
 		}
+		if location == "header" {
+			name = canonicalHeaderName(name)
+		}
 		ptr := fmt.Sprintf("%s/parameters/%d", opPointer, i)
 		paramID := ir.ParameterID(epID, location, name)
 
@@ -369,6 +375,10 @@ func normalizeParameters(rawParams []any, epID, opPointer string, resolver *refR
 	return out, nil
 }
 
+// Header names are case-insensitive, so the IR keeps one spelling and a case
+// change in the spec is not a diff.
+func canonicalHeaderName(name string) string { return strings.ToLower(name) }
+
 func normalizeLocation(value any) string {
 	if s, ok := value.(string); ok {
 		switch s {
@@ -386,18 +396,21 @@ func normalizeContent(contentRaw any, parentID, pointer string, resolver *refRes
 	}
 	out := []ir.MediaType{}
 	for _, mediaType := range content.Keys() {
+		// RFC 9110: media-type keys are case-insensitive. The pointer keeps the
+		// raw key so it still resolves against the real document.
+		lower := strings.ToLower(mediaType)
 		var schemaRaw any = NewOrdMap()
 		if mt, ok := content.GetOr(mediaType).(*OrdMap); ok {
 			if s := mt.GetOr("schema"); s != nil {
 				schemaRaw = s
 			}
 		}
-		schema, err := normalizeSchema(schemaRaw, parentID, "content:"+mediaType,
+		schema, err := normalizeSchema(schemaRaw, parentID, "content:"+lower,
 			pointer+"/content/"+jpescape(mediaType)+"/schema", resolver, limits, 0)
 		if err != nil {
 			return nil, err
 		}
-		out = append(out, ir.MediaType{MediaType: mediaType, Schema: schema})
+		out = append(out, ir.MediaType{MediaType: lower, Schema: schema})
 	}
 	sort.SliceStable(out, func(a, b int) bool { return ir.JSLess(out[a].MediaType, out[b].MediaType) })
 	return out, nil

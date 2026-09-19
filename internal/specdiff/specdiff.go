@@ -102,10 +102,10 @@ type Finding struct {
 	Detail   string   `json:"detail"`
 }
 
-// Fingerprint is stable across runs and re-fetches: same divergence → same
-// value. NUL-joined so arg content cannot shift component boundaries.
+// Fingerprint hashes the CANONICAL template, so a path-parameter rename does
+// not re-fire acknowledged findings. NUL-joined so args cannot shift boundaries.
 func (f Finding) Fingerprint() string {
-	parts := append([]string{f.ID, f.Method, f.Template}, f.Args...)
+	parts := append([]string{f.ID, f.Method, ir.CanonicalPathTemplate(f.Template)}, f.Args...)
 	h := sha256.Sum256([]byte(strings.Join(parts, "\x00")))
 	return "fp_" + hex.EncodeToString(h[:])[:12]
 }
