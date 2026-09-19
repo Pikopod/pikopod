@@ -24,8 +24,10 @@ type Fetcher func(url string) ([]byte, error)
 // Result is the spec the ladder produced.
 type Result struct {
 	Spec   []byte
-	Method string // "postman-documenter" | "spec-link" | "readme-embedded" | "llm-extracted"
+	Method string // "postman-documenter" | "spec-link" | "readme-embedded" | "well-known-spec" | "llm-extracted"
 	Source string // the URL the spec ultimately came from
+	// Skipped lists indexed pages the extraction budget could not hold.
+	Skipped []string
 }
 
 // budget bounds every crawl this package performs.
@@ -103,6 +105,11 @@ func FromDocsURL(pageURL string, html []byte, fetch Fetcher, llm *nl.Client) (*R
 		break // one index page is enough to have tried
 	}
 
+	// Rung 3b: the platform's own machine-readable export at a well-known path.
+	if res := wellKnownSpec(pageURL, fetch); res != nil {
+		return res, nil
+	}
+
 	// Rung 4: Tier C — the model writes the spec from prose.
 	if llm == nil {
 		return nil, errfmt.New(
@@ -116,11 +123,15 @@ func FromDocsURL(pageURL string, html []byte, fetch Fetcher, llm *nl.Client) (*R
 
 // llmExtract builds a bounded corpus and asks the model for an OpenAPI doc.
 // Prefers the site's llms.txt index, else same-host links with HTML stripped.
+type page struct {
+	URL  string `json:"url"`
+	Text string `json:"text"`
+}
+
+func (p page) size() int    { return len(p.Text) }
+func (p page) name() string { return p.URL }
+
 func llmExtract(pageURL string, html []byte, fetch Fetcher, llm *nl.Client) (*Result, error) {
-	type page struct {
-		URL  string `json:"url"`
-		Text string `json:"text"`
-	}
 	var corpus []page
 	size := 0
 	add := func(url, text string) {
@@ -137,15 +148,25 @@ func llmExtract(pageURL string, html []byte, fetch Fetcher, llm *nl.Client) (*Re
 		size += len(text)
 	}
 
-	for _, link := range llmsTxtPages(pageURL, fetch) {
-		raw, err := fetch(link)
-		if err != nil {
-			continue
+	var skipped []string
+	if groups := llmsTxtGroups(pageURL, fetch); len(groups) > 0 {
+		var fetched [][]page
+		for _, group := range groups {
+			var pages []page
+			for _, link := range group {
+				raw, err := fetch(link)
+				if err != nil || len(strings.TrimSpace(string(raw))) == 0 {
+					continue
+				}
+				pages = append(pages, page{URL: link, Text: string(raw)}) // already markdown/plain
+			}
+			fetched = append(fetched, pages)
 		}
-		add(link, string(raw)) // already markdown/plain — no stripping
-		if size >= maxCorpusBytes {
-			break
+		chosen, left := planCorpus(fetched, maxCorpusBytes, corpusShares)
+		for _, p := range chosen {
+			add(p.URL, p.Text)
 		}
+		skipped = left
 	}
 	if len(corpus) == 0 {
 		add(pageURL, htmlToText(html))
@@ -216,7 +237,7 @@ func llmExtract(pageURL string, html []byte, fetch Fetcher, llm *nl.Client) (*Re
 	if err != nil {
 		return nil, err
 	}
-	return &Result{Spec: spec, Method: "llm-extracted", Source: fmt.Sprintf("%s (+%d pages, %d/%d batches)", pageURL, len(corpus)-1, extracted, extracted+failed)}, nil
+	return &Result{Spec: spec, Method: "llm-extracted", Source: fmt.Sprintf("%s (+%d pages, %d/%d batches)", pageURL, len(corpus)-1, extracted, extracted+failed), Skipped: skipped}, nil
 }
 
 // batchPages splits the corpus into byte-bounded batches, never splitting a
@@ -273,9 +294,14 @@ func mergeComponents(dst, src map[string]any) {
 	}
 }
 
-// llmsTxtPages reads <origin>/llms.txt for indexed page URLs, reference and
-// webhook pages first (they carry the endpoint and event truth), bounded.
-func llmsTxtPages(pageURL string, fetch Fetcher) []string {
+// corpusShares reserves the extraction budget per page group: webhook pages
+// first (small, and the only source of event facts), then reference, then
+// guides. Unused reserve flows on in that order.
+var corpusShares = []float64{0.3, 0.5, 0.2}
+
+// llmsTxtGroups reads <origin>/llms.txt and buckets its same-host pages as
+// [webhook, reference, rest], each in index order, bounded overall.
+func llmsTxtGroups(pageURL string, fetch Fetcher) [][]string {
 	u, err := url.Parse(pageURL)
 	if err != nil {
 		return nil
@@ -285,26 +311,131 @@ func llmsTxtPages(pageURL string, fetch Fetcher) []string {
 		return nil
 	}
 	var apiPages, hookPages, rest []string
+	total := 0
 	for _, m := range llmsLinkRe.FindAllStringSubmatch(string(raw), -1) {
 		link := m[1]
 		lu, err := url.Parse(link)
 		if err != nil || lu.Host != u.Host {
 			continue
 		}
+		if total >= 3*maxHopPages {
+			break // markdown pages are cheap; still bounded
+		}
+		total++
 		switch {
+		case strings.Contains(link, "webhook") || strings.Contains(link, "event-types") || strings.Contains(link, "/events"):
+			hookPages = append(hookPages, link)
 		case strings.Contains(link, "api-reference") || strings.Contains(link, "/reference"):
 			apiPages = append(apiPages, link)
-		case strings.Contains(link, "webhook") || strings.Contains(link, "event-types") || strings.Contains(link, "events"):
-			hookPages = append(hookPages, link)
 		default:
 			rest = append(rest, link)
 		}
 	}
-	out := append(append(apiPages, hookPages...), rest...)
-	if len(out) > 3*maxHopPages {
-		out = out[:3*maxHopPages] // markdown pages are cheap; still bounded
+	if total == 0 {
+		return nil
 	}
-	return out
+	return [][]string{hookPages, apiPages, rest}
+}
+
+// planCorpus fits page groups into a byte budget: each group first fills its
+// reserved share in order, then leftover budget is spent in group order.
+// Pages that do not fit are skipped whole and reported, never truncated.
+func planCorpus[P interface {
+	size() int
+	name() string
+}](groups [][]P, budget int, shares []float64) (chosen []P, skipped []string) {
+	type slot struct {
+		p     P
+		group int
+	}
+	var order []slot
+	taken := map[int]map[int]bool{}
+	used := 0
+	for g := range groups {
+		taken[g] = map[int]bool{}
+		reserve := budget
+		if g < len(shares) {
+			reserve = int(float64(budget) * shares[g])
+		}
+		spent := 0
+		for i, p := range groups[g] {
+			if spent+p.size() > reserve || used+p.size() > budget {
+				break
+			}
+			taken[g][i] = true
+			order = append(order, slot{p, g})
+			spent += p.size()
+			used += p.size()
+		}
+	}
+	for g := range groups {
+		for i, p := range groups[g] {
+			if taken[g][i] {
+				continue
+			}
+			if used+p.size() <= budget {
+				taken[g][i] = true
+				order = append(order, slot{p, g})
+				used += p.size()
+			}
+		}
+	}
+	for _, s := range order {
+		chosen = append(chosen, s.p)
+	}
+	for g := range groups {
+		for i, p := range groups[g] {
+			if !taken[g][i] {
+				skipped = append(skipped, p.name())
+			}
+		}
+	}
+	return chosen, skipped
+}
+
+// wellKnownPaths are where documentation platforms publish the spec they
+// render (Mintlify, Redocly, Docusaurus, Swagger UI, springdoc).
+var wellKnownPaths = []string{
+	"/openapi.json", "/openapi.yaml", "/openapi.yml", "/swagger.json", "/swagger.yaml",
+	"/api-reference/openapi.json", "/api/openapi.json", "/v3/api-docs", "/api-docs", "/.well-known/openapi.json",
+}
+
+var llmsSpecLinkRe = regexp.MustCompile(`\((https?://[^)\s]*(?:openapi|swagger)[^)\s]*\.(?:json|ya?ml))\)`)
+
+// wellKnownSpec probes the site's well-known spec paths and its llms.txt for
+// a spec link; bounded to a dozen fetches and never trusts HTML.
+func wellKnownSpec(pageURL string, fetch Fetcher) *Result {
+	u, err := url.Parse(pageURL)
+	if err != nil {
+		return nil
+	}
+	origin := u.Scheme + "://" + u.Host
+	var candidates []string
+	if raw, err := fetch(origin + "/llms.txt"); err == nil && !looksLikeHTML(raw) {
+		for _, m := range llmsSpecLinkRe.FindAllStringSubmatch(string(raw), -1) {
+			candidates = append(candidates, m[1])
+		}
+	}
+	for _, p := range wellKnownPaths {
+		candidates = append(candidates, origin+p)
+	}
+	for i, link := range candidates {
+		if i >= 12 {
+			break
+		}
+		raw, err := fetch(link)
+		if err != nil || len(raw) == 0 || looksLikeHTML(raw) || !looksLikeSpec(raw) {
+			continue
+		}
+		return &Result{Spec: raw, Method: "well-known-spec", Source: link}
+	}
+	return nil
+}
+
+var specMarkerRe = regexp.MustCompile(`(?m)(^\s*(openapi|swagger)\s*:|"(openapi|swagger)"\s*:)`)
+
+func looksLikeSpec(raw []byte) bool {
+	return specMarkerRe.Match(raw[:min(len(raw), 64<<10)])
 }
 
 var llmsLinkRe = regexp.MustCompile(`\]\((https?://[^)\s]+)\)`)

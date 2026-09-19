@@ -287,6 +287,26 @@ Templates are a closed set: `{{body}}`, `{{json_string body}}`, `{{event}}`,
 the sandbox's virtual clock and `{{uuid}}` derives from the seed, so a run
 replays byte for byte. Anything else is refused at import, naming the field.
 
+The same file binds events to the calls that cause them, which a docs import
+cannot know, and marks the ones no call causes:
+
+```yaml
+events:
+  payment_intent.completed: { trigger: { method: POST, path: /intent-actions } }
+  payment_intent.failed:    { emitOnly: true }
+```
+
+Only declared events and declared operations are accepted; anything else is
+refused by name. Attach or change the file on an existing sandbox without
+re-importing (and without the model, for a docs import):
+
+```bash
+pikopod sandbox webhooks examplepay examplepay-webhooks.yaml
+```
+
+A later `import --update` keeps these bindings for every event it declares
+again.
+
 The key is never stored: `pikopod up` reads it from the named variable and
 refuses to start without it when a sink is configured. The signing secret
 printed at import and the `x-pikopod-webhook-*` headers belong to the default

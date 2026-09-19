@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -128,9 +129,64 @@ func loadSpec(cfg *config.Config, source string, out io.Writer) ([]byte, string,
 		if res.Method == "llm-extracted" {
 			fmt.Fprintln(out, "note: this contract was EXTRACTED BY YOUR LLM from prose — it imports as DRAFT with LLM_EXTRACTED provenance; `pikopod sandbox list` shows the marking")
 		}
+		if len(res.Skipped) > 0 {
+			fmt.Fprintf(out, "  ⚠ %d indexed page(s) did not fit the extraction budget, so the spec is partial:\n", len(res.Skipped))
+			for _, p := range res.Skipped {
+				fmt.Fprintf(out, "    %s\n", p)
+			}
+		}
 		return res.Spec, res.Method, nil
 	}
+	if emittedSpecRe.Match(raw[:min(len(raw), 4096)]) {
+		return raw, "llm-extracted", nil
+	}
 	return raw, "spec", nil
+}
+
+// emittedSpecRe marks a spec `--emit-spec` wrote; it re-imports as DRAFT until
+// the reviewer deletes the marker.
+var emittedSpecRe = regexp.MustCompile(`"?x-pikopod-origin"?\s*:\s*"?llm-extracted`)
+
+func normalizeByOrigin(raw []byte, origin string) (*ir.ApiDefinition, error) {
+	if origin == "llm-extracted" {
+		return importer.NormalizeLLMExtracted(raw)
+	}
+	return importer.NormalizeOpenAPI(raw)
+}
+
+// emitSpec writes the spec the ladder produced so it can be read, corrected
+// and committed; an extracted one carries the origin marker.
+func emitSpec(path string, raw []byte, origin string, out io.Writer) error {
+	body := raw
+	if origin == "llm-extracted" {
+		var doc map[string]any
+		if json.Unmarshal(raw, &doc) == nil {
+			doc["x-pikopod-origin"] = "llm-extracted"
+			if pretty, err := json.MarshalIndent(doc, "", "  "); err == nil {
+				body = append(pretty, '\n')
+			}
+		}
+	}
+	if err := os.WriteFile(path, body, 0o644); err != nil {
+		return errfmt.Newf("cannot write --emit-spec file", "check the path", "docs/config-reference.md", "%v", err)
+	}
+	fmt.Fprintf(out, "spec written to %s\n", path)
+	if origin == "llm-extracted" {
+		fmt.Fprintf(out, "  review it, add x-pikopod-trigger to each webhook event, commit it, and import from the file next time (no model needed):\n"+
+			"    pikopod import <name> --update --spec %s\n"+
+			"  it re-imports as DRAFT until you delete the x-pikopod-origin line, which says the facts are now yours\n", path)
+	}
+	return nil
+}
+
+type addOptions struct {
+	SpecSource         string
+	Seed               string
+	WebhookURL         string
+	UpstreamLink       string
+	RecordingsFallback bool
+	EmitSpec           string
+	Webhooks           string
 }
 
 func loadSpecOnce(source string) ([]byte, error) {
@@ -169,6 +225,11 @@ func loadSpecOnce(source string) ([]byte, error) {
 
 // sandboxAdd imports the spec, persists its IR, and registers the sandbox.
 func sandboxAdd(cfg *config.Config, name, specSource, seed, webhookURL, upstreamLink string, recordingsFallback bool, out io.Writer) error {
+	return sandboxAddOpts(cfg, name, addOptions{SpecSource: specSource, Seed: seed, WebhookURL: webhookURL, UpstreamLink: upstreamLink, RecordingsFallback: recordingsFallback}, out)
+}
+
+func sandboxAddOpts(cfg *config.Config, name string, o addOptions, out io.Writer) error {
+	specSource, seed, webhookURL, upstreamLink, recordingsFallback := o.SpecSource, o.Seed, o.WebhookURL, o.UpstreamLink, o.RecordingsFallback
 	if strings.ContainsAny(name, "/\\ \t") || name == "" {
 		return errfmt.New("invalid sandbox name", fmt.Sprintf("%q cannot contain slashes or whitespace", name), "pick a short slug like `payments` — it becomes the route /<name>/ on the sandbox server", "")
 	}
@@ -186,12 +247,12 @@ func sandboxAdd(cfg *config.Config, name, specSource, seed, webhookURL, upstream
 	if err != nil {
 		return err
 	}
-	var def *ir.ApiDefinition
-	if origin == "llm-extracted" {
-		def, err = importer.NormalizeLLMExtracted(raw)
-	} else {
-		def, err = importer.NormalizeOpenAPI(raw)
+	if o.EmitSpec != "" {
+		if err := emitSpec(o.EmitSpec, raw, origin, out); err != nil {
+			return err
+		}
 	}
+	def, err := normalizeByOrigin(raw, origin)
 	if err != nil {
 		return err
 	}
@@ -252,6 +313,9 @@ func sandboxAdd(cfg *config.Config, name, specSource, seed, webhookURL, upstream
 	}
 	fmt.Fprintf(out, "serve it with `pikopod up` → http://%s:%d/%s/...\n", cfg.Listen, cfg.SandboxPort, name)
 	fmt.Fprintf(out, "test credential (send it the way the spec's auth scheme expects, e.g. the Authorization header):\n  %s\n", sandbox.IssuedCredential(entry.Seed))
+	if o.Webhooks != "" {
+		return applyWebhookSidecar(cfg, name, o.Webhooks, out)
+	}
 	return nil
 }
 
@@ -276,12 +340,7 @@ func sandboxUpdate(cfg *config.Config, name, specSource string, out io.Writer) e
 	if err != nil {
 		return err
 	}
-	var def *ir.ApiDefinition
-	if origin == "llm-extracted" {
-		def, err = importer.NormalizeLLMExtracted(raw)
-	} else {
-		def, err = importer.NormalizeOpenAPI(raw)
-	}
+	def, err := normalizeByOrigin(raw, origin)
 	if err != nil {
 		return err
 	}
@@ -294,6 +353,7 @@ func sandboxUpdate(cfg *config.Config, name, specSource string, out io.Writer) e
 			if def.WebhookEnvelope == nil {
 				def.WebhookEnvelope = oldDef.WebhookEnvelope
 			}
+			carryEventBindings(def, &oldDef)
 			findings := specdiff.Diff(&oldDef, def)
 			if len(findings) > 0 {
 				fmt.Fprintf(out, "accepting %d declared change(s):\n", len(findings))
@@ -705,25 +765,31 @@ func newSandboxAddCmd() *cobra.Command {
 			if spec == "" {
 				return errfmt.New("no spec given", "sandbox add needs the provider's OpenAPI document", "pass --spec <file-or-url>", "")
 			}
-			seed, _ := cmd.Flags().GetString("seed")
-			webhookURL, _ := cmd.Flags().GetString("webhook-url")
-			upstreamLink, _ := cmd.Flags().GetString("upstream")
-			recFallback, _ := cmd.Flags().GetBool("recordings-fallback")
-			if err := sandboxAdd(cfg, args[0], spec, seed, webhookURL, upstreamLink, recFallback, cmd.OutOrStdout()); err != nil {
-				return err
-			}
-			if sidecar, _ := cmd.Flags().GetString("webhooks"); sidecar != "" {
-				return applyWebhookSidecar(cfg, args[0], sidecar, cmd.OutOrStdout())
-			}
-			return nil
+			return sandboxAddOpts(cfg, args[0], addOptionsFrom(cmd, spec), cmd.OutOrStdout())
 		}}
-	c.Flags().String("spec", "", "spec source (local file or http(s) URL): OpenAPI 3.x, Swagger 2.0, Postman collection, or GraphQL schema")
+	addImportFlags(c)
+	return c
+}
+
+func addImportFlags(c *cobra.Command) {
+	c.Flags().String("spec", "", "spec source (local file or http(s) URL): OpenAPI 3.x, Swagger 2.0, Postman collection, GraphQL schema, or a documentation page")
 	c.Flags().String("seed", "", "run seed (default: random; pin one for reproducible transcripts)")
 	c.Flags().String("webhook-url", "", "optional HTTP(S) sink: webhook deliveries POST here (signed)")
-	c.Flags().String("webhooks", "", "YAML/JSON file describing how the provider wraps and signs deliveries (for specs without x-pikopod-webhook-envelope)")
+	c.Flags().String("webhooks", "", "YAML/JSON file describing how the provider wraps and signs deliveries, and which calls fire which events")
+	c.Flags().String("emit-spec", "", "write the spec the import used (extracted or fetched) to this path so it can be reviewed, corrected and committed")
 	c.Flags().String("upstream", "", "link to a drift-agent upstream so its traffic refines this contract (auto when names match)")
 	c.Flags().Bool("recordings-fallback", false, "serve the linked upstream's recordings for requests neither the spec nor admitted traffic can answer (final tier; X-Pikopod-Replay-Tier)")
-	return c
+}
+
+func addOptionsFrom(cmd *cobra.Command, spec string) addOptions {
+	o := addOptions{SpecSource: spec}
+	o.Seed, _ = cmd.Flags().GetString("seed")
+	o.WebhookURL, _ = cmd.Flags().GetString("webhook-url")
+	o.UpstreamLink, _ = cmd.Flags().GetString("upstream")
+	o.RecordingsFallback, _ = cmd.Flags().GetBool("recordings-fallback")
+	o.EmitSpec, _ = cmd.Flags().GetString("emit-spec")
+	o.Webhooks, _ = cmd.Flags().GetString("webhooks")
+	return o
 }
 
 func newSandboxListCmd() *cobra.Command {
