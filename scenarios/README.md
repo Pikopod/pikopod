@@ -161,6 +161,7 @@ type-specific lives under `config`:
 | `INJECT_FAULT` | `kind`, `method`, `path`, `status`, `delayMs`, `probability`, `target`, `wallclock`, `times`, `per`, `delayDistribution` |
 | `CLEAR_FAULT` | `method`, `path` |
 | `VERIFY_REQUESTS` | `path`, `method` |
+| `VERIFY_SEQUENCE` | `requests` (ordered matchers) |
 | `ASSERT_STATE` | `resourceType`, `resourceId` |
 | `SEED_STATE` | `resources` |
 | `SNAPSHOT` | `label` |
@@ -175,6 +176,34 @@ method and path. `rate_limit` is sugar: the engine arms it as a 429 `error`.
 `times: N` fires the fault for the first N matching requests and then recovers
 deterministically; `per` scopes that window to `global`, `idempotency-key`, or
 `resource`.
+
+### VERIFY_SEQUENCE
+
+`VERIFY_REQUESTS` answers "how many, and what was the last one". `VERIFY_SEQUENCE`
+answers "in what order, and how far apart" — the retry-storm and double-charge
+questions.
+
+```yaml
+- key: retried-with-one-key
+  type: VERIFY_SEQUENCE
+  config:
+    requests:
+      - { method: POST, path: /charges, headers: { idempotency-key: "<tokenized>" } }
+      - { method: POST, path: /charges, minGapMs: 1000 }
+```
+
+It is an ordered **subsequence**: unrelated requests between matches are fine,
+order is not. `minGapMs`/`maxGapMs` measure VIRTUAL time since the previous
+match, so a backoff claim is reproducible. The matchers are the assertion, so
+the step needs none of its own.
+
+It fails closed. An evicted journal cannot prove an ordered claim, and a matcher
+touching headers or query the journal had to truncate is reported as unprovable
+rather than quietly not matching.
+
+Journaled headers and query values are redacted before storage, so an
+identifier arrives as a deterministic, collision-distinct token. That is what
+makes "both retries used the SAME key" provable without the key being readable.
 
 ### Assertions
 

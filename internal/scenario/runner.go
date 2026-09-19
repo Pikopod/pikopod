@@ -65,6 +65,9 @@ type stepOutcome struct {
 	detail       map[string]any
 	captures     map[string]any
 	notEvaluated int
+	// intrinsicChecks are verifications a step performs without declared
+	// assertions, so a run whose only check is a sequence still PASSES.
+	intrinsicChecks int
 }
 
 // runner carries the per-run scope.
@@ -164,6 +167,7 @@ func Run(eng Target, def *ScenarioDefinition, provided map[string]any, seed stri
 		if n := len(step.Assertions) - out.notEvaluated; n > 0 {
 			evaluated += n
 		}
+		evaluated += out.intrinsicChecks
 		for k, v := range out.captures {
 			r.captures[k] = v
 		}
@@ -250,6 +254,8 @@ func (r *runner) dispatch(step *Step) (stepOutcome, error) {
 		return r.assertState(step)
 	case "VERIFY_REQUESTS":
 		return r.verifyRequests(step)
+	case "VERIFY_SEQUENCE":
+		return r.verifySequence(step)
 	case "SNAPSHOT":
 		cfg := step.Config.(*SnapshotConfig)
 		return r.note(fmt.Sprintf("snapshot '%s'", cfg.Label)), nil
@@ -628,6 +634,14 @@ func (r *runner) verifyRequests(step *Step) (stepOutcome, error) {
 			return r.failedVerification(step,
 				"the matching request's body exceeded the journal cap — body assertions are unprovable"), nil
 		}
+		if a.Target == "sandbox.request.headers" && found && last.HeadersTruncated {
+			return r.failedVerification(step,
+				"the matching request carried more headers than the journal caps — header assertions are unprovable"), nil
+		}
+		if a.Target == "sandbox.request.query" && found && last.QueryTruncated {
+			return r.failedVerification(step,
+				"the matching request carried more query values than the journal caps — query assertions are unprovable"), nil
+		}
 	}
 
 	docs := &EvalDocs{}
@@ -636,6 +650,10 @@ func (r *runner) verifyRequests(step *Step) (stepOutcome, error) {
 	if found {
 		docs.LastRequest = last.Body
 		docs.LastRequestFound = last.Body != nil
+		docs.LastRequestExists = true
+		docs.LastRequestHeaders = headersDoc(last.Headers)
+		docs.LastRequestQuery = queryDoc(last.Query)
+		docs.LastRequestCaptured = !last.HeadersTruncated && !last.QueryTruncated
 	}
 	verdict := EvaluateStepAssertions(step.Assertions, docs, subjectsPresent)
 	summary := fmt.Sprintf("sandbox received %d request(s) matching %s %s", count, cfg.Method, path)
@@ -729,4 +747,118 @@ func parseResponseBody(raw []byte) any {
 		return string(raw)
 	}
 	return v
+}
+
+// headersDoc/queryDoc lift journal maps into plain JSON documents so JSONPath
+// resolves against them like any other body.
+func headersDoc(h map[string]string) any {
+	if h == nil {
+		return nil
+	}
+	out := make(map[string]any, len(h))
+	for k, v := range h {
+		out[k] = v
+	}
+	return out
+}
+
+func queryDoc(q map[string][]string) any {
+	if q == nil {
+		return nil
+	}
+	out := make(map[string]any, len(q))
+	for k, vs := range q {
+		vals := make([]any, len(vs))
+		for i, v := range vs {
+			vals[i] = v
+		}
+		out[k] = vals
+	}
+	return out
+}
+
+// verifySequence walks the journal once, advancing through matchers greedily:
+// unmatched requests between matches are allowed, order is not.
+func (r *runner) verifySequence(step *Step) (stepOutcome, error) {
+	cfg := step.Config.(*VerifySequenceConfig)
+	entries, evicted := r.eng.JournalEntries(0)
+	if evicted > 0 {
+		// The missing prefix may have held the match, so no ordered claim is
+		// provable any more.
+		return r.failedVerification(step, fmt.Sprintf(
+			"journal evicted %d entries — an ordered subsequence is unprovable; raise the journal cap or reset it", evicted)), nil
+	}
+
+	tpl := r.tpl()
+	idx := 0
+	var prevAtMs int64
+	matchedAny := false
+	for mi := range cfg.Requests {
+		m := &cfg.Requests[mi]
+		path, err := interpolate(m.Path, tpl)
+		if err != nil {
+			return stepOutcome{}, err
+		}
+		found := false
+		for ; idx < len(entries); idx++ {
+			entry := &entries[idx]
+			if !entry.MatchesSequence(sandbox.SequenceFields{Method: m.Method, Headers: m.Headers, Query: m.Query}, path) {
+				continue
+			}
+			if reason := gapViolation(m, entry.AtMs, prevAtMs, matchedAny); reason != "" {
+				return r.failedVerification(step, fmt.Sprintf("matcher %d matched %s %s but %s", mi, entry.Method, entry.Path, reason)), nil
+			}
+			if reason := unprovable(m, entry); reason != "" {
+				return r.failedVerification(step, fmt.Sprintf("matcher %d cannot be proved: %s", mi, reason)), nil
+			}
+			prevAtMs, matchedAny, found = entry.AtMs, true, true
+			idx++
+			break
+		}
+		if !found {
+			return r.failedVerification(step, fmt.Sprintf(
+				"matcher %d (%s %s) never matched; scanned %d of %d journaled request(s)",
+				mi, orAny(m.Method), orAny(path), idx, len(entries))), nil
+		}
+	}
+	return stepOutcome{
+		status: StatusPassed, virtualEndMs: r.virtualClockMs,
+		summary:         fmt.Sprintf("%d matcher(s) matched in order", len(cfg.Requests)),
+		detail:          map[string]any{"matchers": len(cfg.Requests), "journaled": len(entries)},
+		intrinsicChecks: len(cfg.Requests),
+	}, nil
+}
+
+func orAny(s string) string {
+	if s == "" {
+		return "any"
+	}
+	return s
+}
+
+// gapViolation checks the virtual-time distance from the previous match. The
+// first match has no previous, so gaps do not apply to it.
+func gapViolation(m *SequenceMatcher, atMs, prevAtMs int64, hasPrev bool) string {
+	if !hasPrev || (m.MinGapMs == nil && m.MaxGapMs == nil) {
+		return ""
+	}
+	gap := atMs - prevAtMs
+	if m.MinGapMs != nil && gap < *m.MinGapMs {
+		return fmt.Sprintf("came %dms after the previous match, under minGapMs %d", gap, *m.MinGapMs)
+	}
+	if m.MaxGapMs != nil && gap > *m.MaxGapMs {
+		return fmt.Sprintf("came %dms after the previous match, over maxGapMs %d", gap, *m.MaxGapMs)
+	}
+	return ""
+}
+
+// unprovable reports a matcher touching a field the journal had to truncate.
+func unprovable(m *SequenceMatcher, entry *sandbox.JournalEntry) string {
+	if len(m.Headers) > 0 && entry.HeadersTruncated {
+		return "the request carried more headers than the journal caps"
+	}
+	if len(m.Query) > 0 && entry.QueryTruncated {
+		return "the request carried more query values than the journal caps"
+	}
+	return ""
 }

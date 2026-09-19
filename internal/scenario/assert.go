@@ -45,6 +45,16 @@ type EvalDocs struct {
 	RequestCount     *float64
 	LastRequest      any
 	LastRequestFound bool
+	// LastRequestHeaders/Query are the redacted journal fields of that same
+	// entry. Unprovable is not the same as absent, so a truncated capture
+	// reports found=false and the assertion fails closed.
+	LastRequestHeaders any
+	LastRequestQuery   any
+	// LastRequestExists is whether an entry matched at all. Distinct from
+	// LastRequestFound, which means it also carried a body: a GET has none,
+	// but its headers and query are still assertable.
+	LastRequestExists   bool
+	LastRequestCaptured bool
 }
 
 // ResponseDoc is the response document (parsed JSON body).
@@ -346,6 +356,10 @@ func resolveActual(a *Assertion, docs *EvalDocs) (found bool, value any, pointer
 		return true, *docs.RequestCount, ptr("/requestCount")
 	case "sandbox.request":
 		return resolveBody(docs.LastRequest, docs.LastRequestFound, a.Path)
+	case "sandbox.request.headers":
+		return resolveBody(docs.LastRequestHeaders, docs.LastRequestExists && docs.LastRequestCaptured, a.Path)
+	case "sandbox.request.query":
+		return resolveBody(docs.LastRequestQuery, docs.LastRequestExists && docs.LastRequestCaptured, a.Path)
 	case "execution.faultApplied":
 		if docs.FaultApplied == nil {
 			return false, nil, ptr("/faultApplied")

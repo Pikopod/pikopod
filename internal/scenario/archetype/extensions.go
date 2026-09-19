@@ -175,7 +175,10 @@ const extensionsJSON = `[
       {
         "key": "still-down", "type": "REQUEST",
         "config": { "method": "<<op.method>>", "path": "<<op.collectionPath>>" },
-        "assertions": [{ "target": "response.status", "op": "equals", "expected": 503 }]
+        "assertions": [
+          { "target": "response.status", "op": "equals", "expected": 503 },
+          { "target": "execution.faultApplied", "op": "equals", "expected": true }
+        ]
       },
       {
         "key": "outage-window", "type": "WAIT",
@@ -192,6 +195,14 @@ const extensionsJSON = `[
           { "target": "response.status", "op": "gte", "expected": 200 },
           { "target": "response.status", "op": "lt", "expected": 300 }
         ]
+      },
+      {
+        "key": "outage-shape", "type": "VERIFY_SEQUENCE",
+        "config": { "requests": [
+          { "method": "<<op.method>>", "path": "<<op.collectionPath>>" },
+          { "method": "<<op.method>>", "path": "<<op.collectionPath>>" },
+          { "method": "<<op.method>>", "path": "<<op.collectionPath>>", "minGapMs": 300000 }
+        ] }
       }
     ]
   }

@@ -74,7 +74,6 @@ const catalogueJSON = `[
       {
         "key": "create", "type": "REQUEST",
         "config": { "method": "<<createOp.method>>", "path": "<<createOp.collectionPath>>", "body": {} },
-        "capture": { "resourceId": "response.body$.id" },
         "assertions": [{ "target": "response.status", "op": "gte", "expected": 200 }]
       },
       { "key": "await1", "type": "EXPECT_WEBHOOK", "config": { "match": { "eventType": "<<emittedEvent>>" }, "timeoutMs": 30000 } },
@@ -98,7 +97,24 @@ const catalogueJSON = `[
       {
         "key": "call", "type": "REQUEST",
         "config": { "method": "<<op.method>>", "path": "<<op.collectionPath>>" },
-        "assertions": [{ "subject": "SANDBOX", "target": "response.status", "op": "equals", "expected": 429 }]
+        "assertions": [
+          { "subject": "SANDBOX", "target": "response.status", "op": "equals", "expected": 429 },
+          { "subject": "SANDBOX", "target": "response.headers", "key": "retry-after", "op": "exists" }
+        ]
+      },
+      { "key": "backoff", "type": "WAIT", "config": { "durationMs": 30000 } },
+      { "key": "clear", "type": "CLEAR_FAULT", "config": { "method": "<<op.method>>", "path": "<<op.collectionPath>>" } },
+      {
+        "key": "retry", "type": "REQUEST",
+        "config": { "method": "<<op.method>>", "path": "<<op.collectionPath>>" },
+        "assertions": [{ "subject": "SANDBOX", "target": "response.status", "op": "lt", "expected": 400 }]
+      },
+      {
+        "key": "backed-off", "type": "VERIFY_SEQUENCE",
+        "config": { "requests": [
+          { "method": "<<op.method>>", "path": "<<op.collectionPath>>" },
+          { "method": "<<op.method>>", "path": "<<op.collectionPath>>", "minGapMs": 30000 }
+        ] }
       }
     ]
   },

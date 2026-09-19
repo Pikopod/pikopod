@@ -49,7 +49,7 @@
       "properties": {
         "key": { "type": "string", "pattern": "^[A-Za-z0-9_.-]+$", "maxLength": 80 },
         "description": { "type": "string" },
-        "type": { "type": "string", "enum": ["REQUEST", "WAIT", "EXPECT_WEBHOOK", "INJECT_FAULT", "CLEAR_FAULT", "ASSERT_STATE", "SEED_STATE", "SNAPSHOT", "NOTE", "VERIFY_REQUESTS"] },
+        "type": { "type": "string", "enum": ["REQUEST", "WAIT", "EXPECT_WEBHOOK", "INJECT_FAULT", "CLEAR_FAULT", "ASSERT_STATE", "SEED_STATE", "SNAPSHOT", "NOTE", "VERIFY_REQUESTS", "VERIFY_SEQUENCE"] },
         "config": { "type": "object" },
         "assertions": { "type": "array", "maxItems": 50, "items": { "$ref": "#/$defs/assertion" } },
         "capture": {

@@ -7,6 +7,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"math"
+	"net/http"
 	"strconv"
 	"strings"
 
@@ -175,6 +176,10 @@ func ResolveFaultKind(kind string, status int) (engineKind string, engineStatus 
 }
 
 const maxFaultDelayMs = int64(60_000)
+
+// RateLimitRetryAfterSec is the Retry-After an armed 429 advertises. Fixed, so
+// a backoff assertion is reproducible.
+const RateLimitRetryAfterSec = 30
 
 // Transport-fault kinds: lies at the HTTP/TCP layer, wire-only — virtualized
 // they degrade to header annotation, since a lying transcript breaks replay.
@@ -413,6 +418,11 @@ func (e *Engine) evaluateFaults(endpoint *ir.Endpoint, req *ingressRequest, inne
 				// The armed rule carries no body: a body-less response with no
 				// content-type.
 				out.errResp = &RawResponse{Status: status, Headers: map[string]string{}, Body: nil}
+				// A 429 that does not say how long to wait gives a client
+				// nothing to back off to, which is the whole point of the kind.
+				if status == http.StatusTooManyRequests {
+					out.errResp.Headers["retry-after"] = strconv.Itoa(RateLimitRetryAfterSec)
+				}
 				out.kinds = append(out.kinds, "error")
 				out.delayMs += f.DelayMs // delay-then-error composition
 			}
