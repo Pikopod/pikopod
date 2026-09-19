@@ -23,10 +23,12 @@ func normalizeOpenAPIValue(parsed any, limits ParseLimits, status string) (*ir.A
 	}
 	resolver := newRefResolver(doc, limits)
 
-	endpoints, err := normalizeEndpoints(doc, resolver, limits)
+	examples := []ir.Example{}
+	endpoints, err := normalizeEndpoints(doc, resolver, limits, &examples)
 	if err != nil {
 		return nil, err
 	}
+	sort.SliceStable(examples, func(a, b int) bool { return ir.JSLess(examples[a].ID, examples[b].ID) })
 	schemas, err := normalizeNamedSchemas(doc, resolver, limits)
 	if err != nil {
 		return nil, err
@@ -64,7 +66,7 @@ func normalizeOpenAPIValue(parsed any, limits ParseLimits, status string) (*ir.A
 			Parameters:    []string{},
 			SourcePointer: "#",
 		},
-		Examples: []ir.Example{},
+		Examples: examples,
 	}, nil
 }
 
@@ -225,7 +227,7 @@ func normalizeNamedSchemas(doc *OrdMap, resolver *refResolver, limits ParseLimit
 	return out, nil
 }
 
-func normalizeEndpoints(doc *OrdMap, resolver *refResolver, limits ParseLimits) ([]ir.Endpoint, error) {
+func normalizeEndpoints(doc *OrdMap, resolver *refResolver, limits ParseLimits, examples *[]ir.Example) ([]ir.Endpoint, error) {
 	paths := getMap(doc, "paths")
 	endpoints := []ir.Endpoint{}
 
@@ -254,11 +256,11 @@ func normalizeEndpoints(doc *OrdMap, resolver *refResolver, limits ParseLimits) 
 			if err != nil {
 				return nil, err
 			}
-			requestBody, err := normalizeRequestBody(op.GetOr("requestBody"), epID, opPointer, resolver, limits)
+			requestBody, err := normalizeRequestBody(op.GetOr("requestBody"), epID, opPointer, resolver, limits, examples)
 			if err != nil {
 				return nil, err
 			}
-			responses, err := normalizeResponses(op.GetOr("responses"), epID, opPointer, resolver, limits)
+			responses, err := normalizeResponses(op.GetOr("responses"), epID, opPointer, resolver, limits, examples)
 			if err != nil {
 				return nil, err
 			}
@@ -384,7 +386,7 @@ func normalizeLocation(value any) string {
 	return ""
 }
 
-func normalizeContent(contentRaw any, parentID, pointer string, resolver *refResolver, limits ParseLimits) ([]ir.MediaType, error) {
+func normalizeContent(contentRaw any, parentID, pointer string, resolver *refResolver, limits ParseLimits, examples *[]ir.Example) ([]ir.MediaType, error) {
 	content, ok := contentRaw.(*OrdMap)
 	if !ok {
 		return []ir.MediaType{}, nil
@@ -392,13 +394,17 @@ func normalizeContent(contentRaw any, parentID, pointer string, resolver *refRes
 	out := []ir.MediaType{}
 	for _, mediaType := range content.Keys() {
 		var schemaRaw any = NewOrdMap()
+		mtPointer := pointer + "/content/" + jpescape(mediaType)
 		if mt, ok := content.GetOr(mediaType).(*OrdMap); ok {
 			if s := mt.GetOr("schema"); s != nil {
 				schemaRaw = s
 			}
+			if err := collectExamples(mt, parentID, mediaType, mtPointer, resolver, examples); err != nil {
+				return nil, err
+			}
 		}
 		schema, err := normalizeSchema(schemaRaw, parentID, "content:"+mediaType,
-			pointer+"/content/"+jpescape(mediaType)+"/schema", resolver, limits, 0)
+			mtPointer+"/schema", resolver, limits, 0)
 		if err != nil {
 			return nil, err
 		}
@@ -408,7 +414,7 @@ func normalizeContent(contentRaw any, parentID, pointer string, resolver *refRes
 	return out, nil
 }
 
-func normalizeRequestBody(raw any, epID, opPointer string, resolver *refResolver, limits ParseLimits) (*ir.RequestBody, error) {
+func normalizeRequestBody(raw any, epID, opPointer string, resolver *refResolver, limits ParseLimits, examples *[]ir.Example) (*ir.RequestBody, error) {
 	resolved, err := resolver.resolve(raw)
 	if err != nil {
 		return nil, err
@@ -422,7 +428,7 @@ func normalizeRequestBody(raw any, epID, opPointer string, resolver *refResolver
 	if b, ok := rb.GetOr("required").(bool); ok && b {
 		required = ir.Explicit(true, ptr+"/required")
 	}
-	content, err := normalizeContent(rb.GetOr("content"), ir.RequestBodyID(epID), ptr, resolver, limits)
+	content, err := normalizeContent(rb.GetOr("content"), ir.RequestBodyID(epID), ptr, resolver, limits, examples)
 	if err != nil {
 		return nil, err
 	}
@@ -435,7 +441,7 @@ func normalizeRequestBody(raw any, epID, opPointer string, resolver *refResolver
 	}, nil
 }
 
-func normalizeResponses(raw any, epID, opPointer string, resolver *refResolver, limits ParseLimits) ([]ir.ResponseDef, error) {
+func normalizeResponses(raw any, epID, opPointer string, resolver *refResolver, limits ParseLimits, examples *[]ir.Example) ([]ir.ResponseDef, error) {
 	responses, ok := raw.(*OrdMap)
 	if !ok {
 		return []ir.ResponseDef{}, nil
@@ -451,7 +457,7 @@ func normalizeResponses(raw any, epID, opPointer string, resolver *refResolver, 
 			resp = NewOrdMap()
 		}
 		ptr := opPointer + "/responses/" + statusCode
-		content, err := normalizeContent(resp.GetOr("content"), ir.ResponseID(epID, statusCode), ptr, resolver, limits)
+		content, err := normalizeContent(resp.GetOr("content"), ir.ResponseID(epID, statusCode), ptr, resolver, limits, examples)
 		if err != nil {
 			return nil, err
 		}
@@ -518,7 +524,7 @@ func normalizeWebhooks(doc *OrdMap, resolver *refResolver, limits ParseLimits) (
 			}
 			content := []ir.MediaType{}
 			if rb, ok := rbResolved.(*OrdMap); ok {
-				content, err = normalizeContent(rb.GetOr("content"), ir.WebhookID(event), ptr, resolver, limits)
+				content, err = normalizeContent(rb.GetOr("content"), ir.WebhookID(event), ptr, resolver, limits, nil)
 				if err != nil {
 					return nil, err
 				}
@@ -564,6 +570,47 @@ func webhookTriggerOf(pathItem, op *OrdMap) *ir.WebhookTrigger {
 		if method != "" && path != "" {
 			return &ir.WebhookTrigger{Method: strings.ToLower(method), PathTemplate: path}
 		}
+	}
+	return nil
+}
+
+// collectExamples reads a media type's `example` and named `examples`; an
+// absent example yields nothing, never an invented value.
+func collectExamples(mt *OrdMap, parentID, mediaType, pointer string, resolver *refResolver, examples *[]ir.Example) error {
+	if examples == nil {
+		return nil
+	}
+	mtCopy := mediaType
+	if mt.Has("example") {
+		*examples = append(*examples, ir.Example{
+			ID:            ir.ExampleID(parentID, mediaType),
+			ForNodeID:     parentID,
+			MediaType:     &mtCopy,
+			Value:         ir.Explicit(plainValue(mt.GetOr("example")), pointer+"/example"),
+			SourcePointer: pointer + "/example",
+		})
+	}
+	named, ok := mt.GetOr("examples").(*OrdMap)
+	if !ok {
+		return nil
+	}
+	for _, name := range named.Keys() {
+		resolved, err := resolver.resolve(named.GetOr(name))
+		if err != nil {
+			return err
+		}
+		entry, ok := resolved.(*OrdMap)
+		if !ok || !entry.Has("value") {
+			continue
+		}
+		ptr := pointer + "/examples/" + jpescape(name) + "/value"
+		*examples = append(*examples, ir.Example{
+			ID:            ir.ExampleID(parentID, mediaType+":"+name),
+			ForNodeID:     parentID,
+			MediaType:     &mtCopy,
+			Value:         ir.Explicit(plainValue(entry.GetOr("value")), ptr),
+			SourcePointer: ptr,
+		})
 	}
 	return nil
 }

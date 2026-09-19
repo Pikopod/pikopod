@@ -141,7 +141,8 @@ func (e *Engine) doRead(ctx *storeCtx) (*RawResponse, error) {
 		return nil, err
 	}
 	e.tracef("store", "read %s/%s (version %d)", ctx.op.typ, *ctx.op.key, r.Version)
-	return jsonResponse(200, json.RawMessage(r.Attributes), map[string]string{"etag": etagFor(r.Version)}), nil
+	body := e.wrapStored(ctx.endpoint, 200, json.RawMessage(r.Attributes), ctx.op.typ, *ctx.op.key)
+	return jsonResponse(200, body, map[string]string{"etag": etagFor(r.Version)}), nil
 }
 
 func (e *Engine) doList(ctx *storeCtx) (*RawResponse, error) {
@@ -205,7 +206,8 @@ func (e *Engine) doCreate(ctx *storeCtx) (*RawResponse, error) {
 	// Synthesized server fields fill gaps the client left; the client's values
 	// always win; canonical `id` is the synthesized key (RESOURCE mode only).
 	synth := e.synthCtx("create", resourceKey)
-	stored := completeResource(successSchema(ctx.endpoint, status), attrs, synth, !ctx.isResource)
+	shape := shapeFor(successSchema(ctx.endpoint, status), resourceKeys(attrs, requestSchema(ctx.endpoint), synth), synth)
+	stored := completeResource(shape.inner, attrs, synth, !ctx.isResource)
 	if ctx.isResource {
 		stored.Set("id", resourceKey)
 	}
@@ -231,7 +233,7 @@ func (e *Engine) doCreate(ctx *storeCtx) (*RawResponse, error) {
 	// emits a webhook.
 	e.enqueueWebhookFor(ctx.endpoint, webhookActionCreated, typeSlug(ctx.op.typ), json.RawMessage(created.Attributes))
 
-	response := jsonResponse(status, json.RawMessage(created.Attributes), map[string]string{"etag": etagFor(created.Version)})
+	response := jsonResponse(status, shape.wrap(json.RawMessage(created.Attributes), synth), map[string]string{"etag": etagFor(created.Version)})
 	if key != nil {
 		e.recordIdempotencyLocked(*key, reqHash, response) // idemMu held since the replay check
 	}
@@ -316,7 +318,8 @@ func (e *Engine) doModify(ctx *storeCtx) (*RawResponse, error) {
 			return nil, err
 		}
 		e.enqueueWebhookFor(ctx.endpoint, webhookActionUpdated, typeSlug(ctx.op.typ), json.RawMessage(result.Attributes))
-		return jsonResponse(200, json.RawMessage(result.Attributes), map[string]string{"etag": etagFor(result.Version)}), nil
+		body := e.wrapStored(ctx.endpoint, 200, json.RawMessage(result.Attributes), ctx.op.typ, *ctx.op.key, strconv.FormatInt(result.Version, 10))
+		return jsonResponse(200, body, map[string]string{"etag": etagFor(result.Version)}), nil
 	}
 }
 
