@@ -193,6 +193,7 @@ func (a *Agent) SetContracts(m map[string]*ir.ApiDefinition) {
 	defer a.mu.Unlock()
 	for k, v := range m {
 		a.contracts[k] = v
+		a.Recorder.SetRules(k, sanitizeRules(v))
 	}
 }
 

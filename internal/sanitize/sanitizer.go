@@ -24,6 +24,9 @@ type Rule struct {
 	Field         string `json:"field,omitempty"`
 	PointerPrefix string `json:"pointerPrefix,omitempty"`
 	Mode          Mode   `json:"mode"`
+	// AllowedValues makes an override conditional on the leaf value. An
+	// empty set preserves the legacy unconditional rule behavior.
+	AllowedValues []any `json:"allowedValues,omitempty"`
 }
 
 type Redaction struct {
@@ -162,12 +165,16 @@ type dropped struct{}
 func Sanitize(value any, tok *Tokenizer, rules []Rule, isHeaderRoot bool) Result {
 	var redactions []Redaction
 
-	ruleFor := func(key, pointer string) (Mode, bool) {
+	ruleFor := func(key, pointer string, value any) (Mode, bool) {
 		for _, r := range rules {
-			if r.Field != "" && strings.EqualFold(r.Field, key) {
-				return r.Mode, true
+			matches := r.Field != "" && strings.EqualFold(r.Field, key)
+			if !matches && r.PointerPrefix != "" {
+				matches = strings.HasPrefix(pointer, r.PointerPrefix)
 			}
-			if r.PointerPrefix != "" && strings.HasPrefix(pointer, r.PointerPrefix) {
+			if !matches || (len(r.AllowedValues) > 0 && !containsValue(r.AllowedValues, value)) {
+				continue
+			}
+			if matches {
 				return r.Mode, true
 			}
 		}
@@ -210,7 +217,7 @@ func Sanitize(value any, tok *Tokenizer, rules []Rule, isHeaderRoot bool) Result
 			return out
 		}
 		// Leaf: rule override wins, else the detector; fail-closed default is DROP.
-		mode, ok := ruleFor(key, pointer)
+		mode, ok := ruleFor(key, pointer, node)
 		if !ok {
 			mode = Classify(key, node, isHeader)
 		}
@@ -253,6 +260,60 @@ func Sanitize(value any, tok *Tokenizer, rules []Rule, isHeaderRoot bool) Result
 		sanitized = nil
 	}
 	return Result{Sanitized: sanitized, Redactions: redactions}
+}
+
+func containsValue(values []any, value any) bool {
+	for _, allowed := range values {
+		if equalValue(allowed, value) {
+			return true
+		}
+	}
+	return false
+}
+
+func equalValue(a, b any) bool {
+	if aString, ok := a.(string); ok {
+		bString, ok := b.(string)
+		return ok && aString == bString
+	}
+	if aBool, ok := a.(bool); ok {
+		bBool, ok := b.(bool)
+		return ok && aBool == bBool
+	}
+	if a == nil || b == nil {
+		return a == nil && b == nil
+	}
+	if aNumber, ok := numericValue(a); ok {
+		bNumber, ok := numericValue(b)
+		return ok && aNumber == bNumber
+	}
+	return false
+}
+
+func numericValue(value any) (float64, bool) {
+	switch n := value.(type) {
+	case json.Number:
+		f, err := n.Float64()
+		return f, err == nil
+	case float64:
+		return n, true
+	case float32:
+		return float64(n), true
+	case int:
+		return float64(n), true
+	case int64:
+		return float64(n), true
+	case int32:
+		return float64(n), true
+	case uint:
+		return float64(n), true
+	case uint64:
+		return float64(n), true
+	case uint32:
+		return float64(n), true
+	default:
+		return 0, false
+	}
 }
 
 func escapePointer(seg string) string {

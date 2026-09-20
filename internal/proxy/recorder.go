@@ -74,14 +74,30 @@ type Recorder struct {
 	// observer taps EVERY sanitized record before the sampling decision;
 	// a true return marks a baseline-moving record (always persisted).
 	observer func(*Record) bool
+	rulesMu  sync.RWMutex
+	rules    map[string][]sanitize.Rule
 }
 
 func NewRecorder(dataDir string, tok *sanitize.Tokenizer, m *Metrics) *Recorder {
-	return &Recorder{tok: tok, dataDir: dataDir, m: m, files: map[string]*store.NDJSON{}, maxFile: 64 << 20, sampleRate: 1}
+	return &Recorder{tok: tok, dataDir: dataDir, m: m, files: map[string]*store.NDJSON{}, rules: map[string][]sanitize.Rule{}, maxFile: 64 << 20, sampleRate: 1}
 }
 
 // SetObserver wires the learn/diff/alert pipeline. Call before Run.
 func (rec *Recorder) SetObserver(fn func(*Record) bool) { rec.observer = fn }
+
+// SetRules installs value-conditional sanitizer rules for one upstream.
+func (rec *Recorder) SetRules(upstream string, rules []sanitize.Rule) {
+	copyRules := append([]sanitize.Rule(nil), rules...)
+	rec.rulesMu.Lock()
+	rec.rules[upstream] = copyRules
+	rec.rulesMu.Unlock()
+}
+
+func (rec *Recorder) rulesFor(upstream string) []sanitize.Rule {
+	rec.rulesMu.RLock()
+	defer rec.rulesMu.RUnlock()
+	return append([]sanitize.Rule(nil), rec.rules[upstream]...)
+}
 
 // SetSampling sets the routine-record persistence rate (clamped to [0,1];
 // call before Run).
@@ -189,6 +205,7 @@ func (rec *Recorder) persist(record *Record) error {
 }
 
 func (rec *Recorder) sanitizeExchange(ex *Exchange) (*Record, error) {
+	rules := rec.rulesFor(ex.Upstream)
 	redactions := 0
 	var detail []SectionRedaction
 	collect := func(section string, rs []sanitize.Redaction) {
@@ -205,14 +222,14 @@ func (rec *Recorder) sanitizeExchange(ex *Exchange) (*Record, error) {
 		for k, v := range h {
 			flat[strings.ToLower(k)] = strings.Join(v, ", ")
 		}
-		res := sanitize.Sanitize(flat, rec.tok, nil, true)
+		res := sanitize.Sanitize(flat, rec.tok, rules, true)
 		collect(section, res.Redactions)
 		out, _ := res.Sanitized.(map[string]any)
 		return out
 	}
 
-	reqBody, reqKind := rec.sanitizeBody("req_body", ex.ReqBody, ex.ReqHeader, collect)
-	respBody, respKind := rec.sanitizeBody("resp_body", ex.RespBody, ex.RespHeader, collect)
+	reqBody, reqKind := rec.sanitizeBody("req_body", ex.ReqBody, ex.ReqHeader, rules, collect)
+	respBody, respKind := rec.sanitizeBody("resp_body", ex.RespBody, ex.RespHeader, rules, collect)
 
 	// Path may embed identifiers (tx_abc...); tokenize path segments that
 	// classify as identifiers so recorded paths are safe at rest too.
@@ -232,7 +249,7 @@ func (rec *Recorder) sanitizeExchange(ex *Exchange) (*Record, error) {
 
 // sanitizeBody decodes content-encoding, parses JSON or form bodies, and
 // sanitizes the parsed tree. Anything else is metadata-only ("binary").
-func (rec *Recorder) sanitizeBody(section string, raw []byte, h http.Header, collect func(string, []sanitize.Redaction)) (any, string) {
+func (rec *Recorder) sanitizeBody(section string, raw []byte, h http.Header, rules []sanitize.Rule, collect func(string, []sanitize.Redaction)) (any, string) {
 	if len(raw) == 0 {
 		return nil, "none"
 	}
@@ -253,7 +270,7 @@ func (rec *Recorder) sanitizeBody(section string, raw []byte, h http.Header, col
 		// float64; the record of record keeps the literal digits.
 		dec.UseNumber()
 		if err := dec.Decode(&v); err == nil {
-			res := sanitize.Sanitize(v, rec.tok, nil, false)
+			res := sanitize.Sanitize(v, rec.tok, rules, false)
 			collect(section, res.Redactions)
 			return res.Sanitized, "json"
 		}
@@ -268,7 +285,7 @@ func (rec *Recorder) sanitizeBody(section string, raw []byte, h http.Header, col
 				vals[urlUnescape(k)] = urlUnescape(v)
 			}
 		}
-		res := sanitize.Sanitize(vals, rec.tok, nil, false)
+		res := sanitize.Sanitize(vals, rec.tok, rules, false)
 		collect(section, res.Redactions)
 		return res.Sanitized, "form"
 	default:
