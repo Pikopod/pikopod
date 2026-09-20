@@ -22,6 +22,7 @@ import (
 	"github.com/pikopod/pikopod/internal/errfmt"
 	"github.com/pikopod/pikopod/internal/ir"
 	"github.com/pikopod/pikopod/internal/proxy"
+	"github.com/pikopod/pikopod/internal/sanitize/specrules"
 	"github.com/pikopod/pikopod/internal/scenario/nl"
 	"github.com/pikopod/pikopod/internal/specdiff"
 	"github.com/pikopod/pikopod/internal/specwatch"
@@ -138,11 +139,19 @@ func newUpCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if cfg.Refine.Enabled {
-				contracts, err := contractsForUpstreams(cfg)
-				if err != nil {
-					return err
+			contracts, err := contractsForUpstreams(cfg)
+			if err != nil {
+				return err
+			}
+			if rules := specrules.ForContracts(contracts); len(rules) > 0 {
+				a.SetSpecRules(rules)
+				fields := 0
+				for _, rs := range rules {
+					fields += len(rs)
 				}
+				fmt.Fprintf(out2(cmd), "spec-declared enums: %d field(s) across %d upstream(s) keep their declared values readable on disk\n", fields, len(rules))
+			}
+			if cfg.Refine.Enabled {
 				a.SetContracts(contracts)
 				fmt.Fprintf(out2(cmd), "contract refinement ON: traffic refines %d linked contract(s)\n", len(contracts))
 			}

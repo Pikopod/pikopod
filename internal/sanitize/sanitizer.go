@@ -7,9 +7,6 @@ import (
 	"strings"
 )
 
-// Sanitization SUBSTITUTES rather than deletes — dropping an auth header or an id
-// would break replay. Detection is generic and FAILS CLOSED: unclassifiable → DROP.
-
 type Mode string
 
 const (
@@ -19,11 +16,27 @@ const (
 	ModeAllow      Mode = "ALLOW"
 )
 
-// Rule overrides the detector by lowercased field name (exact) or JSON-pointer prefix.
 type Rule struct {
-	Field         string `json:"field,omitempty"`
-	PointerPrefix string `json:"pointerPrefix,omitempty"`
-	Mode          Mode   `json:"mode"`
+	Field         string   `json:"field,omitempty"`
+	PointerPrefix string   `json:"pointerPrefix,omitempty"`
+	Mode          Mode     `json:"mode"`
+	AllowedValues []string `json:"allowedValues,omitempty"`
+}
+
+func (r *Rule) admits(node any) bool {
+	if len(r.AllowedValues) == 0 {
+		return true
+	}
+	s, ok := node.(string)
+	if !ok {
+		return false
+	}
+	for _, v := range r.AllowedValues {
+		if v == s {
+			return true
+		}
+	}
+	return false
 }
 
 type Redaction struct {
@@ -162,8 +175,12 @@ type dropped struct{}
 func Sanitize(value any, tok *Tokenizer, rules []Rule, isHeaderRoot bool) Result {
 	var redactions []Redaction
 
-	ruleFor := func(key, pointer string) (Mode, bool) {
-		for _, r := range rules {
+	ruleFor := func(key, pointer string, node any) (Mode, bool) {
+		for i := range rules {
+			r := &rules[i]
+			if !r.admits(node) {
+				continue
+			}
 			if r.Field != "" && strings.EqualFold(r.Field, key) {
 				return r.Mode, true
 			}
@@ -210,7 +227,7 @@ func Sanitize(value any, tok *Tokenizer, rules []Rule, isHeaderRoot bool) Result
 			return out
 		}
 		// Leaf: rule override wins, else the detector; fail-closed default is DROP.
-		mode, ok := ruleFor(key, pointer)
+		mode, ok := ruleFor(key, pointer, node)
 		if !ok {
 			mode = Classify(key, node, isHeader)
 		}
