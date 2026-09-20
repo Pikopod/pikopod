@@ -18,9 +18,6 @@ import (
 	"github.com/pikopod/pikopod/internal/config"
 )
 
-// callTool drives one tools/call through the wire and returns the
-// structured result plus the raw serialized line, so tests can assert on
-// what a client actually receives.
 func callTool(t *testing.T, cfg *config.Config, name string, args any) (map[string]any, string) {
 	t.Helper()
 	argsRaw, _ := json.Marshal(args)
