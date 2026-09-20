@@ -186,7 +186,8 @@ and [Redaction](https://docs.pikopod.com/observe/redaction).
 [Security](https://docs.pikopod.com/operations/security) · [CLI reference](https://docs.pikopod.com/reference/cli/overview)
 
 Contributing: [CONTRIBUTING.md](CONTRIBUTING.md) · [DEVELOPMENT.md](DEVELOPMENT.md) ·
-[SECURITY.md](SECURITY.md) · [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)
+[SECURITY.md](SECURITY.md) · [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) ·
+[RELEASE.md](RELEASE.md)
 
 ## License
 
