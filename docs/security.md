@@ -48,6 +48,17 @@ Detection is generic — key names, value shape, entropy — never a list of
 provider-specific prefixes, so it does not silently stop working when you add a
 provider nobody anticipated.
 
+**One thing an imported contract changes, precisely.** When an upstream has an
+imported spec, a response field whose schema declares an `enum` keeps a value
+on disk **only if that value is one of the declared members**. `currency: NGN`
+survives because the provider published `[NGN, USD]`; the same field carrying
+`GHS` or a free-text error is classified exactly as it would be without the
+spec. Only `EXPLICIT` and `DERIVED` enums count; an enum the model extracted
+from prose or a heuristic inferred unlocks nothing, because relaxing redaction
+on a guess is not recoverable. Request bodies, headers, paths and every other
+field are untouched, and an upstream with no imported contract behaves exactly
+as before. `pikopod up` prints how many fields this applies to.
+
 Verify it yourself rather than trusting this page:
 
 ```bash

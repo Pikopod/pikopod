@@ -74,6 +74,9 @@ type Recorder struct {
 	// observer taps EVERY sanitized record before the sampling decision;
 	// a true return marks a baseline-moving record (always persisted).
 	observer func(*Record) bool
+	// specRules: upstream → rules derived from its imported contract, applied
+	// to response bodies only. Nil for an upstream without a contract.
+	specRules map[string][]sanitize.Rule
 }
 
 func NewRecorder(dataDir string, tok *sanitize.Tokenizer, m *Metrics) *Recorder {
@@ -98,6 +101,10 @@ func (rec *Recorder) SetSampling(rate float64) {
 // SetRetention arms the per-upstream logs' TTL (0 = size-only rotation;
 // call before Run).
 func (rec *Recorder) SetRetention(ttl time.Duration) { rec.ttl = ttl }
+
+// SetSpecRules installs contract-derived sanitizer rules per upstream (call
+// before Run). Built once at startup; the observe path only reads them.
+func (rec *Recorder) SetSpecRules(rules map[string][]sanitize.Rule) { rec.specRules = rules }
 
 // Sweep enforces retention on every open log (the periodic tick's hook —
 // a quiet upstream must still age out). Safe concurrently with Run.
@@ -211,8 +218,8 @@ func (rec *Recorder) sanitizeExchange(ex *Exchange) (*Record, error) {
 		return out
 	}
 
-	reqBody, reqKind := rec.sanitizeBody("req_body", ex.ReqBody, ex.ReqHeader, collect)
-	respBody, respKind := rec.sanitizeBody("resp_body", ex.RespBody, ex.RespHeader, collect)
+	reqBody, reqKind := rec.sanitizeBody("req_body", ex.ReqBody, ex.ReqHeader, nil, collect)
+	respBody, respKind := rec.sanitizeBody("resp_body", ex.RespBody, ex.RespHeader, rec.specRules[ex.Upstream], collect)
 
 	// Path may embed identifiers (tx_abc...); tokenize path segments that
 	// classify as identifiers so recorded paths are safe at rest too.
@@ -232,7 +239,7 @@ func (rec *Recorder) sanitizeExchange(ex *Exchange) (*Record, error) {
 
 // sanitizeBody decodes content-encoding, parses JSON or form bodies, and
 // sanitizes the parsed tree. Anything else is metadata-only ("binary").
-func (rec *Recorder) sanitizeBody(section string, raw []byte, h http.Header, collect func(string, []sanitize.Redaction)) (any, string) {
+func (rec *Recorder) sanitizeBody(section string, raw []byte, h http.Header, rules []sanitize.Rule, collect func(string, []sanitize.Redaction)) (any, string) {
 	if len(raw) == 0 {
 		return nil, "none"
 	}
@@ -253,7 +260,7 @@ func (rec *Recorder) sanitizeBody(section string, raw []byte, h http.Header, col
 		// float64; the record of record keeps the literal digits.
 		dec.UseNumber()
 		if err := dec.Decode(&v); err == nil {
-			res := sanitize.Sanitize(v, rec.tok, nil, false)
+			res := sanitize.Sanitize(v, rec.tok, rules, false)
 			collect(section, res.Redactions)
 			return res.Sanitized, "json"
 		}
@@ -268,7 +275,7 @@ func (rec *Recorder) sanitizeBody(section string, raw []byte, h http.Header, col
 				vals[urlUnescape(k)] = urlUnescape(v)
 			}
 		}
-		res := sanitize.Sanitize(vals, rec.tok, nil, false)
+		res := sanitize.Sanitize(vals, rec.tok, rules, false)
 		collect(section, res.Redactions)
 		return res.Sanitized, "form"
 	default:

@@ -186,6 +186,10 @@ func (a *Agent) learner(upstream string) *baseline.Learner {
 // pin resolution). Call before Run.
 func (a *Agent) SetWatcher(w *specwatch.Watcher) { a.watch = w }
 
+// SetSpecRules gives the recorder each upstream's contract-derived sanitizer
+// rules; call before Run.
+func (a *Agent) SetSpecRules(rules map[string][]sanitize.Rule) { a.Recorder.SetSpecRules(rules) }
+
 // SetContracts links upstreams to their spec-derived IRs so admission passes can
 // compare traffic against the spec (`pikopod up` wires it from the registry).
 func (a *Agent) SetContracts(m map[string]*ir.ApiDefinition) {
