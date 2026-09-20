@@ -93,19 +93,48 @@ func TestTransportFaultsOnTheWire(t *testing.T) {
 	if _, readErr := io.ReadAll(resp.Body); !errors.Is(readErr, io.ErrUnexpectedEOF) {
 		t.Fatalf("declared-longer body must end in unexpected EOF, got %v", readErr)
 	}
+
+	serveTimed := func(kind string, delayMs int64) (time.Duration, error) {
+		e := newEngine(t, loadWidgets(t), Config{ID: "sbx_timed_" + kind, Seed: "wire-1", WallclockFaults: true})
+		e.ArmFault(FaultRule{Method: "GET", Path: "/widgets", Kind: kind, DelayMs: delayMs, Probability: 1})
+		srv := httptest.NewServer(e)
+		t.Cleanup(srv.Close)
+		start := time.Now()
+		resp, err := (&http.Client{Timeout: 2 * time.Second}).Get(srv.URL + "/widgets")
+		if resp != nil {
+			resp.Body.Close()
+		}
+		return time.Since(start), err
+	}
+
+	hangElapsed, hangErr := serveTimed("hang", 300)
+	if hangErr == nil || hangElapsed < 250*time.Millisecond {
+		t.Fatalf("hang must hold the connection before closing: elapsed=%v err=%v", hangElapsed, hangErr)
+	}
+	for _, kind := range []string{FaultEmptyResponse, FaultRandomDataThenClose} {
+		elapsed, err := serveTimed(kind, 300)
+		if err == nil {
+			t.Fatalf("%s must fail before an HTTP response is parsed", kind)
+		}
+		if elapsed >= 250*time.Millisecond {
+			t.Fatalf("%s must close immediately rather than behave like hang: elapsed=%v", kind, elapsed)
+		}
+	}
 }
 
 // Virtualized mode (the default): transport kinds degrade to header
 // annotation — deterministic, transcript-stable, no wire damage.
 func TestTransportFaultsVirtualizedAnnotation(t *testing.T) {
-	e := newEngine(t, loadWidgets(t), Config{ID: "sbx_virt", Seed: "virt-1"})
-	e.ArmFault(FaultRule{Method: "POST", Path: "/widgets", Kind: FaultConnectionReset, Probability: 1})
-	got := do(t, e, "POST", "/widgets", `{"name":"g"}`, nil)
-	if got.status != 201 {
-		t.Fatalf("virtualized transport fault must not break the response: %d", got.status)
-	}
-	if !strings.Contains(got.headers[FaultAppliedHeader], FaultConnectionReset) {
-		t.Fatalf("the would-be fault must be annotated: %v", got.headers)
+	for _, kind := range []string{FaultConnectionReset, FaultEmptyResponse, FaultRandomDataThenClose} {
+		e := newEngine(t, loadWidgets(t), Config{ID: "sbx_virt_" + kind, Seed: "virt-1"})
+		e.ArmFault(FaultRule{Method: "POST", Path: "/widgets", Kind: kind, Probability: 1})
+		got := do(t, e, "POST", "/widgets", `{"name":"g"}`, nil)
+		if got.status != 201 {
+			t.Fatalf("virtualized transport fault must not break the response: %s: %d", kind, got.status)
+		}
+		if !strings.Contains(got.headers[FaultAppliedHeader], kind) {
+			t.Fatalf("the would-be fault must be annotated: %s: %v", kind, got.headers)
+		}
 	}
 }
 

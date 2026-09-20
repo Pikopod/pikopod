@@ -167,7 +167,8 @@ type-specific lives under `config`:
 | `NOTE` | `text` |
 
 Fault `kind` is one of `error`, `latency`, `hang`, `slow_body`,
-`connection_reset`, `malformed_response`, `wrong_content_length`, `rate_limit`,
+`connection_reset`, `malformed_response`, `wrong_content_length`,
+`empty_response`, `random_data_then_close`, `rate_limit`,
 `duplicate_webhook`, `drop_webhook`, `reorder_webhook`, `delay_webhook`. The
 webhook kinds are armed here, in a scenario step — not by `pikopod chaos`.
 `times: N` fires the fault for the first N matching requests and then recovers

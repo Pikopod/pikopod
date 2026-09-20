@@ -45,6 +45,7 @@ var validFaultKinds = map[string]bool{
 	"duplicate_webhook": true, "delay_webhook": true,
 	"drop_webhook": true, "reorder_webhook": true, "rate_limit": true,
 	"connection_reset": true, "malformed_response": true, "wrong_content_length": true,
+	"empty_response": true, "random_data_then_close": true,
 }
 
 var (

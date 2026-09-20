@@ -306,6 +306,20 @@ func (e *Engine) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return // client gone mid-delay
 		}
 	}
+	if wf.empty || wf.randomData {
+		// Both faults require a real connection: neither writes an HTTP
+		// response, and random_data_then_close deliberately writes no preamble.
+		if hj, ok := w.(http.Hijacker); ok {
+			if conn, _, err := hj.Hijack(); err == nil {
+				if wf.randomData {
+					_, _ = conn.Write([]byte("pikopod-random-data-then-close\x00\xff"))
+				}
+				conn.Close()
+				return
+			}
+		}
+		return
+	}
 	if wf.resetConn {
 		// RST, not FIN: SO_LINGER 0 then close — "connection reset by peer".
 		if hj, ok := w.(http.Hijacker); ok {

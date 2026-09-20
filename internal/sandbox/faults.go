@@ -18,7 +18,7 @@ import (
 type FaultRule struct {
 	Method      string  `json:"method"`
 	Path        string  `json:"path"` // matched against the endpoint's pathTemplate
-	Kind        string  `json:"kind"` // "error" | "latency" | "hang" | "slow_body" | webhook kinds below
+	Kind        string  `json:"kind"` // "error" | "latency" | "hang" | "slow_body" | transport/webhook kinds below
 	Status      int     `json:"status,omitempty"`
 	DelayMs     int64   `json:"delayMs,omitempty"`
 	Probability float64 `json:"probability"` // 0..1; 1 = always
@@ -146,6 +146,11 @@ const (
 	// FaultWrongContentLength declares more bytes than it sends — clients
 	// see an unexpected EOF mid-body.
 	FaultWrongContentLength = "wrong_content_length"
+	// FaultEmptyResponse closes an accepted connection without writing any
+	// response bytes.
+	FaultEmptyResponse = "empty_response"
+	// FaultRandomDataThenClose writes non-HTTP bytes and closes the connection.
+	FaultRandomDataThenClose = "random_data_then_close"
 )
 
 // Fault response annotation headers (consumed by the scenario runner).
@@ -213,6 +218,8 @@ type wireFault struct {
 	resetConn   bool
 	malformed   bool
 	wrongLength bool
+	empty       bool
+	randomData  bool
 }
 
 func (e *Engine) handleWire(req *ingressRequest, innerPath string) (*RawResponse, *wireFault, error) {
@@ -258,7 +265,8 @@ func (e *Engine) handleWire(req *ingressRequest, innerPath string) (*RawResponse
 	var wf *wireFault
 	if fx.wallclock {
 		wf = &wireFault{sleepMs: fx.delayMs, hangMs: fx.hangMs, slowBodyMs: fx.slowBodyMs,
-			resetConn: fx.resetConn, malformed: fx.malformed, wrongLength: fx.wrongLength}
+			resetConn: fx.resetConn, malformed: fx.malformed, wrongLength: fx.wrongLength,
+			empty: fx.empty, randomData: fx.randomData}
 	}
 	if fx.errResp != nil {
 		annotateFault(fx.errResp, fx.delayMs, fx.kinds)
@@ -309,6 +317,8 @@ type faultOutcome struct {
 	resetConn   bool
 	malformed   bool
 	wrongLength bool
+	empty       bool
+	randomData  bool
 }
 
 // evaluateFaults keeps rule order, accumulates latency (capped 60s) and lets
@@ -402,6 +412,12 @@ func (e *Engine) evaluateFaults(endpoint *ir.Endpoint, req *ingressRequest, inne
 		case FaultWrongContentLength:
 			out.wrongLength = true
 			out.kinds = append(out.kinds, FaultWrongContentLength)
+		case FaultEmptyResponse:
+			out.empty = true
+			out.kinds = append(out.kinds, FaultEmptyResponse)
+		case FaultRandomDataThenClose:
+			out.randomData = true
+			out.kinds = append(out.kinds, FaultRandomDataThenClose)
 		}
 	}
 	if out.delayMs > maxFaultDelayMs {

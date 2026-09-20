@@ -588,9 +588,10 @@ func (s *sandboxServer) serveAdmin(w http.ResponseWriter, r *http.Request) {
 		}
 		switch rule.Kind {
 		case "error", "latency", "hang", "slow_body",
-			sandbox.FaultConnectionReset, sandbox.FaultMalformedResponse, sandbox.FaultWrongContentLength:
+			sandbox.FaultConnectionReset, sandbox.FaultMalformedResponse, sandbox.FaultWrongContentLength,
+			sandbox.FaultEmptyResponse, sandbox.FaultRandomDataThenClose:
 		default:
-			writeSandboxJSONError(w, http.StatusBadRequest, "kind must be error, latency, hang, slow_body, connection_reset, malformed_response, or wrong_content_length")
+			writeSandboxJSONError(w, http.StatusBadRequest, "kind must be error, latency, hang, slow_body, connection_reset, malformed_response, wrong_content_length, empty_response, or random_data_then_close")
 			return
 		}
 		if rule.Method == "" || rule.Path == "" {
