@@ -318,6 +318,21 @@ provider — so it is opt-in twice over, and the least mature thing here. Read
 > 4xx that your own payload caused, the body matters, so check the pack against
 > what your code actually sends.
 
+## Use it from a coding agent
+
+`pikopod mcp` serves the same checks over the Model Context Protocol, so an
+agent that just wrote or patched an integration can verify it against what the
+provider actually sends before opening a pull request:
+
+```json
+{ "mcpServers": { "pikopod": { "command": "pikopod", "args": ["mcp"] } } }
+```
+
+Every answer carries a verdict, and `UNVERIFIABLE` is never dressed up as
+`CLEAN`: a gate with no recordings, an upstream still warming up, or a check
+whose evidence was redacted says so, with the reason. See
+[docs/config-reference.md](docs/config-reference.md#mcp) for the tool list.
+
 ## Documentation
 
 **Using pikopod**

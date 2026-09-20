@@ -41,6 +41,7 @@ func main() {
 		newChaosCmd(),
 		newModeCmd(),
 		newWebhookCmd(),
+		newMCPCmd(),
 		newBaselineCmd(),
 		newAckCmd(),
 		newAcceptCmd(),

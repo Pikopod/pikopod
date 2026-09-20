@@ -433,3 +433,46 @@ payload untouched is invisible to it. When the scan finds nothing, pikopod
 reports `UNVERIFIABLE` and exits non-zero rather than reporting a clean result —
 it will not hand your CI a green gate on a silent miss. Treat a zero-impact
 answer as "look yourself," not as proof the field is unused.
+
+## mcp
+
+`pikopod mcp` serves pikopod to a coding agent over the Model Context Protocol
+on stdin/stdout. It reads the same `pikopod.yaml` (`--config`), starts no
+listener and no daemon, and exits 2 when the configuration is missing or
+invalid.
+
+```json
+{ "mcpServers": { "pikopod": { "command": "pikopod", "args": ["mcp", "--config", "/path/to/pikopod.yaml"] } } }
+```
+
+Every tool returns one verdict from a closed set, and **`CLEAN` and
+`UNVERIFIABLE` never collapse**: an agent proceeds on `CLEAN`, and
+`UNVERIFIABLE` always carries a reason saying what could not be established.
+
+| Verdict | Meaning |
+|---|---|
+| `CLEAN` | The check ran and found nothing. |
+| `FINDINGS` | The check ran and found something; findings attached. |
+| `UNVERIFIABLE` | The check could not determine an answer; `reason` says why (no recordings, warmup incomplete, evidence redacted, nothing binds). |
+| `ERROR` | pikopod or its configuration is broken; `error` carries what/why/fix/docs. |
+
+The readers are the checks an agent cannot make by reading files:
+
+| Tool | Answers |
+|---|---|
+| `spec_diff` | What two spec versions declare differently, with a severity per finding. |
+| `drift_events` | What the agent observed change in traffic that passed warmup. Before warmup it is `UNVERIFIABLE` with the samples seen and the gate, never an empty `CLEAN`; every result carries a `warmup` block. |
+| `replay_ci` | The CI gate: recordings against frozen baselines. |
+| `conformance` | Whether the provider's recorded responses obey its own spec; redacted evidence counts as unverifiable, never as a pass. |
+| `reproduce` | A recorded incident turned into a pack and run locally (writes one pack file under `data_dir/scenarios`). |
+| `scenario_list`, `scenario_run` | Which archetypes bind to a sandbox, with the reason when one does not, and the verdict of running them against a throwaway copy. |
+| `get_requests` | What the caller's own code actually sent to the running sandbox. |
+
+The controls put a **running** sandbox (`pikopod up`) into a state the
+caller's own tests then meet; they act on a local fake and never on a
+provider: `set_mode`, `clear_mode`, `arm_fault`, `clear_faults`,
+`emit_webhook`.
+
+Deliberately absent: `fix` (a model editing code with no human in the loop),
+`import`, `chaos`, `ack`, `accept`, and every reset. They stay human-operated
+commands.
