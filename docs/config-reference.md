@@ -298,7 +298,11 @@ about changes the provider *declared* as well as changes observed on the wire.
 Fetches are ETag-gated, and the pin never advances on its own — accepting a
 declared change is an explicit `pikopod import <name> --update`.
 
-Severity is derived by law from the shape of the change, never hand-assigned.
+Severity is derived by law from the shape of the change (how the admitted
+payload set moved, on which side, in a guaranteed or optional part), never
+hand-assigned. Withdrawing a presence guarantee on a response field, whether by
+removing the field or by making it optional, is `WARN`; traffic evidence that
+consumers receive the field today raises it to `ERR`.
 
 ## refine
 

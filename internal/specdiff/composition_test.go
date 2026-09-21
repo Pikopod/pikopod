@@ -27,8 +27,8 @@ func TestAllOfMembersAreDiffed(t *testing.T) {
 	)))
 	fs := Diff(def(oldEp), def(newEp))
 	f := find(t, fs, "response-required-property-removed")
-	if f.Level != Err {
-		t.Fatalf("guaranteed removal through allOf must be ERR: %+v", f)
+	if f.Level != Warn {
+		t.Fatalf("guaranteed removal through allOf derives the same as became-optional: %+v", f)
 	}
 }
 
@@ -48,7 +48,7 @@ func TestOneOfVariantRemovedIsReported(t *testing.T) {
 	oldEp := ep("GET", "/widgets", with200(oneOf(strSchema(), objSchema(), strSchema())))
 	newEp := ep("GET", "/widgets", with200(oneOf(strSchema(), objSchema())))
 	fs := Diff(def(oldEp), def(newEp))
-	// Shrinks × Response derives INFO by the severity law (the output space
+	// Narrows × Response with tolerance derives INFO by the severity law (the output space
 	// contracts; consumers that handled the shape keep working) — the same
 	// level as response-enum-value-removed.
 	f := find(t, fs, "response-variant-removed")

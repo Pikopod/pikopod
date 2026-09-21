@@ -48,27 +48,23 @@ func (d *differ) walkSchema(oldN, newN *ir.IrSchemaNode, dir Direction, where, a
 	// oneOf/anyOf members are NOT diffed pairwise: identity is positional and
 	// a reorder would flood false findings. Only presence/kind/count are certain.
 	if (oldN.Composition == nil) != (newN.Composition == nil) {
-		d.emit(mk("schema-restructured", DeriveLevel(Incomparable, dir, Guards{Uncertain: oldN.Type.IsUncertain() || newN.Type.IsUncertain()}),
+		d.emit(mk("schema-restructured", DeriveLevel(Incomparable, dir, Guaranteed, Guards{Uncertain: oldN.Type.IsUncertain() || newN.Type.IsUncertain()}),
 			where+at(path)+" was restructured (composition added/removed)", argKey, path))
 		return
 	}
 	if oldN.Composition != nil {
 		oc, nc := oldN.Composition, newN.Composition
 		if oc.Kind != nc.Kind {
-			d.emit(mk("schema-restructured", DeriveLevel(Incomparable, dir, Guards{}),
+			d.emit(mk("schema-restructured", DeriveLevel(Incomparable, dir, Guaranteed, Guards{}),
 				fmt.Sprintf("%s%s changed composition kind %s → %s", where, at(path), oc.Kind, nc.Kind), argKey, path))
 			return
 		}
 		switch {
 		case len(nc.Members) < len(oc.Members):
-			eff := Narrows
-			if dir == Response {
-				eff = Shrinks
-			}
-			d.emit(mk(dirCheckID(dir, "variant-removed"), DeriveLevel(eff, dir, Guards{}),
+			d.emit(mk(dirCheckID(dir, "variant-removed"), DeriveLevel(Narrows, dir, Guaranteed, Guards{Tolerated: dir == Response}),
 				fmt.Sprintf("%s%s %s variants %d → %d — a documented shape was removed", where, at(path), oc.Kind, len(oc.Members), len(nc.Members)), argKey, path))
 		case len(nc.Members) > len(oc.Members):
-			d.emit(mk(dirCheckID(dir, "variant-added"), DeriveLevel(Widens, dir, Guards{Uncertain: dir == Response}),
+			d.emit(mk(dirCheckID(dir, "variant-added"), DeriveLevel(Widens, dir, Guaranteed, Guards{Uncertain: dir == Response}),
 				fmt.Sprintf("%s%s %s variants %d → %d — consumers switching on shape may not handle the new one", where, at(path), oc.Kind, len(oc.Members), len(nc.Members)), argKey, path))
 		}
 		return
@@ -77,8 +73,8 @@ func (d *differ) walkSchema(oldN, newN *ir.IrSchemaNode, dir Direction, where, a
 	uncertain := oldN.Type.IsUncertain() || newN.Type.IsUncertain()
 	label := where + at(path)
 
-	if eff, changed := typeEffect(oldN.Type.Value, newN.Type.Value, dir); changed {
-		d.emit(mk(typeCheckID(dir), DeriveLevel(eff, dir, Guards{Uncertain: uncertain}),
+	if eff, tolerated, changed := typeEffect(oldN.Type.Value, newN.Type.Value, dir); changed {
+		d.emit(mk(typeCheckID(dir), DeriveLevel(eff, dir, Guaranteed, Guards{Uncertain: uncertain, Tolerated: tolerated}),
 			fmt.Sprintf("%s type %s → %s", label, oldN.Type.Value, newN.Type.Value),
 			argKey, path, oldN.Type.Value, newN.Type.Value))
 	}
@@ -87,19 +83,19 @@ func (d *differ) walkSchema(oldN, newN *ir.IrSchemaNode, dir Direction, where, a
 	// Response: allowing null means consumers that never handled null break.
 	if !oldN.Nullable.Value && newN.Nullable.Value {
 		if dir == Request {
-			d.emit(mk("request-nullable-added", DeriveLevel(Widens, Request, Guards{}),
+			d.emit(mk("request-nullable-added", DeriveLevel(Widens, Request, Guaranteed, Guards{}),
 				label+" now accepts null", argKey, path))
 		} else {
-			d.emit(mk("response-nullable-added", DeriveLevel(Widens, Response, Guards{Uncertain: uncertain}),
+			d.emit(mk("response-nullable-added", DeriveLevel(Widens, Response, Guaranteed, Guards{Uncertain: uncertain}),
 				label+" may now be null — parsers that never handled null will break", argKey, path))
 		}
 	}
 	if oldN.Nullable.Value && !newN.Nullable.Value {
 		if dir == Request {
-			d.emit(mk("request-nullable-removed", DeriveLevel(Narrows, Request, Guards{Uncertain: uncertain}),
+			d.emit(mk("request-nullable-removed", DeriveLevel(Narrows, Request, Guaranteed, Guards{Uncertain: uncertain}),
 				label+" no longer accepts null", argKey, path))
 		} else {
-			d.emit(mk("response-nullable-removed", DeriveLevel(Shrinks, Response, Guards{}),
+			d.emit(mk("response-nullable-removed", DeriveLevel(Narrows, Response, Guaranteed, Guards{Tolerated: true}),
 				label+" is no longer nullable", argKey, path))
 		}
 	}
@@ -126,25 +122,19 @@ func typeCheckID(dir Direction) string {
 	return "response-type-changed"
 }
 
-// typeEffect classifies a scalar-type transition through the subtype lattice
-// (integer ⊂ number). "unknown" on either side abstains — never guess.
-func typeEffect(from, to string, dir Direction) (Effect, bool) {
+func typeEffect(from, to string, dir Direction) (effect Effect, tolerated, changed bool) {
 	if from == to || from == "unknown" || to == "unknown" || from == "" || to == "" {
-		return "", false
+		return "", false, false
 	}
-	widerNew := from == "integer" && to == "number"    // new type accepts/produces MORE
-	narrowerNew := from == "number" && to == "integer" // new type accepts/produces LESS
+	widerNew := from == "integer" && to == "number"
+	narrowerNew := from == "number" && to == "integer"
 	switch {
-	case dir == Request && widerNew:
-		return Widens, true // server accepts more — old clients fine
-	case dir == Request && narrowerNew:
-		return Narrows, true // old clients sending floats now rejected
-	case dir == Response && widerNew:
-		return Widens, true // consumers typed int may now receive floats
-	case dir == Response && narrowerNew:
-		return Shrinks, true // outputs are a subset of what consumers parse
+	case widerNew:
+		return Widens, false, true
+	case narrowerNew:
+		return Narrows, dir == Response, true
 	default:
-		return Incomparable, true
+		return Incomparable, false, true
 	}
 }
 
@@ -156,19 +146,19 @@ func (d *differ) diffEnums(oldN, newN *ir.IrSchemaNode, dir Direction, label, ar
 		return
 	case oldVals == nil: // enum introduced where the value space was open
 		if dir == Request {
-			d.emit(mk("request-enum-closed", DeriveLevel(Narrows, Request, Guards{Uncertain: uncertain}),
+			d.emit(mk("request-enum-closed", DeriveLevel(Narrows, Request, Guaranteed, Guards{Uncertain: uncertain}),
 				label+" is now restricted to an enum ["+joinSorted(newVals)+"]", argKey, path))
 		} else {
-			d.emit(mk("response-enum-closed", DeriveLevel(Shrinks, Response, Guards{}),
+			d.emit(mk("response-enum-closed", DeriveLevel(Narrows, Response, Guaranteed, Guards{Tolerated: true}),
 				label+" is now documented as an enum ["+joinSorted(newVals)+"]", argKey, path))
 		}
 		return
 	case newVals == nil: // enum removed — value space opened
 		if dir == Request {
-			d.emit(mk("request-enum-opened", DeriveLevel(Widens, Request, Guards{}),
+			d.emit(mk("request-enum-opened", DeriveLevel(Widens, Request, Guaranteed, Guards{}),
 				label+" is no longer restricted to an enum", argKey, path))
 		} else {
-			d.emit(mk("response-enum-opened", DeriveLevel(Widens, Response, Guards{Uncertain: uncertain}),
+			d.emit(mk("response-enum-opened", DeriveLevel(Widens, Response, Guaranteed, Guards{Uncertain: uncertain}),
 				label+" is no longer a closed enum — any value may now appear", argKey, path))
 		}
 		return
@@ -188,20 +178,20 @@ func (d *differ) diffEnums(oldN, newN *ir.IrSchemaNode, dir Direction, label, ar
 	sort.Strings(added)
 	for _, v := range removed {
 		if dir == Request {
-			d.emit(mk("request-enum-value-removed", DeriveLevel(Narrows, Request, Guards{Uncertain: uncertain}),
+			d.emit(mk("request-enum-value-removed", DeriveLevel(Narrows, Request, Guaranteed, Guards{Uncertain: uncertain}),
 				label+": value "+quote(v)+" no longer accepted", argKey, path, v))
 		} else {
-			d.emit(mk("response-enum-value-removed", DeriveLevel(Shrinks, Response, Guards{}),
+			d.emit(mk("response-enum-value-removed", DeriveLevel(Narrows, Response, Guaranteed, Guards{Tolerated: true}),
 				label+": value "+quote(v)+" removed from the documented set", argKey, path, v))
 		}
 	}
 	for _, v := range added {
 		if dir == Request {
-			d.emit(mk("request-enum-value-added", DeriveLevel(Widens, Request, Guards{}),
+			d.emit(mk("request-enum-value-added", DeriveLevel(Widens, Request, Guaranteed, Guards{}),
 				label+": accepts new value "+quote(v), argKey, path, v))
 		} else {
 			// The exhaustive-switch hazard: NOT Tolerated by convention.
-			d.emit(mk("response-enum-value-added", DeriveLevel(Widens, Response, Guards{Uncertain: uncertain}),
+			d.emit(mk("response-enum-value-added", DeriveLevel(Widens, Response, Guaranteed, Guards{Uncertain: uncertain}),
 				label+": may now return "+quote(v)+" — exhaustive switches break", argKey, path, v))
 		}
 	}
@@ -235,15 +225,15 @@ func (d *differ) diffProperties(oldN, newN *ir.IrSchemaNode, dir Direction, wher
 			if dir == Request {
 				// Clients still sending it are usually ignored by servers.
 				d.emit(mk("request-property-removed",
-					DeriveLevel(Narrows, Request, Guards{OptionalOnly: true, Uncertain: op.Required.IsUncertain()}),
+					DeriveLevel(Narrows, Request, Optional, Guards{Uncertain: op.Required.IsUncertain()}),
 					label+" removed from the request schema", argKey, ppath))
 			} else if op.Required.Value {
 				d.emit(mk("response-required-property-removed",
-					DeriveLevel(Narrows, Response, Guards{Uncertain: op.Required.IsUncertain()}),
+					DeriveLevel(Widens, Response, Guaranteed, Guards{Uncertain: op.Required.IsUncertain()}),
 					label+" (guaranteed) removed — consumers reading it break", argKey, ppath))
 			} else {
 				d.emit(mk("response-property-removed",
-					DeriveLevel(Narrows, Response, Guards{OptionalOnly: true}),
+					DeriveLevel(Narrows, Response, Optional, Guards{}),
 					label+" (optional) removed", argKey, ppath))
 			}
 			continue
@@ -252,20 +242,20 @@ func (d *differ) diffProperties(oldN, newN *ir.IrSchemaNode, dir Direction, wher
 		if !op.Required.Value && np.Required.Value {
 			if dir == Request {
 				d.emit(mk("request-property-became-required",
-					DeriveLevel(Narrows, Request, Guards{Uncertain: np.Required.IsUncertain()}),
+					DeriveLevel(Narrows, Request, Guaranteed, Guards{Uncertain: np.Required.IsUncertain()}),
 					label+" became required — clients omitting it will be rejected", argKey, ppath))
 			} else {
-				d.emit(mk("response-property-became-required", DeriveLevel(Shrinks, Response, Guards{}),
+				d.emit(mk("response-property-became-required", DeriveLevel(Narrows, Response, Guaranteed, Guards{Tolerated: true}),
 					label+" is now guaranteed present", argKey, ppath))
 			}
 		}
 		if op.Required.Value && !np.Required.Value {
 			if dir == Request {
-				d.emit(mk("request-property-became-optional", DeriveLevel(Widens, Request, Guards{}),
+				d.emit(mk("request-property-became-optional", DeriveLevel(Widens, Request, Guaranteed, Guards{}),
 					label+" became optional", argKey, ppath))
 			} else {
 				d.emit(mk("response-property-became-optional",
-					DeriveLevel(Widens, Response, Guards{Uncertain: np.Required.IsUncertain()}),
+					DeriveLevel(Widens, Response, Guaranteed, Guards{Uncertain: np.Required.IsUncertain()}),
 					label+" is no longer guaranteed — consumers assuming presence break", argKey, ppath))
 			}
 		}
@@ -287,16 +277,16 @@ func (d *differ) diffProperties(oldN, newN *ir.IrSchemaNode, dir Direction, wher
 		if dir == Request {
 			if np.Required.Value {
 				d.emit(mk("request-property-added-required",
-					DeriveLevel(Narrows, Request, Guards{Uncertain: np.Required.IsUncertain()}),
+					DeriveLevel(Narrows, Request, Guaranteed, Guards{Uncertain: np.Required.IsUncertain()}),
 					"new REQUIRED "+label+" — every existing client omits it", argKey, ppath))
 			} else {
-				d.emit(mk("request-property-added-optional", DeriveLevel(Widens, Request, Guards{}),
+				d.emit(mk("request-property-added-optional", DeriveLevel(Widens, Request, Optional, Guards{}),
 					"new optional "+label, argKey, ppath))
 			}
 		} else {
 			// Additive response field: consumers ignore unknown fields by
 			// dominant convention (the Tolerated guard) — INFO, not WARN.
-			d.emit(mk("response-property-added", DeriveLevel(Widens, Response, Guards{Tolerated: true}),
+			d.emit(mk("response-property-added", DeriveLevel(Widens, Response, Guaranteed, Guards{Tolerated: true}),
 				"new "+label+" in responses", argKey, ppath))
 		}
 	}

@@ -161,8 +161,9 @@ rather than only in the log. A spec split across files works too: relative
 `$ref`s resolve inside the same repository at the same ref (see
 [which `$ref`s are supported](docs/config-reference.md#ref-policy)).
 
-Severity is **derived by law**: one function maps the shape of a change — its
-effect, its direction, and any guards — onto `ERR`/`WARN`/`INFO`. No check
+Severity is **derived by law**: one function maps the shape of a change — how
+the set of admitted payloads moved, on which side, in a guaranteed or optional
+part of the contract, and any guards — onto `ERR`/`WARN`/`INFO`. No check
 carries a hand-assigned severity, so "breaking" means the same thing on every
 endpoint and on every provider, and changing the rule changes every verdict at
 once.

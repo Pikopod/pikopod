@@ -13,31 +13,47 @@ func TestDeriveLevelLaw(t *testing.T) {
 	cases := []struct {
 		effect Effect
 		dir    Direction
+		scope  Scope
 		guards Guards
 		want   Level
 	}{
-		{Narrows, Request, Guards{}, Err},
-		{Widens, Request, Guards{}, Info},
-		{Narrows, Response, Guards{}, Err},
-		{Widens, Response, Guards{}, Warn},
-		{Shrinks, Response, Guards{}, Info},
-		{Incomparable, Request, Guards{}, Err},
-		{Incomparable, Response, Guards{}, Err},
-		// Guards cap ERR at WARN.
-		{Narrows, Request, Guards{DeprecatedHonored: true}, Warn},
-		{Narrows, Request, Guards{OptionalOnly: true}, Warn},
-		{Narrows, Response, Guards{Uncertain: true}, Warn},
-		{Incomparable, Response, Guards{Uncertain: true}, Warn},
-		// Tolerated caps WARN at INFO (additive response property).
-		{Widens, Response, Guards{Tolerated: true}, Info},
-		// Tolerated does not touch ERR.
-		{Narrows, Request, Guards{Tolerated: true}, Err},
-		// Both guard classes stack: ERR → WARN → INFO.
-		{Narrows, Response, Guards{OptionalOnly: true, Tolerated: true}, Info},
+		{Narrows, Request, Guaranteed, Guards{}, Err},
+		{Narrows, Request, Optional, Guards{}, Warn},
+		{Widens, Request, Guaranteed, Guards{}, Info},
+		{Widens, Request, Optional, Guards{}, Info},
+		{Narrows, Response, Guaranteed, Guards{}, Err},
+		{Narrows, Response, Optional, Guards{}, Warn},
+		{Widens, Response, Guaranteed, Guards{}, Warn},
+		{Widens, Response, Optional, Guards{}, Info},
+		{Incomparable, Request, Guaranteed, Guards{}, Err},
+		{Incomparable, Response, Guaranteed, Guards{}, Err},
+		{Unchanged, Request, Guaranteed, Guards{}, Info},
+		{Unchanged, Response, Optional, Guards{}, Info},
+		{Narrows, Request, Guaranteed, Guards{DeprecatedHonored: true}, Warn},
+		{Narrows, Response, Guaranteed, Guards{DeprecatedHonored: true}, Warn},
+		{Narrows, Request, Optional, Guards{DeprecatedHonored: true}, Warn},
+		{Narrows, Response, Guaranteed, Guards{Uncertain: true}, Warn},
+		{Incomparable, Response, Guaranteed, Guards{Uncertain: true}, Warn},
+		{Widens, Response, Guaranteed, Guards{Uncertain: true}, Warn},
+		{Widens, Request, Guaranteed, Guards{Uncertain: true}, Info},
+		{Widens, Request, Guaranteed, Guards{DeprecatedHonored: true}, Info},
+		{Widens, Request, Guaranteed, Guards{Tolerated: true}, Info},
+		{Widens, Response, Guaranteed, Guards{Tolerated: true}, Info},
+		{Narrows, Response, Guaranteed, Guards{Tolerated: true}, Info},
+		{Narrows, Response, Optional, Guards{Tolerated: true}, Info},
+		{Narrows, Request, Guaranteed, Guards{Tolerated: true}, Err},
+		{Narrows, Response, Guaranteed, Guards{Tolerated: true, Uncertain: true}, Info},
 	}
 	for _, c := range cases {
-		if got := DeriveLevel(c.effect, c.dir, c.guards); got != c.want {
-			t.Errorf("DeriveLevel(%s, %s, %+v) = %s, want %s", c.effect, c.dir, c.guards, got, c.want)
+		if got := DeriveLevel(c.effect, c.dir, c.scope, c.guards); got != c.want {
+			t.Errorf("DeriveLevel(%s, %s, %s, %+v) = %s, want %s", c.effect, c.dir, c.scope, c.guards, got, c.want)
+		}
+	}
+	for _, e := range []Effect{Narrows, Widens, Incomparable, Unchanged} {
+		for _, d := range []Direction{Request, Response} {
+			for _, s := range []Scope{Guaranteed, Optional} {
+				DeriveLevel(e, d, s, Guards{})
+			}
 		}
 	}
 }
@@ -196,20 +212,20 @@ func TestTypeLattice(t *testing.T) {
 		{"integer", "number", Request, Widens},
 		{"number", "integer", Request, Narrows},
 		{"integer", "number", Response, Widens},
-		{"number", "integer", Response, Shrinks},
+		{"number", "integer", Response, Narrows},
 		{"string", "object", Response, Incomparable},
 		{"boolean", "string", Request, Incomparable},
 	}
 	for _, c := range cases {
-		eff, changed := typeEffect(c.from, c.to, c.dir)
+		eff, _, changed := typeEffect(c.from, c.to, c.dir)
 		if !changed || eff != c.effect {
 			t.Errorf("typeEffect(%s→%s, %s) = %s/%v, want %s", c.from, c.to, c.dir, eff, changed, c.effect)
 		}
 	}
-	if _, changed := typeEffect("unknown", "string", Request); changed {
+	if _, _, changed := typeEffect("unknown", "string", Request); changed {
 		t.Error("unknown must abstain, never guess")
 	}
-	if _, changed := typeEffect("string", "string", Response); changed {
+	if _, _, changed := typeEffect("string", "string", Response); changed {
 		t.Error("equal types are not a change")
 	}
 }
@@ -257,8 +273,8 @@ func TestResponsePropertyLifecycle(t *testing.T) {
 		prop("extra", false, strSchema()),
 	))))
 	fs := Diff(oldDef, newDef)
-	if f := find(t, fs, "response-required-property-removed"); f.Level != Err {
-		t.Fatalf("guaranteed property removed: %+v", f)
+	if f := find(t, fs, "response-required-property-removed"); f.Level != Warn {
+		t.Fatalf("guaranteed property removed widens the response set, WARN by law: %+v", f)
 	}
 	// Additive response property is INFO (Tolerated guard), not WARN.
 	if f := find(t, fs, "response-property-added"); f.Level != Info {
