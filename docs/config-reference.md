@@ -397,15 +397,17 @@ and each degradation explains which fields missed.
 
 ```yaml
 llm:
-  provider: openrouter          # openrouter (default) or openai
+  provider: openrouter          # openrouter (default), openai, or anthropic
   api_key: sk-or-...            # provider-neutral key
   model: openai/gpt-4o-mini     # optional; this is the OpenRouter default
   # openrouter_key: sk-or-...   # deprecated alias, still honoured
 ```
 
 Bring your own key. pikopod never ships a key and never proxies your requests
-through anyone else. The registered providers are `openrouter` and `openai`.
-OpenRouter defaults to `openai/gpt-4o-mini`; OpenAI defaults to `gpt-4o-mini`.
+through anyone else. The registered providers are `openrouter`, `openai`, and
+`anthropic`. OpenRouter defaults to `openai/gpt-4o-mini`; OpenAI defaults to
+`gpt-4o-mini`; Anthropic defaults to the pinned
+`claude-3-5-haiku-20241022` model.
 The `Provider` boundary is the extension point for additional providers.
 
 Adding one is two edits: a name and its key environment variables in
@@ -418,7 +420,8 @@ Key resolution is deterministic and stops at the first value found:
 
 1. `llm.api_key`
 2. `PIKOPOD_LLM_KEY`
-3. the provider's standard environment variable (`OPENROUTER_API_KEY` or `OPENAI_API_KEY`)
+3. the provider's standard environment variable (`OPENROUTER_API_KEY`,
+   `OPENAI_API_KEY`, or `ANTHROPIC_API_KEY`)
 4. for OpenRouter only, deprecated `PIKOPOD_OPENROUTER_KEY` or
    `llm.openrouter_key`
 
