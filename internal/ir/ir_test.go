@@ -57,26 +57,18 @@ func TestCanonicalStripsVolatileBackPointers(t *testing.T) {
 	}
 }
 
-// IsGuess vs IsUncertain is the enforcement boundary: a per-field heuristic
-// (INFERRED) is a guess and must never gate sandbox auth/validation, while
-// LLM_EXTRACTED is uncertain-but-simulatable (Tier-C contracts ARE the
-// product). Conflating the two either enforces guesses or stops simulating
-// extracted contracts.
 func TestProvenanceTierGates(t *testing.T) {
 	cases := []struct {
 		p         ir.Prov[string]
-		guess     bool
 		uncertain bool
 	}{
-		{ir.Explicit("x", "e"), false, false},
-		{ir.Derived("x", "e"), false, false},
-		{ir.Inferred("x", 0.7, "rule"), true, true},
-		{ir.Prov[string]{Value: "x", Provenance: ir.ProvenanceLLMExtracted, Confidence: 0.7}, false, true},
+		{ir.Explicit("x", "e"), false},
+		{ir.Derived("x", "e"), false},
+		{ir.Prov[string]{Value: "x", Provenance: ir.ProvenanceLLMExtracted, Confidence: 0.7}, true},
 	}
 	for _, c := range cases {
-		if c.p.IsGuess() != c.guess || c.p.IsUncertain() != c.uncertain {
-			t.Fatalf("%s: IsGuess=%v IsUncertain=%v, want %v/%v",
-				c.p.Provenance, c.p.IsGuess(), c.p.IsUncertain(), c.guess, c.uncertain)
+		if c.p.IsUncertain() != c.uncertain {
+			t.Fatalf("%s: IsUncertain=%v, want %v", c.p.Provenance, c.p.IsUncertain(), c.uncertain)
 		}
 	}
 }

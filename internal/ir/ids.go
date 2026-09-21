@@ -57,24 +57,8 @@ func AuthSchemeID(name string) string {
 	return "au_" + shortHash(name)
 }
 
-func ResourceID(name string) string {
-	return "rs_" + shortHash(name)
-}
-
 func WebhookID(event string) string {
 	return "wh_" + shortHash(event)
-}
-
-func ErrorEntryID(statusCode, schemaRef string) string {
-	return "er_" + shortHash(statusCode+":"+schemaRef)
-}
-
-func RelationshipID(fromResourceID, toResourceID, viaField string) string {
-	return "rl_" + shortHash(fromResourceID+"->"+toResourceID+":"+viaField)
-}
-
-func StateTransitionID(resourceID, field, toState string) string {
-	return "st_" + shortHash(resourceID+":"+field+":"+toState)
 }
 
 func ExampleID(forNodeID, mediaType string) string {

@@ -96,9 +96,6 @@ func looksLikeRealSecret(value string) bool {
 // isEnforceableScheme: only apiKey (with a known parameter name) and HTTP
 // bearer/basic are simulated; provenance must be trusted (not INFERRED/LLM).
 func isEnforceableScheme(scheme *ir.AuthScheme) bool {
-	if scheme.Kind.IsGuess() {
-		return false // heuristic guesses are never enforced; LLM-extracted schemes are (ir.Prov.IsGuess)
-	}
 	switch scheme.Kind.Value {
 	case "apiKey":
 		return scheme.ParameterName != nil

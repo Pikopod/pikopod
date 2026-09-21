@@ -80,18 +80,17 @@ degrading quietly. The fetching is broader than one page; see
 [security notes](security.md#importing-from-a-documentation-url-fetches-more-than-one-page).
 
 Every field carries **provenance**: `EXPLICIT` (stated in the source), `DERIVED`
-(a deterministic transformation of it), `INFERRED` (a heuristic, with a stated
-rule), or `LLM_EXTRACTED` (model output). The levels never merge, because
-inferred behavior must not be presented as documented behavior.
+(a deterministic transformation of it), or `LLM_EXTRACTED` (model output). The
+levels never merge, because extracted behavior must not be presented as
+documented behavior.
 
 **A model-written contract is simulated, not refused** — and that distinction is
-deliberate rather than an oversight. The sandbox declines to *enforce* only
-`INFERRED` fields, because a heuristic guess about auth or validation produces a
-test that fails for reasons unrelated to your code. Model-extracted fields are
-simulated so the sandbox is useful at all for a provider that ships no spec, but
-they are marked `DRAFT` in `pikopod sandbox list`, capped at
-`POTENTIALLY_BREAKING` in any spec diff, and lose to observed traffic whenever
-the two disagree. The guess is carried, labelled, and outranked — not trusted.
+deliberate rather than an oversight. Model-extracted fields are simulated so the
+sandbox is useful at all for a provider that ships no spec, but they are marked
+`DRAFT` in `pikopod sandbox list`, capped at `POTENTIALLY_BREAKING` in any spec
+diff, never unlock redaction, cannot bind a failure archetype without an
+explicit `--bind`, and lose to observed traffic whenever the two disagree. The
+guess is carried, labelled, and outranked — not trusted.
 
 ### Sandbox
 

@@ -20,10 +20,6 @@ const llmSpecFixture = `{
   "components": {"securitySchemes": {"bearerAuth": {"type": "http", "scheme": "bearer"}}}
 }`
 
-// A model-written contract tells the truth about itself — DRAFT
-// status, every provenance tier LLM_EXTRACTED with capped confidence,
-// evidence preserved — while the sandbox still ENFORCES it (IsGuess, not
-// IsUncertain, gates enforcement).
 func TestLLMExtractedProvenance(t *testing.T) {
 	def, err := NormalizeLLMExtracted([]byte(llmSpecFixture))
 	if err != nil {
@@ -51,14 +47,9 @@ func TestLLMExtractedProvenance(t *testing.T) {
 	if checkedProvs == 0 {
 		t.Fatal("no provenance fields checked")
 	}
-	// The enforcement split: LLM_EXTRACTED is uncertain (differs/bindings
-	// surface it) but NOT a guess (the sandbox still simulates it).
 	scheme := def.AuthSchemes[0].Kind
 	if !scheme.IsUncertain() {
 		t.Fatal("LLM_EXTRACTED must read as uncertain for diff/bind surfacing")
-	}
-	if scheme.IsGuess() {
-		t.Fatal("LLM_EXTRACTED must NOT read as a per-field guess — the sandbox enforces it")
 	}
 	// NormalizerVersion names the origin.
 	if got := def.NormalizerVersion; got != ir.NormalizerVersion+"+llm-extracted" {

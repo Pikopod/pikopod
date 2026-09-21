@@ -123,7 +123,7 @@ func (c *checker) walk(endpoint *ir.Endpoint, status int, node *ir.IrSchemaNode,
 	}
 
 	if value == nil {
-		if !node.Nullable.Value && !node.Nullable.IsGuess() && node.Type.Value != "" && !node.Type.IsGuess() {
+		if !node.Nullable.Value && node.Type.Value != "" {
 			if c.suppressed(pointer) {
 				return
 			}
@@ -133,7 +133,7 @@ func (c *checker) walk(endpoint *ir.Endpoint, status int, node *ir.IrSchemaNode,
 		return
 	}
 
-	if want := scalarClass(string(node.Type.Value)); want != "" && !node.Type.IsGuess() {
+	if want := scalarClass(string(node.Type.Value)); want != "" {
 		got := jsonClass(value)
 		if got != "" && got != want {
 			if c.suppressed(pointer) {
@@ -147,7 +147,7 @@ func (c *checker) walk(endpoint *ir.Endpoint, status int, node *ir.IrSchemaNode,
 
 	// Value-volatile fields (request ids, timestamps) are exempt: an enum claim
 	// over a churning value is a spec-authoring artifact, not a violation.
-	if s, isStr := value.(string); isStr && node.EnumValues != nil && !node.EnumValues.IsGuess() &&
+	if s, isStr := value.(string); isStr && node.EnumValues != nil &&
 		!volatile.IsResponseField(lastPointerSegment(pointer)) {
 		allowed := stringEnum(node.EnumValues.Value)
 		if len(allowed) > 0 && !slices.Contains(allowed, s) {
@@ -166,7 +166,7 @@ func (c *checker) walk(endpoint *ir.Endpoint, status int, node *ir.IrSchemaNode,
 			childPtr := pointer + "/" + p.Name
 			child, present := v[p.Name]
 			if !present {
-				if p.Required.Value && !p.Required.IsGuess() {
+				if p.Required.Value {
 					if mode, redacted := c.redacted[childPtr]; redacted && mode == "DROP" {
 						// The sanitizer removed it — absence proves nothing.
 						c.report.Unverifiable++

@@ -12,7 +12,7 @@ import (
 const validateMaxDepth = 8
 
 func isEnforceableSchema(schema *ir.IrSchemaNode) bool {
-	return schema != nil && !schema.Type.IsGuess() // LLM-extracted schemas validate; heuristic guesses do not
+	return schema != nil
 }
 
 // bodyTypeMatches mirrors typeMatches over the parsed JSON value model
