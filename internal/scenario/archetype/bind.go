@@ -1,4 +1,4 @@
-// The deterministic archetype binder. A candidate resting SOLELY on INFERRED
+// The deterministic archetype binder. A candidate resting SOLELY on extracted
 // facts is rejected; zero candidates is a first-class result with a reason.
 package archetype
 

@@ -261,6 +261,11 @@ absent does not merge, whatever it buys.
 anything that writes records, the canary test in `internal/agent` must still
 pass. It seeds sentinels into every position and sweeps every persisted byte.
 
+**A field on the IR that nothing reads is deleted, not parked.**
+`internal/ir`'s reader audit fails the build on a field no code outside the
+producers reads; serialisation-only fields need a one-line reason in its
+exemption list.
+
 **Refuse rather than guess.** If a check cannot be proven, report that it could
 not be proven. See how `conformance` counts unverifiable checks, how archetype
 binding treats zero candidates as a first-class answer with a reason, and how

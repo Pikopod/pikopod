@@ -95,11 +95,8 @@ func TestConformanceSuppressesRedactedEvidence(t *testing.T) {
 	}
 }
 
-// Provenance gating: INFERRED spec claims are guesses and never violate.
-func TestConformanceSkipsGuessedClaims(t *testing.T) {
+func TestLLMExtractedClaimsStillChecked(t *testing.T) {
 	def := specDef(t)
-	// Downgrade the enum claim to a heuristic guess — walking the inline
-	// response schema, which is where this spec carries it.
 	downgraded := false
 	for i := range def.Endpoints {
 		for j := range def.Endpoints[i].Responses {
@@ -107,7 +104,8 @@ func TestConformanceSkipsGuessedClaims(t *testing.T) {
 				props := def.Endpoints[i].Responses[j].Content[k].Schema.Properties
 				for m := range props {
 					if props[m].Name == "status" && props[m].Schema.EnumValues != nil {
-						props[m].Schema.EnumValues.Provenance = ir.ProvenanceInferred
+						props[m].Schema.EnumValues.Provenance = ir.ProvenanceLLMExtracted
+						props[m].Schema.EnumValues.Confidence = 0.7
 						downgraded = true
 					}
 				}
@@ -122,7 +120,8 @@ func TestConformanceSkipsGuessedClaims(t *testing.T) {
 	})
 	for _, v := range report.Violations {
 		if v.Code == "enum" {
-			t.Fatalf("a guessed enum claim must never violate: %+v", v)
+			return
 		}
 	}
+	t.Fatalf("an extracted enum claim is still a claim the provider can break: %+v", report.Violations)
 }

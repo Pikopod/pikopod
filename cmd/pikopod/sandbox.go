@@ -399,13 +399,14 @@ func sandboxList(cfg *config.Config, out io.Writer) error {
 	}
 	for _, e := range entries {
 		marking := ""
-		if e.Origin == "llm-extracted" {
+		_, def, defErr := loadSandboxDef(cfg, e.Name)
+		if defErr == nil && def.Status == "DRAFT" {
 			marking = "  ⚠ DRAFT (LLM_EXTRACTED: model-written from prose docs; shapes are best-effort)"
 		} else if e.Origin != "" && e.Origin != "spec" {
 			marking = "  origin=" + e.Origin
 		}
 		fmt.Fprintf(out, "%-20s %s  mode=%s seed=%s  route=/%s/  ir=%s%s\n  credential: %s\n", e.Name, e.ID, e.Mode, e.Seed, e.Name, e.IRFile, marking, sandbox.IssuedCredential(e.Seed))
-		if _, def, err := loadSandboxDef(cfg, e.Name); err == nil && len(def.Webhooks) > 0 {
+		if defErr == nil && len(def.Webhooks) > 0 {
 			declared, triggered, emitOnly, untriggered := webhookCounts(def)
 			line := fmt.Sprintf("  webhooks: %d declared, %d triggered, %d emit-only", declared, triggered, emitOnly)
 			if untriggered > 0 {

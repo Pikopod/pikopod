@@ -62,7 +62,7 @@ type Guards struct {
 	// A widening consumers tolerate by dominant convention (an added response
 	// property, unlike an added enum value). WARN → INFO.
 	Tolerated bool
-	// Either side rests on INFERRED/LLM_EXTRACTED provenance — a heuristic
+	// Either side rests on LLM_EXTRACTED provenance — an extracted claim
 	// must never page as a certain break. ERR → WARN.
 	Uncertain bool
 }

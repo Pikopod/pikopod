@@ -49,12 +49,6 @@ func TestExtractedEnumsUnlockNothing(t *testing.T) {
 	}
 	def, _ = importer.NormalizeOpenAPI([]byte(enumSpec))
 	for i := range def.Schemas {
-		walkProv(&def.Schemas[i].Schema, ir.ProvenanceInferred)
-	}
-	if rules := FromContract(def); len(rules) != 0 {
-		t.Fatalf("INFERRED enums produced rules: %+v", rules)
-	}
-	for i := range def.Schemas {
 		walkProv(&def.Schemas[i].Schema, ir.ProvenanceDerived)
 	}
 	if rules := FromContract(def); len(rules) != 3 {

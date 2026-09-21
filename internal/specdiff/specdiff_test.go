@@ -177,10 +177,10 @@ func TestNewOptionalParamIsInfo(t *testing.T) {
 	}
 }
 
-func TestInferredRequiredIsCappedAtWarn(t *testing.T) {
+func TestIsUncertainStillCoversLLMExtracted(t *testing.T) {
 	newEp := ep("GET", "/widgets")
 	newEp.Parameters = []ir.Parameter{{Name: "tenant", Location: "query",
-		Required: ir.Inferred(true, 0.6, "heuristic"), Schema: strSchema()}}
+		Required: ir.Prov[bool]{Value: true, Provenance: ir.ProvenanceLLMExtracted, Confidence: 0.6, Evidence: "extracted"}, Schema: strSchema()}}
 	fs := Diff(def(ep("GET", "/widgets")), def(newEp))
 	if f := find(t, fs, "param-added-required"); f.Level != Warn {
 		t.Fatalf("inferred-required must not page as certain break: %+v", f)

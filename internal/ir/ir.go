@@ -139,15 +139,6 @@ type NamedSchema struct {
 	SourcePointer string       `json:"sourcePointer"`
 }
 
-type Resource struct {
-	ID              string         `json:"id"`
-	Name            Prov[string]   `json:"name"`
-	Operations      Prov[[]string] `json:"operations"` // create|read|update|delete|list
-	EndpointIDs     []string       `json:"endpointIds"`
-	IdentifierField *Prov[string]  `json:"identifierField"`
-	SourcePointer   string         `json:"sourcePointer"`
-}
-
 type Webhook struct {
 	ID            string            `json:"id"`
 	Event         Prov[string]      `json:"event"`
@@ -168,40 +159,6 @@ type WebhookTrigger struct {
 	PathTemplate string `json:"pathTemplate"`
 }
 
-type ErrorEntry struct {
-	ID            string        `json:"id"`
-	StatusCode    string        `json:"statusCode"`
-	Description   *Prov[string] `json:"description"`
-	Schema        *IrSchemaNode `json:"schema"`
-	EndpointIDs   []string      `json:"endpointIds"`
-	SourcePointer string        `json:"sourcePointer"`
-}
-
-type Relationship struct {
-	ID             string        `json:"id"`
-	FromResourceID string        `json:"fromResourceId"`
-	ToResourceID   string        `json:"toResourceId"`
-	Kind           Prov[string]  `json:"kind"` // references|contains|unknown
-	ViaField       *Prov[string] `json:"viaField"`
-	SourcePointer  string        `json:"sourcePointer"`
-}
-
-type StateTransition struct {
-	ID            string        `json:"id"`
-	ResourceID    string        `json:"resourceId"`
-	Field         Prov[string]  `json:"field"`
-	FromState     *Prov[string] `json:"fromState"`
-	ToState       Prov[string]  `json:"toState"`
-	ViaEndpointID *Prov[string] `json:"viaEndpointId"`
-	SourcePointer string        `json:"sourcePointer"`
-}
-
-type PaginationStrategy struct {
-	Kind          Prov[string] `json:"kind"` // none|cursor|offset|page|link|unknown
-	Parameters    []string     `json:"parameters"`
-	SourcePointer string       `json:"sourcePointer"`
-}
-
 type Example struct {
 	ID            string    `json:"id"`
 	ForNodeID     string    `json:"forNodeId"`
@@ -219,30 +176,20 @@ type SourceTier = string
 // IrStatus: Tier C imports land DRAFT and require explicit human confirmation.
 type IrStatus = string
 
-// ApiStyle: RESOURCE_ORIENTED, ACTION_ORIENTED or MIXED; null until the
-// heuristic pass runs.
-type ApiStyle = string
-
 // ApiDefinition is the normalized internal representation — the versioned
 // contract between ingestion and every phase after it.
 type ApiDefinition struct {
-	IrVersion         string             `json:"irVersion"`
-	NormalizerVersion string             `json:"normalizerVersion"`
-	Status            IrStatus           `json:"status"`
-	SourceKind        SourceKind         `json:"sourceKind"`
-	SourceTier        SourceTier         `json:"sourceTier"`
-	Metadata          Metadata           `json:"metadata"`
-	Servers           []Server           `json:"servers"`
-	AuthSchemes       []AuthScheme       `json:"authSchemes"`
-	Endpoints         []Endpoint         `json:"endpoints"`
-	Schemas           []NamedSchema      `json:"schemas"`
-	Resources         []Resource         `json:"resources"`
-	ApiStyle          *Prov[ApiStyle]    `json:"apiStyle"`
-	Webhooks          []Webhook          `json:"webhooks"`
-	WebhookEnvelope   *WebhookEnvelope   `json:"webhookEnvelope,omitempty"`
-	ErrorCatalogue    []ErrorEntry       `json:"errorCatalogue"`
-	Relationships     []Relationship     `json:"relationships"`
-	StateTransitions  []StateTransition  `json:"stateTransitions"`
-	Pagination        PaginationStrategy `json:"pagination"`
-	Examples          []Example          `json:"examples"`
+	IrVersion         string           `json:"irVersion"`
+	NormalizerVersion string           `json:"normalizerVersion"`
+	Status            IrStatus         `json:"status"`
+	SourceKind        SourceKind       `json:"sourceKind"`
+	SourceTier        SourceTier       `json:"sourceTier"`
+	Metadata          Metadata         `json:"metadata"`
+	Servers           []Server         `json:"servers"`
+	AuthSchemes       []AuthScheme     `json:"authSchemes"`
+	Endpoints         []Endpoint       `json:"endpoints"`
+	Schemas           []NamedSchema    `json:"schemas"`
+	Webhooks          []Webhook        `json:"webhooks"`
+	WebhookEnvelope   *WebhookEnvelope `json:"webhookEnvelope,omitempty"`
+	Examples          []Example        `json:"examples"`
 }

@@ -55,18 +55,7 @@ func normalizeOpenAPIValue(parsed any, limits ParseLimits, status string) (*ir.A
 		Schemas:           schemas,
 		Webhooks:          webhooks,
 		WebhookEnvelope:   envelope,
-		// Heuristic collections — populated by the analysis increment.
-		Resources:        []ir.Resource{},
-		ApiStyle:         nil,
-		ErrorCatalogue:   []ir.ErrorEntry{},
-		Relationships:    []ir.Relationship{},
-		StateTransitions: []ir.StateTransition{},
-		Pagination: ir.PaginationStrategy{
-			Kind:          ir.Derived("unknown", "#"),
-			Parameters:    []string{},
-			SourcePointer: "#",
-		},
-		Examples: examples,
+		Examples:          examples,
 	}, nil
 }
 
