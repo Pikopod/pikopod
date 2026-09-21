@@ -119,7 +119,7 @@ func IsWebhookFaultKind(kind string) bool { return isWebhookFaultKind(kind) }
 
 var faultKinds = []string{
 	"error", "latency", "hang", "slow_body", "rate_limit",
-	FaultConnectionReset, FaultMalformedResponse, FaultWrongContentLength,
+	FaultConnectionReset, FaultMalformedResponse, FaultEmptyResponse, FaultRandomDataThenClose, FaultWrongContentLength,
 	FaultDuplicateWebhook, FaultDropWebhook, FaultReorderWebhook, FaultDelayWebhook,
 }
 
@@ -154,9 +154,10 @@ const RateLimitRetryAfterSec = 30
 const (
 	FaultConnectionReset = "connection_reset"
 
-	FaultMalformedResponse = "malformed_response"
-
-	FaultWrongContentLength = "wrong_content_length"
+	FaultMalformedResponse   = "malformed_response"
+	FaultEmptyResponse       = "empty_response"
+	FaultRandomDataThenClose = "random_data_then_close"
+	FaultWrongContentLength  = "wrong_content_length"
 )
 
 const (
@@ -212,9 +213,11 @@ type wireFault struct {
 	hangMs     int64
 	slowBodyMs int64
 
-	resetConn   bool
-	malformed   bool
-	wrongLength bool
+	resetConn     bool
+	malformed     bool
+	emptyResponse bool
+	randomData    bool
+	wrongLength   bool
 }
 
 func (e *Engine) handleWire(req *ingressRequest, innerPath string) (*RawResponse, *wireFault, error) {
@@ -258,7 +261,8 @@ func (e *Engine) handleWire(req *ingressRequest, innerPath string) (*RawResponse
 	var wf *wireFault
 	if fx.wallclock {
 		wf = &wireFault{sleepMs: fx.delayMs, hangMs: fx.hangMs, slowBodyMs: fx.slowBodyMs,
-			resetConn: fx.resetConn, malformed: fx.malformed, wrongLength: fx.wrongLength}
+			resetConn: fx.resetConn, malformed: fx.malformed, emptyResponse: fx.emptyResponse,
+			randomData: fx.randomData, wrongLength: fx.wrongLength}
 	}
 	if fx.errResp != nil {
 		annotateFault(fx.errResp, fx.delayMs, fx.kinds)
@@ -299,15 +303,17 @@ func annotateFault(resp *RawResponse, delayMs int64, kinds []string) {
 }
 
 type faultOutcome struct {
-	delayMs     int64
-	kinds       []string
-	errResp     *RawResponse
-	hangMs      int64
-	slowBodyMs  int64
-	wallclock   bool
-	resetConn   bool
-	malformed   bool
-	wrongLength bool
+	delayMs       int64
+	kinds         []string
+	errResp       *RawResponse
+	hangMs        int64
+	slowBodyMs    int64
+	wallclock     bool
+	resetConn     bool
+	malformed     bool
+	emptyResponse bool
+	randomData    bool
+	wrongLength   bool
 }
 
 func (e *Engine) evaluateFaults(endpoint *ir.Endpoint, req *ingressRequest, innerPath string) faultOutcome {
@@ -397,6 +403,12 @@ func (e *Engine) evaluateFaults(endpoint *ir.Endpoint, req *ingressRequest, inne
 		case FaultMalformedResponse:
 			out.malformed = true
 			out.kinds = append(out.kinds, FaultMalformedResponse)
+		case FaultEmptyResponse:
+			out.emptyResponse = true
+			out.kinds = append(out.kinds, FaultEmptyResponse)
+		case FaultRandomDataThenClose:
+			out.randomData = true
+			out.kinds = append(out.kinds, FaultRandomDataThenClose)
 		case FaultWrongContentLength:
 			out.wrongLength = true
 			out.kinds = append(out.kinds, FaultWrongContentLength)

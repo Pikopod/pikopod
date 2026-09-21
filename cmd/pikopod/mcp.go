@@ -525,7 +525,7 @@ func mcpServer(cfg *config.Config) *mcp.Server {
 		}})
 
 	s.Register(mcp.Tool{Name: "arm_fault", Annotations: controlsFake(),
-		Description: "Arm one fault on a RUNNING sandbox: error (with status), latency, hang, slow_body, rate_limit, connection_reset, malformed_response, wrong_content_length, or a webhook fault (duplicate_webhook, drop_webhook, reorder_webhook, delay_webhook, matched by event). HTTP faults need method and path template; webhook faults do not. Stands until clear_faults. Controls a local fake, never a provider.",
+		Description: "Arm one fault on a RUNNING sandbox: error (with status), latency, hang, slow_body, rate_limit, connection_reset, empty_response, random_data_then_close, malformed_response, wrong_content_length, or a webhook fault (duplicate_webhook, drop_webhook, reorder_webhook, delay_webhook, matched by event). HTTP faults need method and path template; webhook faults do not. Stands until clear_faults. Controls a local fake, never a provider.",
 		InputSchema: schema([]string{"sandbox", "kind"}, map[string]any{"sandbox": prop("string", "sandbox name"), "kind": prop("string", strings.Join(sandbox.FaultKinds(), " | ")), "method": prop("string", "HTTP method of the target operation"), "path": prop("string", "path template as in the spec"), "status": prop("integer", "status for kind=error (default 500)"), "event": prop("string", "webhook event for webhook kinds (default any)"), "probability": prop("number", "0..1 (default 1)"), "delay_ms": prop("integer", "for latency / delay_webhook")}),
 		Handler: func(_ context.Context, raw json.RawMessage) (any, error) {
 			var args struct {
