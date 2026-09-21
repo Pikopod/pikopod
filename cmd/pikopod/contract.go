@@ -3,9 +3,12 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
+	"time"
 
+	"github.com/pikopod/pikopod/internal/behaviour"
 	"github.com/pikopod/pikopod/internal/config"
 	"github.com/pikopod/pikopod/internal/contract"
 	"github.com/pikopod/pikopod/internal/errfmt"
@@ -14,36 +17,83 @@ import (
 )
 
 func newContractCmd() *cobra.Command {
-	return &cobra.Command{Use: "contract <sandbox>", Short: "Show the effective contract: traffic-admitted additions, spec-vs-traffic contradictions, pin staleness", Args: cobra.ExactArgs(1),
+	c := &cobra.Command{Use: "contract <sandbox>", Short: "Show the effective contract: traffic-admitted additions, spec-vs-traffic contradictions, pin staleness, observed state machine", Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg, err := loadConfig(cmd)
 			if err != nil {
 				return err
 			}
+			format, _ := cmd.Flags().GetString("format")
+			if format == "json" {
+				return contractJSON(cfg, args[0], cmd.OutOrStdout())
+			}
+			if format != "" && format != "text" {
+				return errfmt.New("unknown --format "+format, "contract renders text (default) or json", "e.g. pikopod contract examplepay --format json", "")
+			}
 			return contractReport(cfg, args[0], cmd.OutOrStdout())
 		}}
+	c.Flags().String("format", "text", "output format: text | json")
+	return c
 }
 
-func contractReport(cfg *config.Config, sandboxName string, out io.Writer) error {
+func upstreamOf(cfg *config.Config, sandboxName string) (string, error) {
 	entries, err := loadRegistry(cfg.DataDir)
 	if err != nil {
-		return err
+		return "", err
 	}
 	entry := findEntry(entries, sandboxName)
 	if entry == nil {
-		return errfmt.New("unknown sandbox: "+sandboxName, "nothing registered under that name", "see `pikopod sandbox list`", "")
+		return "", errfmt.New("unknown sandbox: "+sandboxName, "nothing registered under that name", "see `pikopod sandbox list`", "")
 	}
-	upstream := entry.Upstream
-	if upstream == "" {
-		upstream = entry.Name
+	if entry.Upstream != "" {
+		return entry.Upstream, nil
+	}
+	return entry.Name, nil
+}
+
+func behaviourReport(cfg *config.Config, upstream string) (*behaviour.Report, error) {
+	g, err := behaviour.Load(cfg.DataDir, upstream)
+	if err != nil || g == nil {
+		return nil, err
+	}
+	return behaviour.BuildReport(g, cfg.Warmup.MinSamples, time.Duration(*cfg.Warmup.MinHours)*time.Hour, time.Now()), nil
+}
+
+func contractJSON(cfg *config.Config, sandboxName string, out io.Writer) error {
+	upstream, err := upstreamOf(cfg, sandboxName)
+	if err != nil {
+		return err
 	}
 	ov, err := contract.LoadOverlay(cfg.DataDir, upstream)
+	if err != nil {
+		return err
+	}
+	beh, err := behaviourReport(cfg, upstream)
+	if err != nil {
+		return err
+	}
+	enc := json.NewEncoder(out)
+	enc.SetIndent("", "  ")
+	return enc.Encode(map[string]any{"sandbox": sandboxName, "upstream": upstream, "overlay": ov, "behaviour": beh})
+}
+
+func contractReport(cfg *config.Config, sandboxName string, out io.Writer) error {
+	upstream, err := upstreamOf(cfg, sandboxName)
+	if err != nil {
+		return err
+	}
+	ov, err := contract.LoadOverlay(cfg.DataDir, upstream)
+	if err != nil {
+		return err
+	}
+	beh, err := behaviourReport(cfg, upstream)
 	if err != nil {
 		return err
 	}
 	if ov == nil || ov.Version == 0 {
 		fmt.Fprintf(out, "%s: spec contract only — no traffic admissions yet\n", sandboxName)
 		fmt.Fprintln(out, "enable `refine.enabled: true` and run real traffic through the agent; matured observations are admitted on persist ticks (see docs/config-reference.md#refine)")
+		writeBehaviour(out, beh)
 		return nil
 	}
 
@@ -108,5 +158,15 @@ func contractReport(cfg *config.Config, sandboxName string, out io.Writer) error
 		}
 	}
 	fmt.Fprintln(out, "\nadmissions happen automatically on agent persist ticks; accepted drift re-freezes via `pikopod accept <fingerprint>`")
+	writeBehaviour(out, beh)
 	return nil
+}
+
+func writeBehaviour(out io.Writer, beh *behaviour.Report) {
+	if beh == nil {
+		fmt.Fprintln(out, "\nno observed state machine yet: enable `behaviour.enabled: true` and let resources change state through the agent (see docs/config-reference.md#behaviour)")
+		return
+	}
+	fmt.Fprintln(out)
+	beh.WriteText(out, time.Now())
 }

@@ -319,6 +319,43 @@ default is traffic-wins once the sustain gates clear.
 
 Inspect the result with `pikopod contract <sandbox>`.
 
+## behaviour
+
+```yaml
+behaviour:
+  enabled: false
+```
+
+Off by default. When enabled, the agent learns the provider's **observed state
+machine** from traffic: for each resource it sees more than once (a path with
+an identifier segment, such as `/charges/{id}`), every low-cardinality string
+field whose value changed between two recordings records an edge, `pending →
+succeeded`, with a count. Nothing in a specification can say this; only
+traffic can.
+
+`pikopod contract <sandbox>` renders the graph (and `--format json` emits it):
+
+```
+observed state machine — examplepay
+
+  GET /charges/{id} · status          (412 transitions over 9 days)
+    pending      → succeeded      380
+    pending      → failed          31
+    succeeded    → refunded         1     ← seen once
+    never observed: failed → pending, succeeded → pending
+```
+
+`never observed` is an absence in recorded traffic, listed only once the field
+has cleared both warmup gates, and never a claim that the provider cannot make
+the transition. **Nothing here is enforced**: the sandbox is untouched.
+
+What is stored is the aggregate graph only: field paths, value pairs, counts
+and timestamps under `data_dir/apis/<upstream>.behaviour.json`. The previous
+value per resource lives in a bounded in-memory cache and is never written,
+so a restart loses in-flight edges rather than persisting per-resource data.
+Fields the sanitizer tokenized or dropped are invisible; `volatile_fields`
+and `mute` apply here as everywhere else.
+
 ## quotas
 
 Sandbox resource limits, fixed rather than configured:

@@ -84,6 +84,10 @@ type LLM struct {
 	OpenRouterKey string `yaml:"openrouter_key,omitempty"`
 }
 
+type Behaviour struct {
+	Enabled bool `yaml:"enabled,omitempty"`
+}
+
 // Refine controls contract refinement from observed traffic, keeping one
 // behavioral model. Off by default.
 type Refine struct {
@@ -140,6 +144,7 @@ type Config struct {
 	LLM         LLM                 `yaml:"llm,omitempty"`
 	Warmup      Warmup              `yaml:"warmup,omitempty"`
 	Refine      Refine              `yaml:"refine,omitempty"`
+	Behaviour   Behaviour           `yaml:"behaviour,omitempty"`
 	Sampling    Sampling            `yaml:"sampling,omitempty"`
 	Retention   Retention           `yaml:"retention,omitempty"`
 	SpecWatch   SpecWatch           `yaml:"spec_watch,omitempty"`
