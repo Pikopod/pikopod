@@ -101,9 +101,6 @@ func asFloat(t *testing.T, v any) float64 {
 	return 0
 }
 
-// The anti-over-chaining rule: short literals, enum words, amounts and
-// booleans NEVER chain, even when repeated verbatim (Keploy's global
-// value-equality is the anti-pattern).
 func TestFromRecordingsNeverChainsShortLiterals(t *testing.T) {
 	records := []*proxy.Record{
 		trec("POST", "/charges", 201, map[string]any{"currency": "NGN"},

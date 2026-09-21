@@ -152,7 +152,6 @@ func TestDeadEntryLint(t *testing.T) {
 }
 
 func TestCuratedListsExactMatchNeverSubstring(t *testing.T) {
-	// The Keploy lesson: a "date" entry must not swallow "candidate_id".
 	if !IsResponseHeader("date") {
 		t.Fatal("date is volatile")
 	}

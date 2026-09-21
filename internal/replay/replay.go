@@ -23,16 +23,6 @@ import (
 	"github.com/pikopod/pikopod/internal/volatile"
 )
 
-// defaultVolatile: curated field names stripped before tier-1 hashing
-// (signatures, trace context, idempotency keys); exact-match, never substring.
-var defaultVolatile = func() map[string]bool {
-	m := map[string]bool{}
-	for _, n := range volatile.RequestFieldNames() {
-		m[n] = true
-	}
-	return m
-}()
-
 type Recording struct {
 	Record proxy.Record
 	// served marks tier-3 sequence consumption.
@@ -56,9 +46,11 @@ type ReportLine struct {
 
 // Set is an indexed, replayable set of recordings for one upstream.
 type Set struct {
-	mu        sync.Mutex
-	upstream  string
-	volatile  map[string]bool
+	mu       sync.Mutex
+	upstream string
+	// volatile: the user's entries plus the curated request-field list,
+	// stripped before tier-1 hashing; one matcher, drops attributed apart.
+	volatile  *volatile.Matcher
 	exact     map[string][]*Recording
 	shape     map[string][]*Recording
 	sequence  map[string][]*Recording
@@ -74,16 +66,14 @@ func Load(dataDir, upstream string, extraVolatile []string) (*Set, error) {
 		return nil, errfmt.Newf("no recordings for "+upstream, "run `pikopod up` and send traffic through the agent first", "docs/config-reference.md#data_dir", "%v", err)
 	}
 	defer f.Close()
+	m, _, err := volatile.CompileSets(extraVolatile, volatile.RequestFieldNames())
+	if err != nil {
+		return nil, err
+	}
 	s := &Set{
 		upstream: upstream,
-		volatile: map[string]bool{},
+		volatile: m,
 		exact:    map[string][]*Recording{}, shape: map[string][]*Recording{}, sequence: map[string][]*Recording{},
-	}
-	for k := range defaultVolatile {
-		s.volatile[k] = true
-	}
-	for _, v := range extraVolatile {
-		s.volatile[strings.ToLower(v)] = true
 	}
 	sc := bufio.NewScanner(f)
 	sc.Buffer(make([]byte, 0, 64<<10), 8<<20)
@@ -208,9 +198,9 @@ func (s *Set) MatchValueDiag(method, path string, parsed any) (*proxy.Record, Ma
 // because baseline.Flatten keeps values for strings only, missing amounts.
 func (s *Set) valueGap(reqBody, recBody any) []string {
 	reqF := map[string]string{}
-	flattenScalars(s.stripVolatile(reqBody), "", reqF)
+	flattenScalars(s.stripVolatile(reqBody, ""), "", reqF)
 	recF := map[string]string{}
-	flattenScalars(s.stripVolatile(recBody), "", recF)
+	flattenScalars(s.stripVolatile(recBody, ""), "", recF)
 	var out []string
 	for path, rv := range reqF {
 		if bv, ok := recF[path]; ok && rv != bv {
@@ -326,7 +316,7 @@ func takeUnserved(recs []*Recording) *Recording {
 }
 
 func (s *Set) exactKey(method, path string, body any) string {
-	h := sha256.Sum256([]byte(canonicalJSON(s.stripVolatile(body))))
+	h := sha256.Sum256([]byte(canonicalJSON(s.stripVolatile(body, ""))))
 	return method + "|" + normalizePath(path) + "|" + hex.EncodeToString(h[:6])
 }
 
@@ -344,27 +334,32 @@ func (s *Set) seqKey(method, path string) string {
 	return method + "|" + pathtmpl.Templatize(stripQuery(path))
 }
 
-// stripVolatile removes volatile fields recursively before hashing.
-func (s *Set) stripVolatile(node any) any {
+// stripVolatile removes volatile fields recursively before hashing, walking
+// with the learner's path convention so scoped entries apply.
+func (s *Set) stripVolatile(node any, path string) any {
 	switch n := node.(type) {
 	case map[string]any:
 		out := make(map[string]any, len(n))
 		for k, v := range n {
-			if s.volatile[strings.ToLower(k)] {
+			child := k
+			if path != "" {
+				child = path + "/" + k
+			}
+			if _, drop := s.volatile.Match(child); drop {
+				s.volatile.RecordDrop(child)
 				continue
 			}
-			out[k] = s.stripVolatile(v)
+			out[k] = s.stripVolatile(v, child)
 		}
 		return out
 	case []any:
 		out := make([]any, len(n))
 		for i, v := range n {
-			out[i] = s.stripVolatile(v)
+			out[i] = s.stripVolatile(v, path+"[]")
 		}
 		return out
-	default:
-		return node
 	}
+	return node
 }
 
 // GateResult is the offline CI gate's outcome; its findings mirror drift
@@ -386,9 +381,9 @@ type GateFinding struct {
 // Gate diffs an upstream's recordings offline against its FROZEN baselines.
 // Exit-code mapping (0 clean / 1 drift / 2 error) belongs to the CLI.
 func Gate(dataDir, upstream string, volatileFields []string) (*GateResult, error) {
-	volatile := map[string]bool{}
-	for _, v := range volatileFields {
-		volatile[strings.ToLower(v)] = true
+	m, _, err := volatile.Compile(volatileFields)
+	if err != nil {
+		return nil, err
 	}
 	fams, err := baseline.LoadFamilies(dataDir, upstream)
 	if err != nil {
@@ -419,8 +414,8 @@ func Gate(dataDir, upstream string, volatileFields []string) (*GateResult, error
 			continue
 		}
 		for _, f := range drift.DiffRecord(fam, rec.Status, rec.RespBody) {
-			if volatile[strings.ToLower(lastSegment(f.Field))] {
-				continue // config volatile_fields: never gate on churning fields
+			if _, drop := m.Match(f.Field); drop && f.Kind == string(drift.EnumValueNew) {
+				continue
 			}
 			res.Findings = append(res.Findings, GateFinding{Method: rec.Method, Template: template, Kind: f.Kind, Field: f.Field, Detail: f.Detail})
 		}
@@ -437,14 +432,6 @@ func Gate(dataDir, upstream string, volatileFields []string) (*GateResult, error
 	}
 	res.Findings = uniq
 	return res, nil
-}
-
-// lastSegment: "a/b[]/ref" → "ref".
-func lastSegment(path string) string {
-	if i := strings.LastIndexByte(path, '/'); i >= 0 {
-		path = path[i+1:]
-	}
-	return strings.TrimSuffix(path, "[]")
 }
 
 func parseBody(body []byte) any {

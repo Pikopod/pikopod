@@ -1,10 +1,9 @@
-// `pikopod volatile suggest <upstream>` — refusal-typed noise learning over
-// recorded traffic, plus the dead-entry linter for configured volatile_fields.
 package main
 
 import (
 	"fmt"
 
+	"github.com/pikopod/pikopod/internal/baseline"
 	"github.com/pikopod/pikopod/internal/errfmt"
 	"github.com/pikopod/pikopod/internal/volatile"
 	"github.com/spf13/cobra"
@@ -30,6 +29,12 @@ func newVolatileCmd() *cobra.Command {
 			an := volatile.Analyze(records, cfg.Upstreams[upstream].VolatileFields)
 			out := cmd.OutOrStdout()
 			fmt.Fprintf(out, "%d recording(s) analyzed\n", an.Records)
+			m, compileRefusals, err := volatile.Compile(cfg.Upstreams[upstream].VolatileFields)
+			if err != nil {
+				return err
+			}
+			an.Refusals = append(an.Refusals, compileRefusals...)
+			an.Refusals = append(an.Refusals, volatile.Collateral(baseline.NewLearner(upstream, cfg.DataDir, baseline.Warmup{}), m)...)
 
 			if len(an.Suggestions) == 0 {
 				fmt.Fprintln(out, "\nno suggestions — nothing churns that a volatile_fields entry could soundly silence")

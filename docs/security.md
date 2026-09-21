@@ -40,9 +40,9 @@ pikopod does not recognise is written verbatim.
 
 This is a deliberate trade, not an oversight — dropping every unrecognised
 number would discard most of what makes a baseline useful — and it is the one
-place redaction is not fail-closed. If that matters for a field, name it in
-`volatile_fields` or check it with `pikopod inspect` before you trust the
-recording.
+place redaction is not fail-closed. If that matters for a field, check it with
+`pikopod inspect` before you trust the recording; `volatile_fields` does not
+keep a field out of learning, it only stops its values from being tracked.
 
 Detection is generic — key names, value shape, entropy — never a list of
 provider-specific prefixes, so it does not silently stop working when you add a

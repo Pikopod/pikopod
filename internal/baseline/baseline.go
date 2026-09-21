@@ -30,6 +30,12 @@ type FieldStats struct {
 	Values map[string]int `json:"values,omitempty"`
 	// HighCardinality latches once distinct values exceed the cap.
 	HighCardinality bool `json:"high_cardinality,omitempty"`
+	// Churned latches when a value-suppressed field showed two distinct
+	// values: the evidence that the suppression is silencing something real.
+	Churned bool `json:"churned,omitempty"`
+	// lastValue is in-memory only: enough to notice churn, never persisted.
+	lastValue string
+	seenValue bool
 }
 
 type Family struct {
@@ -89,12 +95,19 @@ type Learner struct {
 	families map[string]*Family
 	path     string // persistence file
 	now      func() time.Time
-	// Field names excluded from learning and therefore diffing. Matched on a
-	// path's last segment, case-insensitive.
-	volatile map[string]bool
+	// matcher is the user's volatile_fields, injected by the agent; a match
+	// suppresses VALUE tracking only, so presence and type stay asserted.
+	matcher VolatileMatcher
 	// Value tracking suppressed while presence and type stay asserted:
 	// silencing these wholesale would delete coverage.
 	valueVolatile map[string]bool
+}
+
+// VolatileMatcher decides whether a flattened field path is user-configured
+// volatile. Injected by the agent; baseline never imports internal/volatile.
+type VolatileMatcher interface {
+	Match(path string) (entry string, ok bool)
+	RecordDrop(path string)
 }
 
 func key(method, template, statusClass string) string {
@@ -161,7 +174,6 @@ func (l *Learner) Observe(method, path string, status int, body any, ts time.Tim
 	}
 
 	fields := Flatten(body)
-	l.dropVolatileLocked(fields)
 
 	// Freeze check BEFORE absorbing this record: the record that crosses the
 	// warmup threshold is the first one diffed against the frozen reference.
@@ -195,6 +207,18 @@ func (l *Learner) Observe(method, path string, status int, body any, ts time.Tim
 			// nature), but keep counting presence and types above.
 			st.Values, st.HighCardinality = nil, true
 		}
+		if l.matcher != nil {
+			if _, volatile := l.matcher.Match(path); volatile {
+				st.Values, st.HighCardinality = nil, true
+				l.matcher.RecordDrop(path)
+				if fv.Type == "string" {
+					if st.seenValue && st.lastValue != fv.Value {
+						st.Churned = true
+					}
+					st.lastValue, st.seenValue = fv.Value, true
+				}
+			}
+		}
 		if fv.Type == "string" && !st.HighCardinality {
 			if st.Values == nil {
 				st.Values = map[string]int{}
@@ -208,15 +232,12 @@ func (l *Learner) Observe(method, path string, status int, body any, ts time.Tim
 	return obs
 }
 
-// SetVolatile installs the per-provider volatile field list (config
-// `volatile_fields`). Call before observing.
-func (l *Learner) SetVolatile(names []string) {
+// SetVolatileMatcher installs the user's compiled volatile_fields. Call
+// before observing; the matcher is shared with the agent for Drops().
+func (l *Learner) SetVolatileMatcher(m VolatileMatcher) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	l.volatile = map[string]bool{}
-	for _, n := range names {
-		l.volatile[strings.ToLower(n)] = true
-	}
+	l.matcher = m
 }
 
 // SetValueVolatile installs the curated value-volatile names (the agent
@@ -227,17 +248,6 @@ func (l *Learner) SetValueVolatile(names []string) {
 	l.valueVolatile = map[string]bool{}
 	for _, n := range names {
 		l.valueVolatile[strings.ToLower(n)] = true
-	}
-}
-
-func (l *Learner) dropVolatileLocked(fields map[string]FieldValue) {
-	if len(l.volatile) == 0 {
-		return
-	}
-	for path := range fields {
-		if l.volatile[strings.ToLower(lastFieldSegment(path))] {
-			delete(fields, path)
-		}
 	}
 }
 
