@@ -152,8 +152,14 @@ It reads straight from git with no checkout, and exits `0` clean / `1` breaking
 - run: |
     VERSION=0.1.0   # pin it; CI should not float on latest
     curl -fsSL "https://github.com/Pikopod/pikopod/releases/download/v${VERSION}/pikopod_${VERSION}_linux_amd64.tar.gz" | tar xz
-    ./pikopod spec-diff git:origin/main:openapi.yaml openapi.yaml --fail-on ERR
+    ./pikopod spec-diff git:origin/main:openapi.yaml openapi.yaml --format githubactions --fail-on ERR
 ```
+
+With `--format githubactions` every finding is a workflow command carrying the
+file and line it came from, so it appears inline on the pull request diff
+rather than only in the log. A spec split across files works too: relative
+`$ref`s resolve inside the same repository at the same ref (see
+[which `$ref`s are supported](docs/config-reference.md#ref-policy)).
 
 Severity is **derived by law**: one function maps the shape of a change — its
 effect, its direction, and any guards — onto `ERR`/`WARN`/`INFO`. No check

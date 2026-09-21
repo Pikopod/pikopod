@@ -13,10 +13,27 @@ type refResolver struct {
 	document    *OrdMap
 	limits      ParseLimits
 	resolutions int
+	external    *externalDocs
 }
 
 func newRefResolver(document *OrdMap, limits ParseLimits) *refResolver {
 	return &refResolver{document: document, limits: limits}
+}
+
+func newRefResolverFrom(document *OrdMap, limits ParseLimits, src *Source) (*refResolver, error) {
+	r := &refResolver{document: document, limits: limits}
+	if src == nil || src.Load == nil {
+		return r, nil
+	}
+	r.external = &externalDocs{src: src, docs: map[string]*OrdMap{}}
+	if err := r.external.rewriteRelative(document, src.Dir); err != nil {
+		return nil, err
+	}
+	return r, nil
+}
+
+func (r *refResolver) isExternal(pointer string) bool {
+	return r.external != nil && !strings.HasPrefix(pointer, "#") && !strings.Contains(pointer, "://") && !strings.HasPrefix(pointer, "//")
 }
 
 func (r *refResolver) isRef(node any) (string, bool) {
@@ -42,7 +59,7 @@ func (r *refResolver) resolveSeen(node any, seen map[string]bool) (any, error) {
 	if !ok {
 		return node, nil
 	}
-	if !strings.HasPrefix(pointer, "#/") {
+	if !strings.HasPrefix(pointer, "#/") && !r.isExternal(pointer) {
 		return nil, &SpecError{Code: SpecRefUnresolvable, Message: fmt.Sprintf("remote or external $ref is not permitted: %q", pointer), Pointer: pointer}
 	}
 	if seen[pointer] {
@@ -53,7 +70,22 @@ func (r *refResolver) resolveSeen(node any, seen map[string]bool) (any, error) {
 		return nil, specErr(SpecRefUnresolvable, "ref resolution budget exceeded")
 	}
 	seen[pointer] = true
-	target, found := r.getByPointer(pointer)
+	var target any
+	var found bool
+	if strings.HasPrefix(pointer, "#/") {
+		target, found = r.getByPointer(pointer)
+	} else {
+		file, frag := splitExternal(pointer)
+		doc, err := r.external.load(file, r.limits)
+		if err != nil {
+			return nil, err
+		}
+		if frag == "" {
+			target, found = doc, true
+		} else if strings.HasPrefix(frag, "#/") {
+			target, found = (&refResolver{document: doc}).getByPointer(frag)
+		}
+	}
 	if !found {
 		return nil, &SpecError{Code: SpecRefUnresolvable, Message: fmt.Sprintf("$ref target not found: %q", pointer), Pointer: pointer}
 	}

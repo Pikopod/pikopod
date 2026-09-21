@@ -14,6 +14,10 @@ import (
 var httpMethods = []string{"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS", "TRACE"}
 
 func normalizeOpenAPIValue(parsed any, limits ParseLimits, status string) (*ir.ApiDefinition, error) {
+	return normalizeOpenAPIValueFrom(parsed, limits, status, nil)
+}
+
+func normalizeOpenAPIValueFrom(parsed any, limits ParseLimits, status string, src *Source) (*ir.ApiDefinition, error) {
 	doc, ok := parsed.(*OrdMap)
 	if !ok {
 		return nil, specErr(SpecParseError, "root of an OpenAPI document must be an object")
@@ -21,7 +25,10 @@ func normalizeOpenAPIValue(parsed any, limits ParseLimits, status string) (*ir.A
 	if err := assertSupportedVersion(doc); err != nil {
 		return nil, err
 	}
-	resolver := newRefResolver(doc, limits)
+	resolver, err := newRefResolverFrom(doc, limits, src)
+	if err != nil {
+		return nil, err
+	}
 
 	examples := []ir.Example{}
 	endpoints, err := normalizeEndpoints(doc, resolver, limits, &examples)

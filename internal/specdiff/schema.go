@@ -28,11 +28,11 @@ func deref(n *ir.IrSchemaNode, table map[string]*ir.IrSchemaNode) *ir.IrSchemaNo
 
 // diffSchemaNodes compares one old/new schema pair in a direction, emitting
 // findings prefixed with `where` (human) and keyed on argKey (identity).
-func (d *differ) diffSchemaNodes(oldN, newN *ir.IrSchemaNode, dir Direction, where, argKey string, mk func(string, Level, string, ...string) Finding) {
+func (d *differ) diffSchemaNodes(oldN, newN *ir.IrSchemaNode, dir Direction, where, argKey string, mk mkFn) {
 	d.walkSchema(oldN, newN, dir, where, argKey, "", 0, mk)
 }
 
-func (d *differ) walkSchema(oldN, newN *ir.IrSchemaNode, dir Direction, where, argKey, path string, depth int, mk func(string, Level, string, ...string) Finding) {
+func (d *differ) walkSchema(oldN, newN *ir.IrSchemaNode, dir Direction, where, argKey, path string, depth int, mk mkFn) {
 	if depth > maxSchemaDepth || oldN == nil || newN == nil {
 		return
 	}
@@ -41,6 +41,7 @@ func (d *differ) walkSchema(oldN, newN *ir.IrSchemaNode, dir Direction, where, a
 	if oldN == nil || newN == nil {
 		return
 	}
+	mk = mk.at(newN.SourcePointer, oldN.SourcePointer)
 	// allOf is an intersection — a merge — so flatten and diff member-wise.
 	oldN = ir.FlattenAllOf(oldN, d.oldSchemas)
 	newN = ir.FlattenAllOf(newN, d.newSchemas)
@@ -147,7 +148,7 @@ func typeEffect(from, to string, dir Direction) (Effect, bool) {
 	}
 }
 
-func (d *differ) diffEnums(oldN, newN *ir.IrSchemaNode, dir Direction, label, argKey, path string, uncertain bool, mk func(string, Level, string, ...string) Finding) {
+func (d *differ) diffEnums(oldN, newN *ir.IrSchemaNode, dir Direction, label, argKey, path string, uncertain bool, mk mkFn) {
 	oldVals := enumSet(oldN.EnumValues)
 	newVals := enumSet(newN.EnumValues)
 	switch {
@@ -206,7 +207,7 @@ func (d *differ) diffEnums(oldN, newN *ir.IrSchemaNode, dir Direction, label, ar
 	}
 }
 
-func (d *differ) diffProperties(oldN, newN *ir.IrSchemaNode, dir Direction, where, argKey, path string, depth int, mk func(string, Level, string, ...string) Finding) {
+func (d *differ) diffProperties(oldN, newN *ir.IrSchemaNode, dir Direction, where, argKey, path string, depth int, mk mkFn) {
 	if len(oldN.Properties) == 0 && len(newN.Properties) == 0 {
 		return
 	}
@@ -230,6 +231,7 @@ func (d *differ) diffProperties(oldN, newN *ir.IrSchemaNode, dir Direction, wher
 		label := where + at(ppath)
 		np, ok := newBy[name]
 		if !ok {
+			mk := mk.at("", op.Schema.SourcePointer)
 			if dir == Request {
 				// Clients still sending it are usually ignored by servers.
 				d.emit(mk("request-property-removed",
@@ -246,6 +248,7 @@ func (d *differ) diffProperties(oldN, newN *ir.IrSchemaNode, dir Direction, wher
 			}
 			continue
 		}
+		mk := mk.at(np.Schema.SourcePointer, op.Schema.SourcePointer)
 		if !op.Required.Value && np.Required.Value {
 			if dir == Request {
 				d.emit(mk("request-property-became-required",
@@ -280,6 +283,7 @@ func (d *differ) diffProperties(oldN, newN *ir.IrSchemaNode, dir Direction, wher
 		np := newBy[name]
 		ppath := joinPath(path, name)
 		label := where + at(ppath)
+		mk := mk.at(np.Schema.SourcePointer, "")
 		if dir == Request {
 			if np.Required.Value {
 				d.emit(mk("request-property-added-required",

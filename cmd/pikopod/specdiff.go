@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"strings"
 
@@ -21,62 +22,85 @@ func newSpecDiffCmd() *cobra.Command {
 		Short: "Diff two API spec versions — declared drift, severity derived by law (exit 0 clean / 1 breaking / 2 error)",
 		Long: "Sources: a local file, an http(s) URL, or git:<ref>:<path> (read via `git show`, no checkout).\n" +
 			"Both sides are normalized to pikopod's IR first, so OpenAPI 3.x, Swagger 2.0 and Postman\n" +
-			"collections all diff — even against each other.",
+			"collections all diff — even against each other. A spec split across files works when the\n" +
+			"source is a file or a git ref: same-repository relative $refs resolve at the same ref; remote\n" +
+			"and absolute $refs are always refused.\n\n" +
+			"Exit 0 when nothing is at or above --fail-on, 1 when something is, 2 when a document cannot be\n" +
+			"loaded or normalized (never 1: a spec that fails to load is a tool problem, not drift).",
 		Args: cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			format, _ := cmd.Flags().GetString("format")
 			failOn, _ := cmd.Flags().GetString("fail-on")
-			floor, err := parseLevelFloor(failOn)
+			handoff, _ := cmd.Flags().GetString("handoff")
+			breaking, err := specDiff(args[0], args[1], specDiffOptions{Format: format, FailOn: failOn, Handoff: handoff}, cmd.OutOrStdout(), cmd.ErrOrStderr())
 			if err != nil {
 				return err
 			}
-			oldDef, err := loadSpecIR(args[0])
-			if err != nil {
-				return err
-			}
-			newDef, err := loadSpecIR(args[1])
-			if err != nil {
-				return err
-			}
-			findings := specdiff.Diff(oldDef, newDef)
-			report := specdiff.BuildReport(args[0], args[1], findings)
-			if handoff, _ := cmd.Flags().GetString("handoff"); handoff != "" {
-				f, hErr := os.Create(handoff)
-				if hErr != nil {
-					return hErr
-				}
-				if hErr := report.WriteJSON(f); hErr != nil {
-					f.Close()
-					return hErr
-				}
-				f.Close()
-			}
-			out := cmd.OutOrStdout()
-			switch format {
-			case "json":
-				if err := report.WriteJSON(out); err != nil {
-					return err
-				}
-			case "markdown":
-				report.WriteMarkdown(out)
-			case "text", "":
-				report.WriteText(out)
-			default:
-				return errfmt.New("unknown --format "+format, "spec-diff renders text (default), json, or markdown", "e.g. pikopod spec-diff old.yaml new.yaml --format markdown", "")
-			}
-			if specdiff.Breaking(findings, floor) {
-				// The report above IS the explanation; CI keys on the code.
-				if format == "text" || format == "" {
-					fmt.Fprintf(cmd.ErrOrStderr(), "\nbreaking declared drift at/above %s — failing the gate (exit 1)\n", floor)
-				}
-				os.Exit(1) // 1 = drift, distinct from 2 = tool error (docs/exit-codes.md)
+			if breaking {
+				os.Exit(1)
 			}
 			return nil
 		}}
-	c.Flags().String("format", "text", "output format: text | json | markdown")
+	c.Flags().String("format", "text", "output format: text | json | markdown | githubactions")
 	c.Flags().String("fail-on", "ERR", "exit 1 when findings at/above this level exist: ERR | WARN | INFO")
 	c.Flags().String("handoff", "", "also write the JSON report here (for `pikopod pr comment`)")
 	return c
+}
+
+type specDiffOptions struct {
+	Format  string
+	FailOn  string
+	Handoff string
+}
+
+func specDiff(oldSrc, newSrc string, o specDiffOptions, out, errOut io.Writer) (bool, error) {
+	floor, err := parseLevelFloor(o.FailOn)
+	if err != nil {
+		return false, err
+	}
+	switch o.Format {
+	case "json", "markdown", "githubactions", "text", "":
+	default:
+		return false, errfmt.New("unknown --format "+o.Format, "spec-diff renders text (default), json, markdown, or githubactions", "e.g. pikopod spec-diff old.yaml new.yaml --format githubactions", "")
+	}
+	oldDef, oldPos, err := loadSpecIR(oldSrc)
+	if err != nil {
+		return false, err
+	}
+	newDef, newPos, err := loadSpecIR(newSrc)
+	if err != nil {
+		return false, err
+	}
+	findings := specdiff.Diff(oldDef, newDef)
+	report := specdiff.BuildReport(oldSrc, newSrc, findings)
+	if o.Handoff != "" {
+		f, hErr := os.Create(o.Handoff)
+		if hErr != nil {
+			return false, hErr
+		}
+		if hErr := report.WriteJSON(f); hErr != nil {
+			f.Close()
+			return false, hErr
+		}
+		f.Close()
+	}
+	switch o.Format {
+	case "json":
+		if err := report.WriteJSON(out); err != nil {
+			return false, err
+		}
+	case "markdown":
+		report.WriteMarkdown(out)
+	case "githubactions":
+		report.WriteGitHubActions(out, specdiff.Positions{New: newPos, Old: oldPos})
+	default:
+		report.WriteText(out)
+	}
+	breaking := specdiff.Breaking(findings, floor)
+	if breaking && (o.Format == "text" || o.Format == "") {
+		fmt.Fprintf(errOut, "\nbreaking declared drift at/above %s — failing the gate (exit 1)\n", floor)
+	}
+	return breaking, nil
 }
 
 func parseLevelFloor(s string) (specdiff.Level, error) {
@@ -91,16 +115,14 @@ func parseLevelFloor(s string) (specdiff.Level, error) {
 	return "", errfmt.New("unknown --fail-on "+s, "the floor is one of ERR, WARN, INFO", "e.g. --fail-on WARN", "")
 }
 
-// loadSpecIR normalizes a spec to IR, loading it through specwatch.Fetch — ONE
-// implementation of the git-show/URL/file dispatch and its flag-smuggling guard.
-func loadSpecIR(source string) (*ir.ApiDefinition, error) {
+func loadSpecIR(source string) (*ir.ApiDefinition, ir.Positions, error) {
 	raw, _, _, err := specwatch.Fetch(source, "")
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	def, err := importer.NormalizeOpenAPI(raw)
+	def, pos, err := importer.NormalizeOpenAPIFrom(raw, specwatch.OriginOf(source).ImporterSource())
 	if err != nil {
-		return nil, errfmt.Newf("cannot normalize "+source, "the document did not parse as a supported spec format", "docs/config-reference.md", "%v", err)
+		return nil, nil, errfmt.Newf("cannot normalize "+source, "the document did not parse as a supported spec format", "docs/config-reference.md#ref-policy", "%v", err)
 	}
-	return def, nil
+	return def, pos, nil
 }

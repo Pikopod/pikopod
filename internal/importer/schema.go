@@ -37,6 +37,13 @@ func normalizeSchema(raw any, parentID, role, pointer string, res *refResolver, 
 
 	if refPtr, ok := res.isRef(raw); ok {
 		refName := res.schemaRefName(refPtr)
+		if refName == "" && res.isExternal(refPtr) {
+			resolved, err := res.resolve(raw)
+			if err != nil {
+				return ir.IrSchemaNode{}, err
+			}
+			return normalizeSchema(resolved, parentID, role, pointer, res, limits, depth+1)
+		}
 		if refName == "" {
 			// Non-schema or remote ref where a schema was expected → hard reject.
 			return ir.IrSchemaNode{}, &SpecError{Code: SpecRefUnresolvable, Message: fmt.Sprintf("unsupported schema $ref %q", refPtr), Pointer: refPtr}

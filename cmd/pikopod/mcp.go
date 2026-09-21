@@ -173,11 +173,11 @@ func mcpServer(cfg *config.Config) *mcp.Server {
 			if err != nil {
 				return nil, err
 			}
-			oldDef, err := loadSpecIR(args.Old)
+			oldDef, _, err := loadSpecIR(args.Old)
 			if err != nil {
 				return nil, err
 			}
-			newDef, err := loadSpecIR(args.New)
+			newDef, _, err := loadSpecIR(args.New)
 			if err != nil {
 				return nil, err
 			}
