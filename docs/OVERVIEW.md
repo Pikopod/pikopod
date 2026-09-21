@@ -186,8 +186,13 @@ contract instead.
 
 Separately, pikopod re-fetches the provider's published spec and diffs it
 against your pinned import. Severity is **derived by law** — one function maps a
-change's shape onto ERR/WARN/INFO, so no check carries a hand-assigned severity
-and changing the rule changes every verdict at once.
+change's shape onto ERR/WARN/INFO: whether the set of payloads the contract
+admits narrowed, widened, became incomparable or stayed the same, on the
+request or the response side, in a guaranteed or an optional part of the
+contract, plus guards (a sunset the old spec announced, a widening consumers
+tolerate by convention, or an extracted claim the law will not page on). No
+check carries a hand-assigned severity, and a test over the whole catalogue
+checks that every emitted level is the law's answer.
 
 Then the two signals **cross**. Traffic evidence raises the severity of a
 declared change; a declared change downgrades an observed one to *documented,

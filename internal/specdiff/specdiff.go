@@ -42,51 +42,70 @@ const (
 	Response Direction = "response"
 )
 
-// Effect is the change's type-theoretic direction from the consumer's view:
-// the contract guarantees less, more, a tolerated subset, or neither.
 type Effect string
 
 const (
 	Narrows      Effect = "narrows"
 	Widens       Effect = "widens"
-	Shrinks      Effect = "shrinks"
 	Incomparable Effect = "incomparable"
+	Unchanged    Effect = "unchanged"
 )
 
-// Guards downgrade a derived level when the break is softened by context.
 type Guards struct {
-	// The old spec already marked it deprecated — a sunset was honored. ERR → WARN.
 	DeprecatedHonored bool
-	// The narrowing touches something never guaranteed to consumers. ERR → WARN.
-	OptionalOnly bool
-	// A widening consumers tolerate by dominant convention (an added response
-	// property, unlike an added enum value). WARN → INFO.
-	Tolerated bool
-	// Either side rests on LLM_EXTRACTED provenance — an extracted claim
-	// must never page as a certain break. ERR → WARN.
-	Uncertain bool
+	Tolerated         bool
+	Uncertain         bool
 }
 
-// DeriveLevel is THE severity law. Every check calls it; none picks a level.
-func DeriveLevel(effect Effect, dir Direction, g Guards) Level {
+type lawKey struct {
+	effect Effect
+	dir    Direction
+	scope  Scope
+}
+
+func DeriveLevel(effect Effect, dir Direction, scope Scope, g Guards) Level {
 	var l Level
-	switch {
-	case effect == Incomparable:
+	switch (lawKey{effect, dir, scope}) {
+	case lawKey{Unchanged, Request, Guaranteed}, lawKey{Unchanged, Request, Optional},
+		lawKey{Unchanged, Response, Guaranteed}, lawKey{Unchanged, Response, Optional}:
+		l = Info
+	case lawKey{Incomparable, Request, Guaranteed}, lawKey{Incomparable, Request, Optional},
+		lawKey{Incomparable, Response, Guaranteed}, lawKey{Incomparable, Response, Optional}:
 		l = Err
-	case effect == Narrows:
-		l = Err // request: accepts less; response: withdrawn guarantee
-	case effect == Widens && dir == Request:
-		l = Info // server accepts more — existing clients unaffected
-	case effect == Widens: // × response
-		l = Warn // new output variety — strict consumers can break
-	default: // Shrinks × response
-		l = Info
-	}
-	if l == Err && (g.DeprecatedHonored || g.OptionalOnly || g.Uncertain) {
+	case lawKey{Narrows, Request, Guaranteed}:
+		l = Err
+		if g.DeprecatedHonored {
+			l = Warn
+		}
+	case lawKey{Narrows, Request, Optional}:
 		l = Warn
-	}
-	if l == Warn && g.Tolerated {
+	case lawKey{Narrows, Response, Guaranteed}:
+		l = Err
+		if g.DeprecatedHonored {
+			l = Warn
+		}
+		if g.Tolerated {
+			l = Info
+		}
+	case lawKey{Narrows, Response, Optional}:
+		l = Warn
+		if g.Tolerated {
+			l = Info
+		}
+	case lawKey{Widens, Request, Guaranteed}, lawKey{Widens, Request, Optional}:
 		l = Info
+	case lawKey{Widens, Response, Guaranteed}:
+		l = Warn
+		if g.Tolerated {
+			l = Info
+		}
+	case lawKey{Widens, Response, Optional}:
+		l = Info
+	default:
+		panic(fmt.Sprintf("specdiff: no law for %s × %s × %s", effect, dir, scope))
+	}
+	if g.Uncertain && l == Err {
+		l = Warn
 	}
 	return l
 }
@@ -150,8 +169,8 @@ func Diff(oldDef, newDef *ir.ApiDefinition) []Finding {
 		ne, ok := newEps[k]
 		if !ok {
 			d.emit(pin(Finding{
-				ID: "endpoint-removed", Method: oe.Method.Value, Template: oe.PathTemplate.Value,
-				Level:  DeriveLevel(Narrows, Request, Guards{DeprecatedHonored: oe.Deprecated.Value, Uncertain: oe.Method.IsUncertain()}),
+				ID: mustCheck("endpoint-removed"), Method: oe.Method.Value, Template: oe.PathTemplate.Value,
+				Level:  DeriveLevel(Narrows, Request, Guaranteed, Guards{DeprecatedHonored: oe.Deprecated.Value, Uncertain: oe.Method.IsUncertain()}),
 				Detail: "endpoint removed from the spec",
 			}, "", oe.SourcePointer))
 			continue
@@ -161,8 +180,8 @@ func Diff(oldDef, newDef *ir.ApiDefinition) []Finding {
 	for k, ne := range newEps {
 		if _, ok := oldEps[k]; !ok {
 			d.emit(pin(Finding{
-				ID: "endpoint-added", Method: ne.Method.Value, Template: ne.PathTemplate.Value,
-				Level:  DeriveLevel(Widens, Request, Guards{}),
+				ID: mustCheck("endpoint-added"), Method: ne.Method.Value, Template: ne.PathTemplate.Value,
+				Level:  DeriveLevel(Widens, Request, Guaranteed, Guards{}),
 				Detail: "new endpoint",
 			}, ne.SourcePointer, ""))
 		}
@@ -224,11 +243,11 @@ func indexEndpoints(def *ir.ApiDefinition) map[string]*ir.Endpoint {
 func (d *differ) diffEndpoint(oe, ne *ir.Endpoint) {
 	method, template := ne.Method.Value, ne.PathTemplate.Value
 	var mk mkFn = func(id string, level Level, detail string, args ...string) Finding {
-		return pin(Finding{ID: id, Level: level, Method: method, Template: template, Args: args, Detail: detail}, ne.SourcePointer, oe.SourcePointer)
+		return pin(Finding{ID: mustCheck(id), Level: level, Method: method, Template: template, Args: args, Detail: detail}, ne.SourcePointer, oe.SourcePointer)
 	}
 
 	if !oe.Deprecated.Value && ne.Deprecated.Value {
-		d.emit(mk("endpoint-deprecated", Info, "endpoint marked deprecated — plan the migration"))
+		d.emit(mk("endpoint-deprecated", DeriveLevel(Unchanged, Request, Guaranteed, Guards{}), "endpoint marked deprecated — plan the migration"))
 	}
 
 	d.diffParams(oe, ne, mk)
@@ -289,23 +308,23 @@ func (d *differ) diffParams(oe, ne *ir.Endpoint, mk mkFn) {
 			// Removed request param: clients still sending it are usually
 			// ignored by servers — a narrowing softened by convention.
 			d.emit(mk.at("", op.SourcePointer)("param-removed",
-				DeriveLevel(Narrows, Request, Guards{OptionalOnly: true, DeprecatedHonored: op.Deprecated.Value}),
+				DeriveLevel(Narrows, Request, Optional, Guards{DeprecatedHonored: op.Deprecated.Value}),
 				label+" removed", op.Location, op.Name))
 			continue
 		}
 		mk := mk.at(np.SourcePointer, op.SourcePointer)
 		if op.Location == "path" && op.Name != np.Name {
-			d.emit(mk("param-renamed", Info,
+			d.emit(mk("param-renamed", DeriveLevel(Unchanged, Request, Guaranteed, Guards{}),
 				"path param `"+op.Name+"` renamed to `"+np.Name+"` (same position — compared, not re-added)",
 				op.Name, np.Name))
 		}
 		if !op.Required.Value && np.Required.Value {
 			d.emit(mk("param-became-required",
-				DeriveLevel(Narrows, Request, Guards{Uncertain: np.Required.IsUncertain()}),
+				DeriveLevel(Narrows, Request, Guaranteed, Guards{Uncertain: np.Required.IsUncertain()}),
 				label+" became required — clients omitting it will be rejected", op.Location, op.Name))
 		}
 		if op.Required.Value && !np.Required.Value {
-			d.emit(mk("param-became-optional", DeriveLevel(Widens, Request, Guards{}),
+			d.emit(mk("param-became-optional", DeriveLevel(Widens, Request, Guaranteed, Guards{}),
 				label+" became optional", op.Location, op.Name))
 		}
 		d.diffSchemaNodes(&op.Schema, &np.Schema, Request, label, "param", mk)
@@ -319,10 +338,10 @@ func (d *differ) diffParams(oe, ne *ir.Endpoint, mk mkFn) {
 		mk := mk.at(np.SourcePointer, "")
 		if np.Required.Value {
 			d.emit(mk("param-added-required",
-				DeriveLevel(Narrows, Request, Guards{Uncertain: np.Required.IsUncertain()}),
+				DeriveLevel(Narrows, Request, Guaranteed, Guards{Uncertain: np.Required.IsUncertain()}),
 				"new REQUIRED "+label+" — every existing client omits it", np.Location, np.Name))
 		} else {
-			d.emit(mk("param-added-optional", DeriveLevel(Widens, Request, Guards{}),
+			d.emit(mk("param-added-optional", DeriveLevel(Widens, Request, Optional, Guards{}),
 				"new optional "+label, np.Location, np.Name))
 		}
 	}
@@ -336,27 +355,31 @@ func (d *differ) diffRequestBody(ob, nb *ir.RequestBody, mk mkFn) {
 		mk := mk.at(nb.SourcePointer, "")
 		if nb.Required.Value {
 			d.emit(mk("request-body-added-required",
-				DeriveLevel(Narrows, Request, Guards{Uncertain: nb.Required.IsUncertain()}),
+				DeriveLevel(Narrows, Request, Guaranteed, Guards{Uncertain: nb.Required.IsUncertain()}),
 				"endpoint now REQUIRES a request body"))
 		} else {
-			d.emit(mk("request-body-added-optional", DeriveLevel(Widens, Request, Guards{}),
+			d.emit(mk("request-body-added-optional", DeriveLevel(Widens, Request, Optional, Guards{}),
 				"endpoint now accepts an optional request body"))
 		}
 		return
 	case nb == nil:
+		scope := Guaranteed
+		if !ob.Required.Value {
+			scope = Optional
+		}
 		d.emit(mk.at("", ob.SourcePointer)("request-body-removed",
-			DeriveLevel(Narrows, Request, Guards{OptionalOnly: !ob.Required.Value}),
+			DeriveLevel(Narrows, Request, scope, Guards{}),
 			"request body removed from the spec"))
 		return
 	}
 	mk = mk.at(nb.SourcePointer, ob.SourcePointer)
 	if !ob.Required.Value && nb.Required.Value {
 		d.emit(mk("request-body-became-required",
-			DeriveLevel(Narrows, Request, Guards{Uncertain: nb.Required.IsUncertain()}),
+			DeriveLevel(Narrows, Request, Guaranteed, Guards{Uncertain: nb.Required.IsUncertain()}),
 			"request body became required"))
 	}
 	if ob.Required.Value && !nb.Required.Value {
-		d.emit(mk("request-body-became-optional", DeriveLevel(Widens, Request, Guards{}),
+		d.emit(mk("request-body-became-optional", DeriveLevel(Widens, Request, Guaranteed, Guards{}),
 			"request body became optional"))
 	}
 	d.diffContent(ob.Content, nb.Content, Request, "request body", mk)
@@ -379,12 +402,12 @@ func (d *differ) diffResponses(oe, ne *ir.Endpoint, mk mkFn) {
 			if isSuccessStatus(status) {
 				// The documented happy path disappeared — consumers read it.
 				d.emit(mk("response-status-removed",
-					DeriveLevel(Narrows, Response, Guards{DeprecatedHonored: oe.Deprecated.Value}),
+					DeriveLevel(Narrows, Response, Guaranteed, Guards{DeprecatedHonored: oe.Deprecated.Value}),
 					"response status "+status+" removed — the documented success shape is gone", status))
 			} else {
 				// An error status that stops occurring is output the client
 				// tolerates by construction.
-				d.emit(mk("response-status-removed", DeriveLevel(Shrinks, Response, Guards{}),
+				d.emit(mk("response-status-removed", DeriveLevel(Narrows, Response, Guaranteed, Guards{Tolerated: true}),
 					"response status "+status+" removed", status))
 			}
 			continue
@@ -393,7 +416,7 @@ func (d *differ) diffResponses(oe, ne *ir.Endpoint, mk mkFn) {
 	}
 	for status, nr := range newByStatus {
 		if _, ok := oldByStatus[status]; !ok {
-			d.emit(mk.at(nr.SourcePointer, "")("response-status-added", DeriveLevel(Widens, Response, Guards{}),
+			d.emit(mk.at(nr.SourcePointer, "")("response-status-added", DeriveLevel(Widens, Response, Guaranteed, Guards{}),
 				"endpoint documents a new response status "+status+" — handle it", status))
 		}
 	}
@@ -415,19 +438,18 @@ func (d *differ) diffContent(oldC, newC []ir.MediaType, dir Direction, where str
 			if dir == Request {
 				id, detail = "request-media-type-removed", where+" no longer accepts "+mt
 			}
-			d.emit(mk(id, DeriveLevel(Narrows, dir, Guards{}), detail, append(argPrefix, mt)...))
+			d.emit(mk(id, DeriveLevel(Narrows, dir, Guaranteed, Guards{}), detail, append(argPrefix, mt)...))
 			continue
 		}
 		d.diffSchemaNodes(&om.Schema, &nm.Schema, dir, where+" ("+mt+")", strings.Join(append(argPrefix, mt), " "), mk)
 	}
 	for mt := range newBy {
 		if _, ok := oldBy[mt]; !ok {
-			id := "response-media-type-added"
-			guards := Guards{Tolerated: true} // an extra representation breaks nobody
+			id, guards := "response-media-type-added", Guards{Tolerated: true}
 			if dir == Request {
-				id = "request-media-type-added"
+				id, guards = "request-media-type-added", Guards{}
 			}
-			d.emit(mk(id, DeriveLevel(Widens, dir, guards), where+" adds "+mt, append(argPrefix, mt)...))
+			d.emit(mk(id, DeriveLevel(Widens, dir, Guaranteed, guards), where+" adds "+mt, append(argPrefix, mt)...))
 		}
 	}
 }
@@ -442,19 +464,19 @@ func (d *differ) diffEndpointSecurity(oe, ne *ir.Endpoint, mk mkFn) {
 		newIDs[s.SchemeID] = true
 	}
 	if len(oldIDs) == 0 && len(newIDs) > 0 {
-		d.emit(mk("endpoint-security-added", DeriveLevel(Narrows, Request, Guards{}),
+		d.emit(mk("endpoint-security-added", DeriveLevel(Narrows, Request, Guaranteed, Guards{}),
 			"endpoint now requires authentication — unauthenticated clients will be rejected"))
 	}
 	for id := range oldIDs {
 		if !newIDs[id] && len(newIDs) > 0 {
 			// One accepted auth option withdrawn (others remain).
 			d.emit(mk("endpoint-security-scheme-removed",
-				DeriveLevel(Narrows, Request, Guards{}),
+				DeriveLevel(Narrows, Request, Guaranteed, Guards{}),
 				"auth scheme `"+id+"` no longer accepted on this endpoint", id))
 		}
 	}
 	if len(oldIDs) > 0 && len(newIDs) == 0 {
-		d.emit(mk("endpoint-security-removed", DeriveLevel(Widens, Request, Guards{}),
+		d.emit(mk("endpoint-security-removed", DeriveLevel(Widens, Request, Guaranteed, Guards{}),
 			"endpoint no longer requires authentication"))
 	}
 }
@@ -469,12 +491,12 @@ func (d *differ) diffAuthSchemes(oldDef, newDef *ir.ApiDefinition) {
 		newBy[newDef.AuthSchemes[i].Name] = &newDef.AuthSchemes[i]
 	}
 	mk := func(id string, level Level, detail string, args ...string) Finding {
-		return Finding{ID: id, Level: level, Method: "*", Template: "(auth)", Args: args, Detail: detail}
+		return Finding{ID: mustCheck(id), Level: level, Method: "*", Template: "(auth)", Args: args, Detail: detail}
 	}
 	for name, os := range oldBy {
 		ns, ok := newBy[name]
 		if !ok {
-			d.emit(mk("auth-scheme-removed", DeriveLevel(Narrows, Request, Guards{}),
+			d.emit(mk("auth-scheme-removed", DeriveLevel(Narrows, Request, Guaranteed, Guards{}),
 				"auth scheme `"+name+"` removed — clients authenticating with it break", name))
 			continue
 		}
@@ -482,14 +504,14 @@ func (d *differ) diffAuthSchemes(oldDef, newDef *ir.ApiDefinition) {
 			strval(os.Scheme) != strval(ns.Scheme) ||
 			strval(os.ParameterName) != strval(ns.ParameterName) ||
 			strval(os.Location) != strval(ns.Location) {
-			d.emit(mk("auth-scheme-changed", DeriveLevel(Incomparable, Request, Guards{}),
+			d.emit(mk("auth-scheme-changed", DeriveLevel(Incomparable, Request, Guaranteed, Guards{}),
 				fmt.Sprintf("auth scheme `%s` changed: %s → %s — existing credentials/headers stop working",
 					name, describeScheme(os), describeScheme(ns)), name))
 		}
 	}
 	for name := range newBy {
 		if _, ok := oldBy[name]; !ok {
-			d.emit(mk("auth-scheme-added", DeriveLevel(Widens, Request, Guards{}),
+			d.emit(mk("auth-scheme-added", DeriveLevel(Widens, Request, Guaranteed, Guards{}),
 				"new auth scheme `"+name+"`", name))
 		}
 	}
