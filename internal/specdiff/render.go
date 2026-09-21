@@ -7,7 +7,46 @@ import (
 	"fmt"
 	"io"
 	"sort"
+	"strings"
+
+	"github.com/pikopod/pikopod/internal/ir"
 )
+
+type Positions struct {
+	New ir.Positions
+	Old ir.Positions
+}
+
+func (p Positions) lookup(f Finding) (ir.Position, bool) {
+	switch f.SourceSide {
+	case SideNew:
+		return p.New.Lookup(f.SourcePointer)
+	case SideOld:
+		return p.Old.Lookup(f.SourcePointer)
+	}
+	return ir.Position{}, false
+}
+
+func ghEscape(s string) string {
+	return strings.NewReplacer("%", "%25", "\r", "%0D", "\n", "%0A").Replace(s)
+}
+
+func ghProperty(s string) string {
+	return strings.NewReplacer("%", "%25", "\r", "%0D", "\n", "%0A", ":", "%3A", ",", "%2C").Replace(s)
+}
+
+func (r *Report) WriteGitHubActions(w io.Writer, positions Positions) {
+	for _, level := range []Level{Err, Warn, Info} {
+		for _, f := range bySeverity(r.Items, level) {
+			cmd := map[Level]string{Err: "error", Warn: "warning", Info: "notice"}[f.Level]
+			props := "title=" + ghProperty(f.ID)
+			if pos, ok := positions.lookup(f.Finding); ok && pos.Line > 0 {
+				props = "file=" + ghProperty(pos.File) + ",line=" + fmt.Sprint(pos.Line) + ",col=" + fmt.Sprint(pos.Col) + "," + props
+			}
+			fmt.Fprintf(w, "::%s %s::%s\n", cmd, props, ghEscape(f.ID+": "+f.Method+" "+f.Template+" — "+f.Detail))
+		}
+	}
+}
 
 // Report is the JSON envelope — also the PR-surface handoff shape.
 type Report struct {

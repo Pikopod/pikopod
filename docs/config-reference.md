@@ -74,6 +74,24 @@ learned), **stable** (the field never changed value, so nothing is silenced) or
 **over-broad** (a bare name also covers a field that never churned); `pikopod
 up` prints the same at startup.
 
+## ref-policy
+
+Which `$ref`s a spec may carry, wherever pikopod reads one (`import`,
+`spec-diff`, `spec_watch`):
+
+| `$ref` | Resolved? | Why |
+|---|---|---|
+| `#/components/…` (local) | always | The document is already in hand. |
+| `./schemas/x.yaml#/X`, `../common.yaml` (relative, same repository) | when the source is a local file or `git:<ref>:<path>` | Read from the same directory tree, or from git object storage at the **same ref**, never the working tree. Bounded: at most 64 files and 32 MiB across them; cycles across files are refused. |
+| `/etc/…`, `../../…` escaping the root | never | The reference must stay inside the document's own tree. |
+| `https://…`, `//host/…`, `file://…` | never | pikopod runs in CI on pull requests from forks; a fetched `$ref` is a server-side request forgery waiting to happen. Vendor the document instead. |
+| any relative `$ref` when the source is a URL | never | There is no tree to resolve it in. |
+
+A refused `$ref` is a typed error naming the pointer (`SPEC_REF_UNRESOLVABLE`),
+exit `2`. In a CI container where the checkout is owned by another user, `git`
+refuses to read it; pikopod says so and names the fix
+(`git config --global --add safe.directory "$GITHUB_WORKSPACE"`).
+
 ## incidents
 
 An **incident** is an exchange that failed, as opposed to drift, which is a

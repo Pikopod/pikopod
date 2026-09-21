@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -352,6 +353,45 @@ func hashOf(raw []byte) string {
 
 // Fetch loads a spec source: http(s) with If-None-Match, git:<ref>:<path>
 // via `git show`, anything else as a local file.
+type Origin struct {
+	Kind string
+	Ref  string
+	Path string
+	Dir  string
+}
+
+func (o Origin) ImporterSource() *importer.Source {
+	switch o.Kind {
+	case "git":
+		ref := o.Ref
+		return &importer.Source{File: o.Path, Dir: path.Dir(o.Path), Load: func(rel string) ([]byte, error) {
+			raw, err := gitShow(ref + ":" + rel)
+			if err == nil && int64(len(raw)) > maxSpecBytes {
+				return nil, errfmt.New("referenced spec file exceeds the size cap", rel+" is larger than 32 MiB", "split or trim the referenced file", "docs/config-reference.md#ref-policy")
+			}
+			return raw, err
+		}}
+	case "file":
+		dir := o.Dir
+		return &importer.Source{File: o.Path, Load: func(rel string) ([]byte, error) {
+			return os.ReadFile(filepath.Join(dir, filepath.FromSlash(rel)))
+		}}
+	}
+	return &importer.Source{File: o.Path}
+}
+
+func OriginOf(source string) Origin {
+	switch {
+	case strings.HasPrefix(source, "git:"):
+		ref, p, _ := strings.Cut(strings.TrimPrefix(source, "git:"), ":")
+		return Origin{Kind: "git", Ref: ref, Path: path.Clean(p)}
+	case strings.HasPrefix(source, "http://"), strings.HasPrefix(source, "https://"):
+		return Origin{Kind: "url", Path: source}
+	default:
+		return Origin{Kind: "file", Path: source, Dir: filepath.Dir(source)}
+	}
+}
+
 func Fetch(source, etag string) ([]byte, string, bool, error) {
 	switch {
 	case strings.HasPrefix(source, "git:"):
@@ -430,7 +470,11 @@ func gitShow(refspec string) ([]byte, error) {
 	var out, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &out, &stderr
 	if err := cmd.Run(); err != nil {
-		return nil, errfmt.New("git show failed for "+refspec, strings.TrimSpace(stderr.String()), "check the ref and path exist", "")
+		msg := strings.TrimSpace(stderr.String())
+		if strings.Contains(msg, "dubious ownership") {
+			return nil, errfmt.New("git refuses to read this checkout", "the working tree is owned by another user, which git treats as unsafe by default (common in CI containers)", "run `git config --global --add safe.directory \"$GITHUB_WORKSPACE\"` (or the checkout path) before pikopod", "docs/config-reference.md#ref-policy")
+		}
+		return nil, errfmt.New("git show failed for "+refspec, msg, "check the ref and path exist", "")
 	}
 	return out.Bytes(), nil
 }

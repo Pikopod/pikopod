@@ -14,45 +14,63 @@ import (
 // parseYAMLSafely loads core-schema YAML only: no custom tags, bounded alias
 // expansion, duplicate keys a hard error, no YAML 1.1 leftovers from yaml.v3.
 func parseYAMLSafely(text string, limits ParseLimits) (any, error) {
+	doc, _, err := parseYAMLWithPositions(text, limits, false)
+	return doc, err
+}
+
+func parseYAMLWithPositions(text string, limits ParseLimits, track bool) (any, Positions, error) {
 	if len(text) > limits.MaxDocumentBytes {
-		return nil, specErr(SpecTooLarge, "document exceeds the size limit")
+		return nil, nil, specErr(SpecTooLarge, "document exceeds the size limit")
 	}
 	var root yaml.Node
 	if err := yaml.Unmarshal([]byte(text), &root); err != nil {
-		return nil, specErr(SpecParseError, fmt.Sprintf("YAML parse failed: %v", err))
+		return nil, nil, specErr(SpecParseError, fmt.Sprintf("YAML parse failed: %v", err))
 	}
 	c := &yamlConverter{limits: limits}
+	if track {
+		c.positions = Positions{}
+	}
 	var doc any
-	if root.Kind != 0 { // zero Kind means an empty document
+	if root.Kind != 0 {
 		node := &root
 		if root.Kind == yaml.DocumentNode {
 			if len(root.Content) == 0 {
-				return nil, enforceStructuralLimits(nil, limits)
+				return nil, nil, enforceStructuralLimits(nil, limits)
 			}
 			node = root.Content[0]
 		}
 		var err error
-		doc, err = c.convert(node)
+		doc, err = c.convertAt(node, "#")
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 	}
 	if err := enforceStructuralLimits(doc, limits); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	return doc, nil
+	return doc, c.positions, nil
 }
+
+type Positions map[string]ir.Position
 
 type yamlConverter struct {
-	limits  ParseLimits
-	aliases int
-	nodes   int
-	depth   int
+	limits    ParseLimits
+	aliases   int
+	nodes     int
+	depth     int
+	positions Positions
 }
 
-// convert enforces node/depth budgets DURING conversion: an alias-amplified
-// subtree must fail before it allocates, not once the multi-GB tree exists.
 func (c *yamlConverter) convert(node *yaml.Node) (any, error) {
+	return c.convertAt(node, "")
+}
+
+func (c *yamlConverter) convertAt(node *yaml.Node, pointer string) (any, error) {
+	if c.positions != nil && pointer != "" {
+		if _, set := c.positions[pointer]; !set {
+			c.positions[pointer] = ir.Position{Line: node.Line, Col: node.Column}
+		}
+	}
 	c.nodes++
 	if c.limits.MaxNodes > 0 && c.nodes > c.limits.MaxNodes {
 		return nil, specErr(SpecTooLarge, "spec exceeds the node budget during YAML conversion")
@@ -68,7 +86,7 @@ func (c *yamlConverter) convert(node *yaml.Node) (any, error) {
 		if c.aliases > c.limits.MaxAliasExpansions {
 			return nil, specErr(SpecParseError, "YAML parse failed: too many alias expansions")
 		}
-		return c.convert(node.Alias)
+		return c.convertAt(node.Alias, pointer)
 	case yaml.MappingNode:
 		out := NewOrdMap()
 		for i := 0; i+1 < len(node.Content); i += 2 {
@@ -93,7 +111,14 @@ func (c *yamlConverter) convert(node *yaml.Node) (any, error) {
 			if out.Has(key) {
 				return nil, specErr(SpecParseError, fmt.Sprintf("YAML parse failed: duplicate key %q", key))
 			}
-			value, err := c.convert(valueNode)
+			childPtr := ""
+			if pointer != "" {
+				childPtr = pointer + "/" + jpescape(key)
+				if c.positions != nil {
+					c.positions[childPtr] = ir.Position{Line: keyNode.Line, Col: keyNode.Column}
+				}
+			}
+			value, err := c.convertAt(valueNode, childPtr)
 			if err != nil {
 				return nil, err
 			}
@@ -102,8 +127,12 @@ func (c *yamlConverter) convert(node *yaml.Node) (any, error) {
 		return out, nil
 	case yaml.SequenceNode:
 		out := make([]any, 0, len(node.Content))
-		for _, item := range node.Content {
-			v, err := c.convert(item)
+		for i, item := range node.Content {
+			childPtr := ""
+			if pointer != "" {
+				childPtr = pointer + "/" + strconv.Itoa(i)
+			}
+			v, err := c.convertAt(item, childPtr)
 			if err != nil {
 				return nil, err
 			}

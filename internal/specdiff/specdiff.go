@@ -94,12 +94,37 @@ func DeriveLevel(effect Effect, dir Direction, g Guards) Level {
 // Finding is one declared-drift divergence. Args are the check-specific
 // identity components that feed the fingerprint.
 type Finding struct {
-	ID       string   `json:"id"`
-	Level    Level    `json:"level"`
-	Method   string   `json:"method"`
-	Template string   `json:"template"`
-	Args     []string `json:"args,omitempty"`
-	Detail   string   `json:"detail"`
+	ID            string   `json:"id"`
+	Level         Level    `json:"level"`
+	Method        string   `json:"method"`
+	Template      string   `json:"template"`
+	Args          []string `json:"args,omitempty"`
+	Detail        string   `json:"detail"`
+	SourcePointer string   `json:"sourcePointer,omitempty"`
+	SourceSide    string   `json:"sourceSide,omitempty"`
+}
+
+const (
+	SideNew = "new"
+	SideOld = "old"
+)
+
+func pin(f Finding, newPtr, oldPtr string) Finding {
+	switch {
+	case newPtr != "":
+		f.SourcePointer, f.SourceSide = newPtr, SideNew
+	case oldPtr != "":
+		f.SourcePointer, f.SourceSide = oldPtr, SideOld
+	}
+	return f
+}
+
+type mkFn func(id string, level Level, detail string, args ...string) Finding
+
+func (mk mkFn) at(newPtr, oldPtr string) mkFn {
+	return func(id string, level Level, detail string, args ...string) Finding {
+		return pin(mk(id, level, detail, args...), newPtr, oldPtr)
+	}
 }
 
 // Fingerprint is stable across runs and re-fetches: same divergence → same
@@ -124,22 +149,22 @@ func Diff(oldDef, newDef *ir.ApiDefinition) []Finding {
 	for k, oe := range oldEps {
 		ne, ok := newEps[k]
 		if !ok {
-			d.emit(Finding{
+			d.emit(pin(Finding{
 				ID: "endpoint-removed", Method: oe.Method.Value, Template: oe.PathTemplate.Value,
 				Level:  DeriveLevel(Narrows, Request, Guards{DeprecatedHonored: oe.Deprecated.Value, Uncertain: oe.Method.IsUncertain()}),
 				Detail: "endpoint removed from the spec",
-			})
+			}, "", oe.SourcePointer))
 			continue
 		}
 		d.diffEndpoint(oe, ne)
 	}
 	for k, ne := range newEps {
 		if _, ok := oldEps[k]; !ok {
-			d.emit(Finding{
+			d.emit(pin(Finding{
 				ID: "endpoint-added", Method: ne.Method.Value, Template: ne.PathTemplate.Value,
 				Level:  DeriveLevel(Widens, Request, Guards{}),
 				Detail: "new endpoint",
-			})
+			}, ne.SourcePointer, ""))
 		}
 	}
 
@@ -198,8 +223,8 @@ func indexEndpoints(def *ir.ApiDefinition) map[string]*ir.Endpoint {
 
 func (d *differ) diffEndpoint(oe, ne *ir.Endpoint) {
 	method, template := ne.Method.Value, ne.PathTemplate.Value
-	mk := func(id string, level Level, detail string, args ...string) Finding {
-		return Finding{ID: id, Level: level, Method: method, Template: template, Args: args, Detail: detail}
+	var mk mkFn = func(id string, level Level, detail string, args ...string) Finding {
+		return pin(Finding{ID: id, Level: level, Method: method, Template: template, Args: args, Detail: detail}, ne.SourcePointer, oe.SourcePointer)
 	}
 
 	if !oe.Deprecated.Value && ne.Deprecated.Value {
@@ -252,7 +277,7 @@ func pathParamOrder(template string) []string {
 	return out
 }
 
-func (d *differ) diffParams(oe, ne *ir.Endpoint, mk func(string, Level, string, ...string) Finding) {
+func (d *differ) diffParams(oe, ne *ir.Endpoint, mk mkFn) {
 	oldOrder := pathParamOrder(oe.PathTemplate.Value)
 	newOrder := pathParamOrder(ne.PathTemplate.Value)
 
@@ -263,11 +288,12 @@ func (d *differ) diffParams(oe, ne *ir.Endpoint, mk func(string, Level, string, 
 		if np == nil {
 			// Removed request param: clients still sending it are usually
 			// ignored by servers — a narrowing softened by convention.
-			d.emit(mk("param-removed",
+			d.emit(mk.at("", op.SourcePointer)("param-removed",
 				DeriveLevel(Narrows, Request, Guards{OptionalOnly: true, DeprecatedHonored: op.Deprecated.Value}),
 				label+" removed", op.Location, op.Name))
 			continue
 		}
+		mk := mk.at(np.SourcePointer, op.SourcePointer)
 		if op.Location == "path" && op.Name != np.Name {
 			d.emit(mk("param-renamed", Info,
 				"path param `"+op.Name+"` renamed to `"+np.Name+"` (same position — compared, not re-added)",
@@ -290,6 +316,7 @@ func (d *differ) diffParams(oe, ne *ir.Endpoint, mk func(string, Level, string, 
 			continue
 		}
 		label := np.Location + " param `" + np.Name + "`"
+		mk := mk.at(np.SourcePointer, "")
 		if np.Required.Value {
 			d.emit(mk("param-added-required",
 				DeriveLevel(Narrows, Request, Guards{Uncertain: np.Required.IsUncertain()}),
@@ -301,11 +328,12 @@ func (d *differ) diffParams(oe, ne *ir.Endpoint, mk func(string, Level, string, 
 	}
 }
 
-func (d *differ) diffRequestBody(ob, nb *ir.RequestBody, mk func(string, Level, string, ...string) Finding) {
+func (d *differ) diffRequestBody(ob, nb *ir.RequestBody, mk mkFn) {
 	switch {
 	case ob == nil && nb == nil:
 		return
 	case ob == nil:
+		mk := mk.at(nb.SourcePointer, "")
 		if nb.Required.Value {
 			d.emit(mk("request-body-added-required",
 				DeriveLevel(Narrows, Request, Guards{Uncertain: nb.Required.IsUncertain()}),
@@ -316,11 +344,12 @@ func (d *differ) diffRequestBody(ob, nb *ir.RequestBody, mk func(string, Level, 
 		}
 		return
 	case nb == nil:
-		d.emit(mk("request-body-removed",
+		d.emit(mk.at("", ob.SourcePointer)("request-body-removed",
 			DeriveLevel(Narrows, Request, Guards{OptionalOnly: !ob.Required.Value}),
 			"request body removed from the spec"))
 		return
 	}
+	mk = mk.at(nb.SourcePointer, ob.SourcePointer)
 	if !ob.Required.Value && nb.Required.Value {
 		d.emit(mk("request-body-became-required",
 			DeriveLevel(Narrows, Request, Guards{Uncertain: nb.Required.IsUncertain()}),
@@ -333,7 +362,7 @@ func (d *differ) diffRequestBody(ob, nb *ir.RequestBody, mk func(string, Level, 
 	d.diffContent(ob.Content, nb.Content, Request, "request body", mk)
 }
 
-func (d *differ) diffResponses(oe, ne *ir.Endpoint, mk func(string, Level, string, ...string) Finding) {
+func (d *differ) diffResponses(oe, ne *ir.Endpoint, mk mkFn) {
 	oldByStatus := map[string]*ir.ResponseDef{}
 	for i := range oe.Responses {
 		oldByStatus[oe.Responses[i].StatusCode] = &oe.Responses[i]
@@ -346,6 +375,7 @@ func (d *differ) diffResponses(oe, ne *ir.Endpoint, mk func(string, Level, strin
 	for status, or := range oldByStatus {
 		nr, ok := newByStatus[status]
 		if !ok {
+			mk := mk.at("", or.SourcePointer)
 			if isSuccessStatus(status) {
 				// The documented happy path disappeared — consumers read it.
 				d.emit(mk("response-status-removed",
@@ -359,17 +389,17 @@ func (d *differ) diffResponses(oe, ne *ir.Endpoint, mk func(string, Level, strin
 			}
 			continue
 		}
-		d.diffContent(or.Content, nr.Content, Response, "response "+status, mk, status)
+		d.diffContent(or.Content, nr.Content, Response, "response "+status, mk.at(nr.SourcePointer, or.SourcePointer), status)
 	}
-	for status := range newByStatus {
+	for status, nr := range newByStatus {
 		if _, ok := oldByStatus[status]; !ok {
-			d.emit(mk("response-status-added", DeriveLevel(Widens, Response, Guards{}),
+			d.emit(mk.at(nr.SourcePointer, "")("response-status-added", DeriveLevel(Widens, Response, Guards{}),
 				"endpoint documents a new response status "+status+" — handle it", status))
 		}
 	}
 }
 
-func (d *differ) diffContent(oldC, newC []ir.MediaType, dir Direction, where string, mk func(string, Level, string, ...string) Finding, argPrefix ...string) {
+func (d *differ) diffContent(oldC, newC []ir.MediaType, dir Direction, where string, mk mkFn, argPrefix ...string) {
 	oldBy := map[string]*ir.MediaType{}
 	for i := range oldC {
 		oldBy[oldC[i].MediaType] = &oldC[i]
@@ -402,7 +432,7 @@ func (d *differ) diffContent(oldC, newC []ir.MediaType, dir Direction, where str
 	}
 }
 
-func (d *differ) diffEndpointSecurity(oe, ne *ir.Endpoint, mk func(string, Level, string, ...string) Finding) {
+func (d *differ) diffEndpointSecurity(oe, ne *ir.Endpoint, mk mkFn) {
 	oldIDs := map[string]bool{}
 	for _, s := range oe.Security {
 		oldIDs[s.SchemeID] = true

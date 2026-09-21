@@ -95,48 +95,66 @@ func Detect(raw []byte) (Kind, error) {
 // NormalizeOpenAPI normalizes OpenAPI 3.x or Swagger 2.0 bytes into the IR. A
 // 2.0 converter upgrade re-versions every 2.0-sourced API via normalizerVersion.
 func NormalizeOpenAPI(raw []byte) (*ir.ApiDefinition, error) {
+	def, _, err := NormalizeOpenAPIFrom(raw, nil)
+	return def, err
+}
+
+func NormalizeOpenAPIFrom(raw []byte, src *Source) (*ir.ApiDefinition, ir.Positions, error) {
+	def, pos, err := normalizeOpenAPIFrom(raw, src)
+	if err != nil {
+		return nil, nil, err
+	}
+	file := ""
+	if src != nil {
+		file = src.File
+	}
+	return def, fileOf(pos, file), nil
+}
+
+func normalizeOpenAPIFrom(raw []byte, src *Source) (*ir.ApiDefinition, Positions, error) {
 	kind, err := Detect(raw)
 	if err != nil {
-		return nil, userFacing(err)
+		return nil, nil, userFacing(err)
 	}
 	switch kind {
 	case KindOpenAPI:
-		// fall through
 	case KindPostman:
-		return NormalizePostman(raw)
+		def, err := NormalizePostman(raw)
+		return def, nil, err
 	case KindGraphQLSDL:
-		return NormalizeGraphQLSDL(raw)
+		def, err := NormalizeGraphQLSDL(raw)
+		return def, nil, err
 	case KindGraphQLIntrospection:
-		return NormalizeGraphQLIntrospection(raw)
+		def, err := NormalizeGraphQLIntrospection(raw)
+		return def, nil, err
 	case KindDocumentation:
-		return nil, errfmt.New("import spec", "unstructured documentation is not yet supported in pikopod v1 (Tier C requires model-assisted extraction)",
+		return nil, nil, errfmt.New("import spec", "unstructured documentation is not yet supported in pikopod v1 (Tier C requires model-assisted extraction)",
 			"provide an OpenAPI 3.x or Swagger 2.0 document instead", "")
 	}
 
 	limits := DefaultParseLimits
-	doc, err := parseStructured(string(raw), formatAuto, limits)
+	doc, pos, err := parseStructuredWithPositions(string(raw), limits)
 	if err != nil {
-		return nil, userFacing(err)
+		return nil, nil, userFacing(err)
 	}
 
 	normalizerVersion := ir.NormalizerVersion
 	if isSwagger2Document(doc) {
 		converted, err := convertSwagger2ToOpenAPI(doc, limits)
 		if err != nil {
-			return nil, userFacing(err)
+			return nil, nil, userFacing(err)
 		}
 		doc = converted
-		// Mirrors normalizeSourceWithConversion: the converter version
-		// participates in normalizerVersion and therefore in normalizedHash.
+		pos = nil
 		normalizerVersion += "+" + swagger2ConverterName + "@" + swagger2ConverterVersion
 	}
 
-	def, err := normalizeOpenAPIValue(doc, limits, "ACTIVE")
+	def, err := normalizeOpenAPIValueFrom(doc, limits, "ACTIVE", src)
 	if err != nil {
-		return nil, userFacing(err)
+		return nil, nil, userFacing(err)
 	}
 	def.NormalizerVersion = normalizerVersion
-	return def, nil
+	return def, pos, nil
 }
 
 // NormalizeLLMExtracted runs the pipeline over a MODEL-WRITTEN spec, then
