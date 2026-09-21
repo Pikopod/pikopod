@@ -114,8 +114,12 @@ func Analyze(records []*proxy.Record, configured []string) *Analysis {
 		family := rec.Method + " " + pathtmpl.Templatize(stripQuery(rec.Path)) + " " + baseline.StatusClass(rec.Status)
 		flat := baseline.Flatten(rec.RespBody)
 		for path, fv := range flat {
-			name := strings.ToLower(lastSeg(path))
+			name := strings.ToLower(Leaf(path))
 			if cfg[name] {
+				if !matchedCfg[name] {
+					an.Refusals = append(an.Refusals, Refusal{Name: name, Path: path, Reason: AlreadyConfigured,
+						Detail: "already in volatile_fields; its values are suppressed and it is not re-suggested"})
+				}
 				matchedCfg[name] = true
 				continue
 			}
@@ -221,15 +225,6 @@ func typeList(types map[string]bool) string {
 	}
 	sort.Strings(out)
 	return strings.Join(out, ",")
-}
-
-// lastSeg follows the learner's path convention: "a/b[]/request_ref" →
-// "request_ref" (the name volatile_fields entries match on).
-func lastSeg(path string) string {
-	if i := strings.LastIndex(path, "/"); i >= 0 {
-		path = path[i+1:]
-	}
-	return strings.TrimSuffix(path, "[]")
 }
 
 func stripQuery(p string) string {

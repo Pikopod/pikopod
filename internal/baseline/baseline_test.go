@@ -2,6 +2,7 @@ package baseline
 
 import (
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 )
@@ -303,20 +304,44 @@ func TestFlattenShapes(t *testing.T) {
 	}
 }
 
-// Volatile fields are dropped by their LAST segment at any depth, case-
-// insensitively — the reference never learns them, so they can never drift.
+// leafMatcher is the test stand-in for the injected volatile matcher.
+type leafMatcher struct {
+	names map[string]bool
+	drops []string
+}
+
+func (m *leafMatcher) Match(path string) (string, bool) {
+	leaf := lastFieldSegment(path)
+	if m.names[strings.ToLower(leaf)] {
+		return strings.ToLower(leaf), true
+	}
+	return "", false
+}
+func (m *leafMatcher) RecordDrop(path string) { m.drops = append(m.drops, path) }
+
+func stub(names ...string) *leafMatcher {
+	m := &leafMatcher{names: map[string]bool{}}
+	for _, n := range names {
+		m.names[strings.ToLower(n)] = true
+	}
+	return m
+}
+
+// A configured name suppresses VALUES only: the field stays learned, so its
+// absence, type and nullability still assert at any depth.
 func TestVolatileMatchesNestedSegments(t *testing.T) {
 	l := newTestLearner(t, 100)
-	l.SetVolatile([]string{"Request_Ref"})
+	l.SetVolatileMatcher(stub("Request_Ref"))
 	obs := l.Observe("GET", "/a", 200, map[string]any{
 		"meta": map[string]any{"request_ref": "r1"},
 		"ok":   "yes",
 	}, t0)
-	if _, tracked := obs.Fields["meta/request_ref"]; tracked {
-		t.Fatalf("volatile nested field must be dropped: %+v", obs.Fields)
+	if _, tracked := obs.Fields["meta/request_ref"]; !tracked {
+		t.Fatalf("a volatile field stays observed: %+v", obs.Fields)
 	}
-	if _, kept := obs.Fields["ok"]; !kept {
-		t.Fatal("non-volatile fields must survive")
+	st := obs.Family.Fields["meta/request_ref"]
+	if st == nil || st.Values != nil || !st.HighCardinality || st.Count != 1 {
+		t.Fatalf("values suppressed, presence counted: %+v", st)
 	}
 }
 

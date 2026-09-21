@@ -63,13 +63,16 @@ upstreams:
 |---|---|
 | `listen` | Route prefix on the agent, e.g. `/examplepay`. |
 | `target` | Absolute base URL this upstream forwards to. Must include scheme and host. |
-| `volatile_fields` | Field names excluded from baseline learning, drift diffing, the replay CI gate, and replay tier-1 hashing. Matched by name at any depth, case-insensitive. |
+| `volatile_fields` | Fields whose **values** are allowed to churn. Suppression is value-only: the field is still learned, and its absence, a type change or a null still alert. A bare name (`status`) matches the leaf segment at any depth; a `parent/child` suffix (`meta/status`, `items[]/status`) scopes it. Case-insensitive. Applies to baseline learning, drift diffing and the replay CI gate; replay tier-1 hashing additionally strips a curated request-field list (idempotency keys, trace ids, signatures, timestamps). Anything else is a configuration error (exit 2). |
 | `mute` | Endpoint templates whose alerts are suppressed. |
 | `spec_source` | Arms the declared-drift watcher. See [spec_watch](#spec_watch). |
 | `incidents` | Tunes failed-exchange capture. See [incidents](#incidents). |
 
 Use `pikopod volatile suggest <upstream>` to find noisy fields rather than
-guessing.
+guessing. It also reports configured entries that are **dead** (match nothing
+learned), **stable** (the field never changed value, so nothing is silenced) or
+**over-broad** (a bare name also covers a field that never churned); `pikopod
+up` prints the same at startup.
 
 ## incidents
 

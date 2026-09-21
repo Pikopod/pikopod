@@ -51,7 +51,9 @@ type Agent struct {
 	// contracts: upstream → spec-derived IR, for admission passes. Set by
 	// the CLI (registry-linked sandboxes); empty when refinement is off.
 	contracts map[string]*ir.ApiDefinition
-	started   time.Time
+	// volatile: upstream → compiled volatile_fields, built once at startup.
+	volatile map[string]*volatile.Matcher
+	started  time.Time
 	// watch is the optional declared-drift watcher; its checks ride the persist
 	// tick as a goroutine — a slow spec fetch must never delay persistence.
 	watch *specwatch.Watcher
@@ -103,8 +105,16 @@ func New(cfg *config.Config, alertOpts alert.Options, extraSinks ...alert.Sink) 
 		}
 		muted[name] = set
 	}
+	matchers := map[string]*volatile.Matcher{}
+	for name, up := range cfg.Upstreams {
+		m, _, err := volatile.Compile(up.VolatileFields)
+		if err != nil {
+			return nil, err
+		}
+		matchers[name] = m
+	}
 	a := &Agent{
-		Cfg: cfg, Metrics: metrics, Proxy: p, Alerter: al,
+		Cfg: cfg, Metrics: metrics, Proxy: p, Alerter: al, volatile: matchers,
 		learners:   map[string]*baseline.Learner{},
 		classes:    map[string]map[string]bool{},
 		clientErrs: map[string]errCounts{},
@@ -144,8 +154,6 @@ func (a *Agent) acceptHandler(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(w, `{"accepted":%q,"refrozen_families":%d}`, fp, n)
 }
 
-// ackHandler: POST /ack?fp=fp_… acknowledges a fingerprint on the RUNNING
-// alerter (`pikopod ack`). Token-gated by the proxy on non-loopback binds.
 func (a *Agent) ackHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "POST only", http.StatusMethodNotAllowed)
@@ -173,7 +181,7 @@ func (a *Agent) learner(upstream string) *baseline.Learner {
 			MinSamples: a.Cfg.Warmup.MinSamples,
 			MinAge:     time.Duration(*a.Cfg.Warmup.MinHours) * time.Hour,
 		})
-		l.SetVolatile(a.Cfg.Upstreams[upstream].VolatileFields)
+		l.SetVolatileMatcher(a.volatile[upstream])
 		// Curated response-side value-volatility: request ids and timestamps
 		// never become tracked enum values; presence/type stay.
 		l.SetValueVolatile(volatile.ResponseFieldNames())
@@ -181,6 +189,10 @@ func (a *Agent) learner(upstream string) *baseline.Learner {
 	}
 	return l
 }
+
+// VolatileMatcher returns an upstream's compiled volatile_fields (nil when
+// the upstream is unknown), so callers can read Drops().
+func (a *Agent) VolatileMatcher(upstream string) *volatile.Matcher { return a.volatile[upstream] }
 
 // SetWatcher arms the declared-drift watcher (built by the CLI, which owns
 // pin resolution). Call before Run.
@@ -212,11 +224,7 @@ func (a *Agent) refiner(upstream string) *contract.Refiner {
 	return r
 }
 
-// observe is the recorder's tap, run for EVERY record before the sampling
-// decision; a true return forces the record to disk regardless of the rate.
 func (a *Agent) observe(rec *proxy.Record) (notable bool) {
-	// Fail-open: observer bugs never break serving — but they COUNT, or a
-	// deterministic panic would zero drift detection with observer_panics at 0.
 	defer func() {
 		if p := recover(); p != nil {
 			a.Metrics.ObserverPanics.Add(1)
@@ -296,8 +304,6 @@ func (a *Agent) observe(rec *proxy.Record) (notable bool) {
 	return notable
 }
 
-// incidentKind classifies a failed exchange. 5xx, 429 and pikopod's own
-// unreachable-502 always qualify; 4xx is opt-in and rate-gated.
 func (a *Agent) incidentKind(rec *proxy.Record, template string) (drift.Kind, bool) {
 	isClientErr := rec.Status >= 400 && rec.Status < 500
 	total, errs := a.countExchange(rec.Upstream, rec.Method, template, isClientErr)
@@ -306,14 +312,12 @@ func (a *Agent) incidentKind(rec *proxy.Record, template string) (drift.Kind, bo
 	case rec.Status == 429:
 		return drift.RateLimited, true
 	case rec.Status >= 500:
-		// pikopod's own 502 carries the marker; a real upstream 502 does not.
 		if headerHas(rec.RespHeader, "x-pikopod-error", "upstream-unreachable") {
 			return drift.UpstreamUnreachable, true
 		}
 		return drift.UpstreamError, true
 	case isClientErr:
 		up := a.Cfg.Upstreams[rec.Upstream]
-		// Below the sample floor no rate is claimed: the first 4xx is 100%.
 		if !up.Incidents.ClientErrors || total < config.ClientErrorFloor() {
 			return "", false
 		}
@@ -324,8 +328,6 @@ func (a *Agent) incidentKind(rec *proxy.Record, template string) (drift.Kind, bo
 	return "", false
 }
 
-// countExchange tallies one request against its endpoint family and returns the
-// running totals. Every exchange counts, or the 4xx rate has no denominator.
 func (a *Agent) countExchange(upstream, method, template string, isClientErr bool) (total, errs int) {
 	key := upstream + "|" + method + "|" + template
 	a.mu.Lock()
@@ -339,8 +341,6 @@ func (a *Agent) countExchange(upstream, method, template string, isClientErr boo
 	return c.total, c.errors
 }
 
-// headerHas reports whether a recorded header carries a value, case-insensitively.
-// Recorded headers are map[string]any; values may be a string or a []any.
 func headerHas(h map[string]any, key, want string) bool {
 	for k, v := range h {
 		if !strings.EqualFold(k, key) {
@@ -360,14 +360,10 @@ func headerHas(h map[string]any, key, want string) bool {
 	return false
 }
 
-// Run serves the agent until ctx cancels. Persistence flushes periodically
-// and on shutdown.
 func (a *Agent) Run(ctx context.Context) error {
 	go a.Recorder.Run(a.Proxy.Captures())
 
 	addr := net.JoinHostPort(a.Cfg.Listen, fmt.Sprint(a.Cfg.AgentPort))
-	// ReadHeaderTimeout only: Slowloris defense that still never caps how long a
-	// legitimate request or streaming response may take (fail-open).
 	srv := &http.Server{Addr: addr, Handler: a.Proxy, ReadHeaderTimeout: 20 * time.Second}
 	errCh := make(chan error, 1)
 	go func() {
@@ -400,8 +396,6 @@ func (a *Agent) Run(ctx context.Context) error {
 		case <-tick.C:
 			a.persistAll()
 			if a.watch != nil {
-				// Fire-and-forget: Check self-gates and collapses overlapping calls.
-				// Panic-isolated — a hostile spec must not take down the proxy.
 				go func() {
 					defer func() {
 						if p := recover(); p != nil {

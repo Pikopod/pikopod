@@ -16,6 +16,7 @@ import (
 
 	"github.com/pikopod/pikopod/internal/agent"
 	"github.com/pikopod/pikopod/internal/alert"
+	"github.com/pikopod/pikopod/internal/baseline"
 	"github.com/pikopod/pikopod/internal/config"
 	"github.com/pikopod/pikopod/internal/demo"
 	"github.com/pikopod/pikopod/internal/drift"
@@ -27,6 +28,7 @@ import (
 	"github.com/pikopod/pikopod/internal/specdiff"
 	"github.com/pikopod/pikopod/internal/specwatch"
 	"github.com/pikopod/pikopod/internal/store"
+	"github.com/pikopod/pikopod/internal/volatile"
 	"github.com/spf13/cobra"
 )
 
@@ -138,6 +140,11 @@ func newUpCmd() *cobra.Command {
 			})
 			if err != nil {
 				return err
+			}
+			for _, name := range cfg.UpstreamNames() {
+				for _, r := range volatileCollateral(cfg, name) {
+					fmt.Fprintf(out2(cmd), "volatile_fields %s: %s %s (%s)\n", name, r.Name, r.Reason, r.Detail)
+				}
 			}
 			contracts, err := contractsForUpstreams(cfg)
 			if err != nil {
@@ -558,4 +565,14 @@ func newStatusCmd() *cobra.Command {
 			fmt.Fprintf(cmd.OutOrStdout(), "%s\n", enc)
 			return nil
 		}}
+}
+
+// volatileCollateral lints an upstream's volatile_fields against its persisted
+// baselines at startup; informational only, never blocking.
+func volatileCollateral(cfg *config.Config, upstream string) []volatile.Refusal {
+	m, refusals, err := volatile.Compile(cfg.Upstreams[upstream].VolatileFields)
+	if err != nil || len(m.Entries()) == 0 {
+		return refusals
+	}
+	return append(refusals, volatile.Collateral(baseline.NewLearner(upstream, cfg.DataDir, baseline.Warmup{}), m)...)
 }
