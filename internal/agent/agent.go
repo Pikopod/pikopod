@@ -16,6 +16,7 @@ import (
 
 	"github.com/pikopod/pikopod/internal/alert"
 	"github.com/pikopod/pikopod/internal/baseline"
+	"github.com/pikopod/pikopod/internal/behaviour"
 	"github.com/pikopod/pikopod/internal/config"
 	"github.com/pikopod/pikopod/internal/contract"
 	"github.com/pikopod/pikopod/internal/drift"
@@ -48,6 +49,9 @@ type Agent struct {
 	// refiners: the contract-refinement tap (config `refine.enabled`) — a
 	// SIBLING consumer of the observe stream; shares nothing with learners.
 	refiners map[string]*contract.Refiner
+	// behaviours: the state-machine tap (config `behaviour.enabled`), another
+	// sibling consumer of the observe stream.
+	behaviours map[string]*behaviour.Tracker
 	// contracts: upstream → spec-derived IR, for admission passes. Set by
 	// the CLI (registry-linked sandboxes); empty when refinement is off.
 	contracts map[string]*ir.ApiDefinition
@@ -120,6 +124,7 @@ func New(cfg *config.Config, alertOpts alert.Options, extraSinks ...alert.Sink) 
 		clientErrs: map[string]errCounts{},
 		muted:      muted,
 		refiners:   map[string]*contract.Refiner{},
+		behaviours: map[string]*behaviour.Tracker{},
 		contracts:  map[string]*ir.ApiDefinition{},
 		started:    time.Now(),
 	}
@@ -224,6 +229,28 @@ func (a *Agent) refiner(upstream string) *contract.Refiner {
 	return r
 }
 
+func (a *Agent) behaviour(upstream string) *behaviour.Tracker {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	t, ok := a.behaviours[upstream]
+	if !ok {
+		t = behaviour.New(upstream, a.Cfg.DataDir, a.Cfg.Warmup.MinSamples, time.Duration(*a.Cfg.Warmup.MinHours)*time.Hour)
+		if m := a.volatile[upstream]; m != nil {
+			t.SetVolatile(m)
+		}
+		t.SetMuted(a.muted[upstream])
+		a.behaviours[upstream] = t
+	}
+	return t
+}
+
+func (a *Agent) Behaviour(upstream string) *behaviour.Tracker {
+	if !a.Cfg.Behaviour.Enabled {
+		return nil
+	}
+	return a.behaviour(upstream)
+}
+
 func (a *Agent) observe(rec *proxy.Record) (notable bool) {
 	defer func() {
 		if p := recover(); p != nil {
@@ -233,6 +260,9 @@ func (a *Agent) observe(rec *proxy.Record) (notable bool) {
 
 	if a.Cfg.Refine.Enabled {
 		a.refiner(rec.Upstream).Observe(rec)
+	}
+	if a.Cfg.Behaviour.Enabled {
+		a.behaviour(rec.Upstream).Observe(rec)
 	}
 
 	l := a.learner(rec.Upstream)
@@ -431,7 +461,14 @@ func (a *Agent) persistAll() {
 	for _, l := range a.learners {
 		ls = append(ls, l)
 	}
+	trackers := make([]*behaviour.Tracker, 0, len(a.behaviours))
+	for _, t := range a.behaviours {
+		trackers = append(trackers, t)
+	}
 	a.mu.Unlock()
+	for _, t := range trackers {
+		t.Persist()
+	}
 	for _, l := range ls {
 		l.Persist()
 	}
