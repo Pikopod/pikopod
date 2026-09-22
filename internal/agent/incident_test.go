@@ -35,31 +35,10 @@ func incidentAgent(t *testing.T, target string, tune func(*config.Upstream)) (*A
 	if err != nil {
 		t.Fatal(err)
 	}
-	go a.Recorder.Run(a.Proxy.Captures())
 	front := httptest.NewServer(a.Proxy)
-	// Ordered teardown, registered after t.TempDir so it runs before the
-	// directory is removed: stop new requests, let the recorder finish what
-	// it queued, then stop the alerter writing into the temp dir.
-	t.Cleanup(func() {
-		front.Close()
-		quiesce(a)
-		a.Alerter.Close()
-	})
+	t.Cleanup(front.Close)
+	startPipeline(t, a)
 	return a, front, dir
-}
-
-// quiesce waits for the recorder to finish every capture the proxy queued.
-// Bounded and non-fatal: it runs during cleanup, where t.Fatal cannot.
-func quiesce(a *Agent) {
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
-		m := a.Metrics
-		done := m.RecordingsWritten.Load() + m.RecordingsSampledOut.Load() + m.RecordingErrors.Load()
-		if done >= m.CapturesQueued.Load() {
-			return
-		}
-		time.Sleep(5 * time.Millisecond)
-	}
 }
 
 func scriptedUpstream(t *testing.T, h http.HandlerFunc) string {

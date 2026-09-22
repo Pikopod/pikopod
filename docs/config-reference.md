@@ -212,6 +212,15 @@ Note that `pikopod scenario from-drift` reads the event log, so fingerprints
 older than the retention window can no longer be pinned. Saved packs are
 unaffected.
 
+Every incident row and alert therefore carries `reproducible until <time>` and
+an `export:` hint. `pikopod incidents export <fp>` writes a self-contained
+bundle (event, redacted recording, contract version; never the salt, the token
+or any configuration) that `scenario reproduce` and `fix` accept in place of a
+fingerprint, on any machine, and that keeps working after this host's window
+has closed. A bundle is untrusted input on the way back in: its
+`schema_version` is checked, unknown fields are refused, and it is capped at
+8 MiB.
+
 ## tls
 
 ```yaml

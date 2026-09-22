@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/pikopod/pikopod/internal/alert"
 	"github.com/pikopod/pikopod/internal/bridge"
 	"github.com/pikopod/pikopod/internal/errfmt"
 	"github.com/pikopod/pikopod/internal/fix"
@@ -20,7 +21,7 @@ import (
 
 func newFixCmd() *cobra.Command {
 	c := &cobra.Command{
-		Use:   "fix <fingerprint>",
+		Use:   "fix <fingerprint | bundle.json>",
 		Short: "Turn a drift event into a code change in your repo (scan → LLM patch → check → PR)",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -34,9 +35,19 @@ func newFixCmd() *cobra.Command {
 			dryRun, _ := cmd.Flags().GetBool("dry-run")
 			openPR, _ := cmd.Flags().GetBool("pr")
 
-			ev, err := bridge.FindEvent(cfg.DataDir, args[0])
-			if err != nil {
-				return err
+			var ev *alert.DriftEvent
+			if bridge.IsBundleArg(args[0]) {
+				b, err := bridge.LoadBundle(args[0])
+				if err != nil {
+					return err
+				}
+				ev = &b.Event
+				fmt.Fprintf(out, "bundle %s: exported %s from %s\n", args[0], b.ExportedAt.Format(time.RFC3339), b.Source.Host)
+			} else {
+				ev, err = bridge.FindEvent(cfg.DataDir, args[0])
+				if err != nil {
+					return err
+				}
 			}
 			fmt.Fprintf(out, "drift %s: %s %s — %s %s\n", ev.Fingerprint, ev.Method, ev.Endpoint, ev.Kind, ev.Field)
 

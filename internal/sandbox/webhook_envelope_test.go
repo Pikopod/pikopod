@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -318,5 +319,41 @@ func TestInjectFieldKeepsBytes(t *testing.T) {
 	}
 	if _, err := injectField([]byte(`"scalar"`), "sig", "x"); err == nil {
 		t.Fatal("a scalar payload must be refused")
+	}
+}
+
+func TestCloseDrainsQueuedDeliveriesBeforeReturning(t *testing.T) {
+	def, err := importer.NormalizeOpenAPI([]byte(nestedHookSpec))
+	if err != nil {
+		t.Fatal(err)
+	}
+	release := make(chan struct{})
+	var got int64
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		<-release
+		atomic.AddInt64(&got, 1)
+		w.WriteHeader(200)
+	}))
+	t.Cleanup(srv.Close)
+	e := newEngine(t, def, Config{ID: "sbx_close", Seed: "s", WebhookURL: srv.URL})
+	for i := 0; i < 3; i++ {
+		do(t, e, "POST", "/transactions", `{"amount":1,"currency":"TZS"}`, nil)
+	}
+	closed := make(chan struct{})
+	go func() { e.Close(); close(closed) }()
+	select {
+	case <-closed:
+		t.Fatal("Close returned before the queued deliveries were attempted")
+	case <-time.After(100 * time.Millisecond):
+	}
+	close(release)
+	<-closed
+	if atomic.LoadInt64(&got) != 3 || e.WebhookSinkStats().Delivered != 3 {
+		t.Fatalf("every queued delivery must reach the sink before Close returns: got=%d stats=%+v", got, e.WebhookSinkStats())
+	}
+	e.Close()
+	do(t, e, "POST", "/transactions", `{"amount":2,"currency":"TZS"}`, nil)
+	if e.WebhookSinkStats().Dropped != 1 {
+		t.Fatalf("after Close a delivery is counted as dropped, never sent to a closed channel: %+v", e.WebhookSinkStats())
 	}
 }

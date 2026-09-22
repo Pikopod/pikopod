@@ -73,6 +73,8 @@ type Engine struct {
 	journalTok    *sanitize.Tokenizer
 	webhookURL    string
 	sinkCh        chan WebhookDelivery
+	sinkClosed    bool
+	sinkDone      chan struct{}
 	sinkDelivered int64 // atomics
 	sinkFailed    int64
 	sinkDropped   int64
@@ -157,6 +159,7 @@ func NewEngine(def *ir.ApiDefinition, cfg Config, store *Store) (*Engine, error)
 	if cfg.WebhookURL != "" {
 		e.webhookURL = cfg.WebhookURL
 		e.sinkCh = make(chan WebhookDelivery, webhookSinkQueue)
+		e.sinkDone = make(chan struct{})
 		go e.sinkLoop()
 	}
 	return e, nil

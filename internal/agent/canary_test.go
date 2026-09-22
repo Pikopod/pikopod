@@ -82,7 +82,7 @@ func TestCanarySentinelGate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	go a.Recorder.Run(a.Proxy.Captures())
+	startPipeline(t, a)
 	front := httptest.NewServer(a.Proxy)
 	defer front.Close()
 

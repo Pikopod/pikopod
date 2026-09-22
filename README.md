@@ -301,7 +301,9 @@ pikopod scenario run examplepay incident-14835fa32dfb
 `reproduce` arms the same failure in your sandbox and replays the recorded
 request at it, so your retry logic fails on your laptop instead of in
 production. The generated pack is an ordinary scenario — commit it, and it
-guards that path forever.
+guards that path forever. When the agent runs elsewhere, `pikopod incidents
+export <fp>` on that host writes a bundle (the event and the already-redacted
+recording) that `reproduce` and `fix` accept in place of the fingerprint.
 
 For a **shape change** rather than a failure, `from-drift` pins the old contract
 instead:

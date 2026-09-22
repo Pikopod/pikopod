@@ -253,6 +253,40 @@ reports them as neither pass nor violation, leaving the exit code alone;
 behind is a tool outcome, never a finding. See
 [exit codes](exit-codes.md).
 
+## Deployment
+
+The agent is one process in your request path, and its state is one
+directory. Both facts decide the topology.
+
+**Run one agent as a small shared service, not a sidecar per replica.**
+Baselines are single-writer: two agents pointed at one `data_dir` corrupt each
+other, and N agents with N `data_dir`s learn N partial baselines, each warming
+up on a fraction of the traffic, each raising incidents the others never see,
+with a fingerprint that exists on only one host. A single agent behind a stable
+address sees the whole stream and holds the whole history; the extra hop is a
+loopback-class forward that serves before it observes.
+
+**`data_dir` is state, not cache.** Put it on a persistent volume, back it up
+like a database, and give it to exactly one agent. Losing it loses the
+baselines, the event log and the recordings behind every open incident.
+
+**An incident reaches a developer in one of four ways**, in rough order of how
+often they apply:
+
+1. **Export a bundle.** `pikopod incidents export <fp>` on the agent host writes
+   one JSON file with the event, the already-redacted recording and the contract
+   version. `pikopod scenario reproduce ./incident.json` and `pikopod fix
+   ./incident.json` on a laptop read nothing from that laptop's `data_dir`, and
+   the file keeps working after the origin's retention has aged the incident
+   out. The alert names the deadline as `reproducible until`.
+2. **Commit the generated pack.** `reproduce` writes an ordinary scenario pack;
+   once it is in the repository it guards that path forever and needs no
+   recording at all.
+3. **Share `data_dir`** read-only (a mounted volume, an rsync) for a team that
+   wants every incident, not one at a time.
+4. **Automate the export**: `pikopod incidents export --since 24h` in a cron job,
+   attached to an issue or a pull request, so nobody has to remember step 1.
+
 ## Where the data lives
 
 Everything is under `data_dir`: recordings, baselines, alert state, imported

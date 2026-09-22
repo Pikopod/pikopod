@@ -81,7 +81,7 @@ func scenarioEngine(cfg *config.Config, entry *sandboxEntry, def *ir.ApiDefiniti
 		st.Close()
 		return nil, nil, err
 	}
-	return eng, func() { st.Close() }, nil
+	return eng, func() { eng.Close(); st.Close() }, nil
 }
 
 func packDirs(cfg *config.Config) []string {
@@ -241,6 +241,7 @@ func scenarioRun(cmd *cobra.Command, args []string) error {
 			return err
 		}
 		var res *scenario.RunResult
+		var sink *sandbox.SinkStats
 		if remote != nil {
 			if err := scenario.RefuseUnsupportedSteps(parsed); err != nil {
 				return err
@@ -263,6 +264,10 @@ func scenarioRun(cmd *cobra.Command, args []string) error {
 			if err != nil {
 				return err
 			}
+			if entry.WebhookURL != "" {
+				stats := eng.WebhookSinkStats()
+				sink = &stats
+			}
 		}
 
 		mark := map[string]string{
@@ -272,6 +277,12 @@ func scenarioRun(cmd *cobra.Command, args []string) error {
 		fmt.Fprintf(out, "%s %s — %s (%s)\n", mark, name, res.Status, res.Summary)
 		for _, s := range res.Steps {
 			fmt.Fprintf(out, "    %-14s %-16s %s\n", s.Status, s.Key, s.Summary)
+		}
+		if sink != nil {
+			fmt.Fprintf(out, "    sink: %d delivered, %d failed to %s\n", sink.Delivered, sink.Failed, entry.WebhookURL)
+			if sink.LastError != "" {
+				fmt.Fprintf(out, "    last sink failure: %s\n", sink.LastError)
+			}
 		}
 		switch res.Status {
 		case scenario.RunFailed:

@@ -77,10 +77,14 @@ type Recorder struct {
 	// specRules: upstream → rules derived from its imported contract, applied
 	// to response bodies only. Nil for an upstream without a contract.
 	specRules map[string][]sanitize.Rule
+	done      chan struct{}
 }
 
+// Done is closed when Run has drained its captures channel and returned.
+func (rec *Recorder) Done() <-chan struct{} { return rec.done }
+
 func NewRecorder(dataDir string, tok *sanitize.Tokenizer, m *Metrics) *Recorder {
-	return &Recorder{tok: tok, dataDir: dataDir, m: m, files: map[string]*store.NDJSON{}, maxFile: 64 << 20, sampleRate: 1}
+	return &Recorder{tok: tok, dataDir: dataDir, m: m, files: map[string]*store.NDJSON{}, maxFile: 64 << 20, sampleRate: 1, done: make(chan struct{})}
 }
 
 // SetObserver wires the learn/diff/alert pipeline. Call before Run.
@@ -122,6 +126,7 @@ func (rec *Recorder) Sweep() {
 
 // Run consumes until the channel closes. Call in a goroutine.
 func (rec *Recorder) Run(captures <-chan *Exchange) {
+	defer close(rec.done)
 	for ex := range captures {
 		func() {
 			defer ex.Release() // return the bytes to the capture budget
