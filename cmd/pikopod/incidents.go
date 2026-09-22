@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/pikopod/pikopod/internal/alert"
+	"github.com/pikopod/pikopod/internal/bridge"
 	"github.com/pikopod/pikopod/internal/errfmt"
 	"github.com/spf13/cobra"
 )
@@ -81,8 +82,9 @@ func newIncidentsCmd() *cobra.Command {
 			if total > limit {
 				kept, truncated = kept[:limit], true
 			}
-			return renderIncidents(cmd.OutOrStdout(), kept, total, truncated, format)
+			return renderIncidents(cmd.OutOrStdout(), kept, total, truncated, format, cfg.RetentionTTL())
 		}}
+	c.AddCommand(newIncidentsExportCmd())
 	c.Flags().Duration("since", 0, "only events last seen within this window, e.g. 24h")
 	c.Flags().String("kind", "", "filter by kind, e.g. upstream_error")
 	c.Flags().String("upstream", "", "filter by upstream")
@@ -101,7 +103,66 @@ type incidentReport struct {
 	Events        []alert.DriftEvent `json:"events"`
 }
 
-func renderIncidents(w io.Writer, evs []alert.DriftEvent, total int, truncated bool, format string) error {
+func newIncidentsExportCmd() *cobra.Command {
+	c := &cobra.Command{Use: "export [fingerprint]",
+		Short: "Write a self-contained incident bundle (event + redacted recording) for reproduction on another machine",
+		Long: `Write an incident bundle to stdout: the event, the already-redacted recording
+and the contract version, everything scenario reproduce and fix need. It carries
+no salt, no token and no configuration, and it keeps working after retention has
+aged the incident out of this host.
+
+Pass a fingerprint for one bundle, or --since for a JSON array of every incident
+in the window.`,
+		Args: cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cfg, err := loadConfig(cmd)
+			if err != nil {
+				return err
+			}
+			since, _ := cmd.Flags().GetDuration("since")
+			if len(args) == 0 && since <= 0 {
+				return errfmt.New("nothing to export", "pass a fingerprint or --since <window>", "e.g. pikopod incidents export fp_14835fa32dfb, or --since 24h", "docs/config-reference.md#retention")
+			}
+			host, _ := os.Hostname()
+			now := time.Now()
+			enc := json.NewEncoder(cmd.OutOrStdout())
+			enc.SetIndent("", "  ")
+			if len(args) == 1 {
+				ev, err := bridge.FindEvent(cfg.DataDir, args[0])
+				if err != nil {
+					return err
+				}
+				b, err := bridge.Export(cfg.DataDir, ev, cfg.RetentionTTL(), host, now)
+				if err != nil {
+					return err
+				}
+				return enc.Encode(b)
+			}
+			evs, err := loadEvents(cfg.DataDir)
+			if err != nil {
+				return err
+			}
+			cutoff := now.Add(-since)
+			bundles := []*bridge.Bundle{}
+			for i := range evs {
+				ev := evs[i]
+				if !ev.Kind.IsIncident() || ev.LastSeen.Before(cutoff) {
+					continue
+				}
+				b, err := bridge.Export(cfg.DataDir, &ev, cfg.RetentionTTL(), host, now)
+				if err != nil {
+					fmt.Fprintf(cmd.ErrOrStderr(), "skipping %s: %v\n", ev.Fingerprint, err)
+					continue
+				}
+				bundles = append(bundles, b)
+			}
+			return enc.Encode(bundles)
+		}}
+	c.Flags().Duration("since", 0, "export every incident last seen within this window as a JSON array, e.g. 24h")
+	return c
+}
+
+func renderIncidents(w io.Writer, evs []alert.DriftEvent, total int, truncated bool, format string, retention time.Duration) error {
 	if format == "json" {
 		enc := json.NewEncoder(w)
 		enc.SetIndent("", "  ")
@@ -124,7 +185,10 @@ func renderIncidents(w io.Writer, evs []alert.DriftEvent, total int, truncated b
 			ev.Level, marker, ev.Kind, ev.Method, ev.Endpoint, ev.Upstream,
 			ev.Occurrences, ev.LastSeen.Format(time.RFC3339), ev.Fingerprint)
 		if ev.Kind.IsIncident() {
-			fmt.Fprintf(w, "  reproduce: pikopod scenario reproduce %s\n", ev.Fingerprint)
+			if until := bridge.ExpiresAt(&ev, retention); until != nil {
+				fmt.Fprintf(w, "  reproducible until %s\n", until.UTC().Format(time.RFC3339))
+			}
+			fmt.Fprintf(w, "  reproduce: pikopod scenario reproduce %s\n  export: pikopod incidents export %s\n", ev.Fingerprint, ev.Fingerprint)
 		}
 	}
 	if truncated {

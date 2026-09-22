@@ -11,6 +11,7 @@ import (
 	"net/http/httputil"
 	"net/url"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -90,6 +91,20 @@ type Server struct {
 	ack         http.Handler
 	accept      http.Handler
 	token       string
+	closeMu     sync.RWMutex
+	closed      bool
+	closeOnce   sync.Once
+}
+
+// Close stops accepting captures and closes the channel once no forward is
+// mid-enqueue, so a recorder ranging over Captures() returns.
+func (s *Server) Close() {
+	s.closeOnce.Do(func() {
+		s.closeMu.Lock()
+		s.closed = true
+		close(s.captures)
+		s.closeMu.Unlock()
+	})
 }
 
 // New builds the agent handler. If nobody consumes captures, the channel
@@ -233,6 +248,13 @@ func (s *Server) forward(up *upstreamProxy, w http.ResponseWriter, r *http.Reque
 		}
 		s.queuedBytes.Add(size)
 		ex.release = func() { s.queuedBytes.Add(-size) }
+		s.closeMu.RLock()
+		defer s.closeMu.RUnlock()
+		if s.closed {
+			ex.Release()
+			s.Metrics.CapturesDropped.Add(1)
+			return
+		}
 		select {
 		case s.captures <- ex:
 			s.Metrics.CapturesQueued.Add(1)

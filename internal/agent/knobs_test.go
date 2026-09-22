@@ -35,21 +35,7 @@ func knobAgent(t *testing.T, upstream *httptest.Server, up config.Upstream) (*ca
 	if err != nil {
 		t.Fatal(err)
 	}
-	go a.Recorder.Run(a.Proxy.Captures())
-	t.Cleanup(func() {
-		// Drain before TempDir cleanup: the recorder's tail observer persists
-		// alert state asynchronously, and a persist racing RemoveAll flakes
-		// the test. Wait until every queued capture is written, then give the
-		// final observer call a beat to finish.
-		deadline := time.Now().Add(2 * time.Second)
-		for time.Now().Before(deadline) {
-			if a.Metrics.RecordingsWritten.Load()+a.Metrics.RecordingErrors.Load()+a.Metrics.RecordingsSampledOut.Load() >= a.Metrics.CapturesQueued.Load() {
-				break
-			}
-			time.Sleep(5 * time.Millisecond)
-		}
-		time.Sleep(50 * time.Millisecond)
-	})
+	startPipeline(t, a)
 	return sink, a, dir
 }
 
@@ -253,8 +239,7 @@ func TestRefinementLearnsUndeclaredField(t *testing.T) {
 		t.Fatal(err)
 	}
 	a.SetContracts(map[string]*ir.ApiDefinition{"prov": def})
-	go a.Recorder.Run(a.Proxy.Captures())
-	t.Cleanup(func() { time.Sleep(50 * time.Millisecond) })
+	startPipeline(t, a)
 
 	mutated.Store(true) // fee_bearer present from the start
 	drive(t, a, 12)

@@ -537,7 +537,20 @@ func newSandboxServer(cfg *config.Config) (*sandboxServer, error) {
 	return &sandboxServer{cfg: cfg, store: st, entries: byName, handlers: map[string]http.Handler{}}, nil
 }
 
-func (s *sandboxServer) Close() error { return s.store.Close() }
+func (s *sandboxServer) Close() error {
+	s.mu.Lock()
+	handlers := make([]http.Handler, 0, len(s.handlers))
+	for _, h := range s.handlers {
+		handlers = append(handlers, h)
+	}
+	s.mu.Unlock()
+	for _, h := range handlers {
+		if eng, ok := h.(*sandbox.Engine); ok {
+			eng.Close()
+		}
+	}
+	return s.store.Close()
+}
 
 func (s *sandboxServer) Names() []string {
 	s.mu.Lock()

@@ -48,7 +48,7 @@ func driveEnumDrift(t *testing.T, rules map[string][]sanitize.Rule) string {
 		t.Fatal(err)
 	}
 	a.SetSpecRules(rules)
-	go a.Recorder.Run(a.Proxy.Captures())
+	startPipeline(t, a)
 	front := httptest.NewServer(a.Proxy)
 	defer front.Close()
 	hit := func(n int) {

@@ -342,7 +342,7 @@ func (a *Alerter) emit(ev *DriftEvent, now time.Time) {
 	// would re-alert the same fingerprint on a crash-restart.
 	a.persist()
 	if deliverable {
-		a.deliver(Render(ev), true)
+		a.deliver(RenderWithRetention(ev, a.opts.Retention), true)
 	} else if suppressedNote {
 		a.deliver("pikopod: alert delivery ceiling reached ("+strconv.Itoa(maxDeliveriesPerHour)+"/h) — further alerts this hour are in the local event log (`pikopod status`)", false)
 	}
@@ -534,7 +534,9 @@ func (a *Alerter) evictOneLocked() bool {
 }
 
 // Render formats the one loud message (Slack-markdown-compatible plain text).
-func Render(ev *DriftEvent) string {
+func Render(ev *DriftEvent) string { return RenderWithRetention(ev, 0) }
+
+func RenderWithRetention(ev *DriftEvent, retention time.Duration) string {
 	if ev.Source == "declared" {
 		icon := map[string]string{"ERR": ":rotating_light:", "WARN": ":warning:", "INFO": ":memo:"}[ev.Level]
 		if icon == "" {
@@ -596,14 +598,18 @@ func Render(ev *DriftEvent) string {
 	}
 	// An incident is a failed exchange, not a shape change, and it reproduces
 	// through a different command. Saying "drift" for both misroutes the reader.
-	word, replay := "drift", "from-drift"
+	word, replay, portable := "drift", "from-drift", ""
 	if ev.Kind.IsIncident() {
 		word, replay = "incident", "reproduce"
+		if retention > 0 {
+			portable = " · reproducible until " + ev.LastSeen.Add(retention).UTC().Format(time.RFC3339)
+		}
+		portable += "\nexport: `pikopod incidents export " + ev.Fingerprint + "`"
 	}
 	return fmt.Sprintf(
-		"%s *pikopod %s — %s* on `%s %s` (%s)\n%s%s\nfingerprint `%s` · first seen %s · %d occurrence(s)\nreplay it: `pikopod scenario %s %s`",
+		"%s *pikopod %s — %s* on `%s %s` (%s)\n%s%s\nfingerprint `%s` · first seen %s · %d occurrence(s)%s\nreplay it: `pikopod scenario %s %s`",
 		icon, word, head, ev.Method, ev.Endpoint, ev.Upstream, detail, note,
-		ev.Fingerprint, ev.FirstSeen.Format(time.RFC3339), ev.Occurrences, replay, ev.Fingerprint)
+		ev.Fingerprint, ev.FirstSeen.Format(time.RFC3339), ev.Occurrences, portable, replay, ev.Fingerprint)
 }
 
 func (a *Alerter) persist() {

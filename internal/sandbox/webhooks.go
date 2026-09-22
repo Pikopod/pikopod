@@ -347,6 +347,10 @@ func (e *Engine) appendDelivery(d *WebhookDelivery) {
 		e.webhookLog = e.webhookLog[:n]
 	}
 	if e.sinkCh != nil {
+		if e.sinkClosed {
+			atomic.AddInt64(&e.sinkDropped, 1)
+			return
+		}
 		select {
 		case e.sinkCh <- *d:
 		default:
@@ -414,9 +418,27 @@ func (e *Engine) sinkFailure(d *WebhookDelivery, reason string) {
 // sinkLoop drains the queue with one bounded-timeout attempt per delivery and
 // no retries, on its own goroutine for the engine's lifetime.
 func (e *Engine) sinkLoop() {
+	defer close(e.sinkDone)
 	client := &http.Client{Timeout: webhookSinkTimeout}
 	for d := range e.sinkCh {
 		e.deliverToSink(client, &d)
+	}
+}
+
+// Close stops the sink after a bounded drain so a delivery already queued is
+// attempted before the caller exits; it never blocks a request.
+func (e *Engine) Close() {
+	e.webhookMu.Lock()
+	if e.sinkCh == nil || e.sinkClosed {
+		e.webhookMu.Unlock()
+		return
+	}
+	e.sinkClosed = true
+	close(e.sinkCh)
+	e.webhookMu.Unlock()
+	select {
+	case <-e.sinkDone:
+	case <-time.After(2 * webhookSinkTimeout):
 	}
 }
 
