@@ -74,6 +74,13 @@ type Recorder struct {
 	// observer taps EVERY sanitized record before the sampling decision;
 	// a true return marks a baseline-moving record (always persisted).
 	observer func(*Record) bool
+	// rulesMu guards rules — SetRules may be called after Run starts (the
+	// CLI attaches contracts once the sandbox registry resolves them).
+	rulesMu sync.RWMutex
+	// rules: upstream → spec-derived sanitize rules (e.g. "allow this field's
+	// value only when the provider's own spec calls it an enum member").
+	// Empty/absent means today's behaviour: the bare detector, no overrides.
+	rules map[string][]sanitize.Rule
 }
 
 func NewRecorder(dataDir string, tok *sanitize.Tokenizer, m *Metrics) *Recorder {
@@ -98,6 +105,23 @@ func (rec *Recorder) SetSampling(rate float64) {
 // SetRetention arms the per-upstream logs' TTL (0 = size-only rotation;
 // call before Run).
 func (rec *Recorder) SetRetention(ttl time.Duration) { rec.ttl = ttl }
+
+// SetRules installs spec-derived sanitize rules for one upstream. Safe to
+// call at any time, including while Run is consuming captures.
+func (rec *Recorder) SetRules(upstream string, rules []sanitize.Rule) {
+	rec.rulesMu.Lock()
+	defer rec.rulesMu.Unlock()
+	if rec.rules == nil {
+		rec.rules = map[string][]sanitize.Rule{}
+	}
+	rec.rules[upstream] = rules
+}
+
+func (rec *Recorder) rulesFor(upstream string) []sanitize.Rule {
+	rec.rulesMu.RLock()
+	defer rec.rulesMu.RUnlock()
+	return rec.rules[upstream]
+}
 
 // Sweep enforces retention on every open log (the periodic tick's hook —
 // a quiet upstream must still age out). Safe concurrently with Run.
@@ -189,6 +213,7 @@ func (rec *Recorder) persist(record *Record) error {
 }
 
 func (rec *Recorder) sanitizeExchange(ex *Exchange) (*Record, error) {
+	rules := rec.rulesFor(ex.Upstream)
 	redactions := 0
 	var detail []SectionRedaction
 	collect := func(section string, rs []sanitize.Redaction) {
@@ -205,14 +230,14 @@ func (rec *Recorder) sanitizeExchange(ex *Exchange) (*Record, error) {
 		for k, v := range h {
 			flat[strings.ToLower(k)] = strings.Join(v, ", ")
 		}
-		res := sanitize.Sanitize(flat, rec.tok, nil, true)
+		res := sanitize.Sanitize(flat, rec.tok, rules, true)
 		collect(section, res.Redactions)
 		out, _ := res.Sanitized.(map[string]any)
 		return out
 	}
 
-	reqBody, reqKind := rec.sanitizeBody("req_body", ex.ReqBody, ex.ReqHeader, collect)
-	respBody, respKind := rec.sanitizeBody("resp_body", ex.RespBody, ex.RespHeader, collect)
+	reqBody, reqKind := rec.sanitizeBody("req_body", ex.ReqBody, ex.ReqHeader, rules, collect)
+	respBody, respKind := rec.sanitizeBody("resp_body", ex.RespBody, ex.RespHeader, rules, collect)
 
 	// Path may embed identifiers (tx_abc...); tokenize path segments that
 	// classify as identifiers so recorded paths are safe at rest too.
@@ -232,7 +257,7 @@ func (rec *Recorder) sanitizeExchange(ex *Exchange) (*Record, error) {
 
 // sanitizeBody decodes content-encoding, parses JSON or form bodies, and
 // sanitizes the parsed tree. Anything else is metadata-only ("binary").
-func (rec *Recorder) sanitizeBody(section string, raw []byte, h http.Header, collect func(string, []sanitize.Redaction)) (any, string) {
+func (rec *Recorder) sanitizeBody(section string, raw []byte, h http.Header, rules []sanitize.Rule, collect func(string, []sanitize.Redaction)) (any, string) {
 	if len(raw) == 0 {
 		return nil, "none"
 	}
@@ -253,7 +278,7 @@ func (rec *Recorder) sanitizeBody(section string, raw []byte, h http.Header, col
 		// float64; the record of record keeps the literal digits.
 		dec.UseNumber()
 		if err := dec.Decode(&v); err == nil {
-			res := sanitize.Sanitize(v, rec.tok, nil, false)
+			res := sanitize.Sanitize(v, rec.tok, rules, false)
 			collect(section, res.Redactions)
 			return res.Sanitized, "json"
 		}
@@ -268,7 +293,7 @@ func (rec *Recorder) sanitizeBody(section string, raw []byte, h http.Header, col
 				vals[urlUnescape(k)] = urlUnescape(v)
 			}
 		}
-		res := sanitize.Sanitize(vals, rec.tok, nil, false)
+		res := sanitize.Sanitize(vals, rec.tok, rules, false)
 		collect(section, res.Redactions)
 		return res.Sanitized, "form"
 	default:

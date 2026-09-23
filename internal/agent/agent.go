@@ -188,11 +188,18 @@ func (a *Agent) SetWatcher(w *specwatch.Watcher) { a.watch = w }
 
 // SetContracts links upstreams to their spec-derived IRs so admission passes can
 // compare traffic against the spec (`pikopod up` wires it from the registry).
+// It also derives per-upstream sanitize rules from each contract's declared
+// enums (see enumRulesFromContract) and installs them on the Recorder, so an
+// enum field's traffic reaches the learner in clear text instead of being
+// dropped or tokenized by shape alone — issue #28.
 func (a *Agent) SetContracts(m map[string]*ir.ApiDefinition) {
 	a.mu.Lock()
-	defer a.mu.Unlock()
 	for k, v := range m {
 		a.contracts[k] = v
+	}
+	a.mu.Unlock()
+	for k, v := range m {
+		a.Recorder.SetRules(k, enumRulesFromContract(v))
 	}
 }
 

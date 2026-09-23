@@ -24,6 +24,16 @@ type Rule struct {
 	Field         string `json:"field,omitempty"`
 	PointerPrefix string `json:"pointerPrefix,omitempty"`
 	Mode          Mode   `json:"mode"`
+	// Values, when non-empty, marks this a spec-derived ENUM rule: Mode
+	// applies to a leaf only if its value is a string that either exactly
+	// matches one of these declared members, or still matches the general
+	// enum-token shape (specEnumRE) — never unconditionally on field name
+	// alone. A non-string leaf never matches. The shape half is what lets a
+	// brand-new member the provider hasn't declared yet — the exact thing
+	// drift detection exists to catch — still read in clear text, while a
+	// free-text value arriving under the same field name (an error message,
+	// say) still falls through to the fail-closed default.
+	Values []string `json:"values,omitempty"`
 }
 
 type Redaction struct {
@@ -61,6 +71,13 @@ var (
 	httpMethodRE  = regexp.MustCompile(`^(GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS|TRACE|CONNECT)$`)
 	longAlnumRE   = regexp.MustCompile(`^[A-Za-z0-9]{16,}$`)
 	enumishRE     = regexp.MustCompile(`^[a-z][a-z._/+-]{0,30}$`)
+	// specEnumRE is the WIDENED shape checked for a Rule.Values match: case-
+	// insensitive and underscore-tolerant, unlike enumishRE above. It is only
+	// ever consulted for a field the provider's own spec already declares as
+	// an enum (see Rule.Values) — never applied globally, which is what keeps
+	// it from doing what widening enumishRE itself would do (start allowing
+	// free-text city/merchant/reference values through).
+	specEnumRE    = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9._/+-]{0,30}$`)
 	longDigitsRE  = regexp.MustCompile(`^\d{6,}$`)
 	mediumAlnumRE = regexp.MustCompile(`^[A-Za-z0-9]{6,15}$`)
 	prefixedIDRE  = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9]*_[A-Za-z0-9]{6,}$`)
@@ -162,14 +179,20 @@ type dropped struct{}
 func Sanitize(value any, tok *Tokenizer, rules []Rule, isHeaderRoot bool) Result {
 	var redactions []Redaction
 
-	ruleFor := func(key, pointer string) (Mode, bool) {
+	ruleFor := func(key, pointer string, value any) (Mode, bool) {
 		for _, r := range rules {
-			if r.Field != "" && strings.EqualFold(r.Field, key) {
-				return r.Mode, true
+			matched := (r.Field != "" && strings.EqualFold(r.Field, key)) ||
+				(r.PointerPrefix != "" && strings.HasPrefix(pointer, r.PointerPrefix))
+			if !matched {
+				continue
 			}
-			if r.PointerPrefix != "" && strings.HasPrefix(pointer, r.PointerPrefix) {
-				return r.Mode, true
+			if len(r.Values) > 0 {
+				s, isString := value.(string)
+				if !isString || !(containsString(r.Values, s) || specEnumRE.MatchString(s)) {
+					continue // conditional rule doesn't cover this value; keep looking
+				}
 			}
+			return r.Mode, true
 		}
 		return "", false
 	}
@@ -210,7 +233,7 @@ func Sanitize(value any, tok *Tokenizer, rules []Rule, isHeaderRoot bool) Result
 			return out
 		}
 		// Leaf: rule override wins, else the detector; fail-closed default is DROP.
-		mode, ok := ruleFor(key, pointer)
+		mode, ok := ruleFor(key, pointer, node)
 		if !ok {
 			mode = Classify(key, node, isHeader)
 		}
@@ -253,6 +276,15 @@ func Sanitize(value any, tok *Tokenizer, rules []Rule, isHeaderRoot bool) Result
 		sanitized = nil
 	}
 	return Result{Sanitized: sanitized, Redactions: redactions}
+}
+
+func containsString(list []string, s string) bool {
+	for _, v := range list {
+		if v == s {
+			return true
+		}
+	}
+	return false
 }
 
 func escapePointer(seg string) string {
