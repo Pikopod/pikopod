@@ -50,8 +50,6 @@ func matureRefiner(t *testing.T) *Refiner {
 	return r
 }
 
-// Undeclared fields join the contract at OBSERVED tier once gated; presence
-// becomes confidence.
 func TestAdmitUndeclaredField(t *testing.T) {
 	r := matureRefiner(t)
 	for i := 0; i < 12; i++ {
@@ -73,19 +71,16 @@ func TestAdmitUndeclaredField(t *testing.T) {
 	if spec.Presence < 0.9 {
 		t.Fatalf("presence: %v", spec.Presence)
 	}
-	// Idempotent: re-admitting journals nothing new.
+
 	if again := r.Admit(specDef(t), false); again != 0 {
 		t.Fatalf("re-admission must be idempotent, journaled %d", again)
 	}
 }
 
-// Traffic WINS a sustained type conflict; the spec's claim
-// survives in the contradiction record.
 func TestTrafficWinsSustainedTypeConflict(t *testing.T) {
 	r := matureRefiner(t)
 	for i := 0; i < 12; i++ {
-		// amount arrives as a STRING in 100% of samples, contradicting the
-		// spec's integer claim.
+
 		rec := record("success", nil)
 		rec.RespBody.(map[string]any)["amount"] = "100"
 		r.Observe(rec)
@@ -105,8 +100,6 @@ func TestTrafficWinsSustainedTypeConflict(t *testing.T) {
 		t.Fatalf("the spec's claim must survive in the contradiction record: %+v", eff.Contradictions)
 	}
 
-	// The knob points the other way: prefer_spec gates the override but
-	// still records the contradiction.
 	r2 := matureRefiner(t)
 	for i := 0; i < 12; i++ {
 		rec := record("success", nil)
@@ -123,13 +116,12 @@ func TestTrafficWinsSustainedTypeConflict(t *testing.T) {
 	}
 }
 
-// An UNSUSTAINED conflict (mixed types) never overrides — spec wins, gated.
 func TestUnsustainedConflictDoesNotOverride(t *testing.T) {
 	r := matureRefiner(t)
 	for i := 0; i < 12; i++ {
 		rec := record("success", nil)
 		if i%3 == 0 {
-			rec.RespBody.(map[string]any)["amount"] = "100" // a third are strings
+			rec.RespBody.(map[string]any)["amount"] = "100"
 		}
 		r.Observe(rec)
 	}
@@ -140,11 +132,10 @@ func TestUnsustainedConflictDoesNotOverride(t *testing.T) {
 	}
 }
 
-// Observed enum values UNION into declared enums after the count floor.
 func TestEnumValueUnion(t *testing.T) {
 	r := matureRefiner(t)
 	for i := 0; i < 12; i++ {
-		r.Observe(record("refunded", nil)) // docs declare success|failed only
+		r.Observe(record("refunded", nil))
 	}
 	r.Admit(specDef(t), false)
 	eff := ResolveAt(r.Snapshot(), r.Snapshot().Version)
@@ -154,13 +145,10 @@ func TestEnumValueUnion(t *testing.T) {
 	}
 }
 
-// Sanitizer awareness: redacted fields teach PRESENCE but never types or
-// values — the refiner must not learn the sanitizer's artifacts.
 func TestRedactedFieldsTeachPresenceOnly(t *testing.T) {
 	r := matureRefiner(t)
 	for i := 0; i < 12; i++ {
-		// customer_name was DROPPED at record time: absent from the body,
-		// present in the redaction pointers.
+
 		r.Observe(record("success", nil, proxy.SectionRedaction{Section: "resp_body", Pointer: "/customer_name", Mode: "DROP"}))
 	}
 	r.Admit(specDef(t), false)
@@ -182,8 +170,6 @@ func TestRedactedFieldsTeachPresenceOnly(t *testing.T) {
 	}
 }
 
-// ResolveAt reproduces history: a pin at version N is untouched by later
-// admissions.
 func TestResolveAtPinsHistory(t *testing.T) {
 	r := matureRefiner(t)
 	for i := 0; i < 12; i++ {
@@ -211,12 +197,11 @@ func TestResolveAtPinsHistory(t *testing.T) {
 	}
 }
 
-// Warmup gates: nothing admits before the endpoint matures.
 func TestWarmupGatesAdmission(t *testing.T) {
 	r := NewRefiner("prov", t.TempDir(), 10, 0)
 	base := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	r.SetClock(func() time.Time { return base })
-	for i := 0; i < 5; i++ { // below minSamples
+	for i := 0; i < 5; i++ {
 		r.Observe(record("success", map[string]any{"fee_bearer": "merchant"}))
 	}
 	if n := r.Admit(specDef(t), false); n != 0 {
@@ -224,7 +209,6 @@ func TestWarmupGatesAdmission(t *testing.T) {
 	}
 }
 
-// Persistence round-trips the journal and version.
 func TestOverlayPersistence(t *testing.T) {
 	dir := t.TempDir()
 	r := NewRefiner("prov", dir, 10, 0)

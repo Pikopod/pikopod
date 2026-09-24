@@ -16,8 +16,6 @@ import (
 	"github.com/pikopod/pikopod/internal/store"
 )
 
-// Record is the at-rest shape of an observed exchange and the egress
-// enforcement point: everything in it is post-sanitizer (redact-at-write).
 type Record struct {
 	TS         time.Time      `json:"ts"`
 	Upstream   string         `json:"upstream"`
@@ -29,69 +27,53 @@ type Record struct {
 	RespHeader map[string]any `json:"resp_header,omitempty"`
 	ReqBody    any            `json:"req_body,omitempty"`
 	RespBody   any            `json:"resp_body,omitempty"`
-	// BodyKind: json | form | binary | none. Non-JSON bodies are recorded as
-	// metadata only (kind + size), never as raw content.
+
 	ReqKind    string `json:"req_kind"`
 	RespKind   string `json:"resp_kind"`
 	ReqSize    int    `json:"req_size"`
 	RespSize   int    `json:"resp_size"`
 	Truncated  bool   `json:"truncated,omitempty"`
 	Redactions int    `json:"redactions"`
-	// Redacted lists sanitized pointers + modes, zero payload bytes; the
-	// refiner treats DROP as PRESENT and learns only from ALLOW fields.
+
 	Redacted []SectionRedaction `json:"redacted,omitempty"`
 }
 
-// SectionRedaction locates one redaction within the exchange.
 type SectionRedaction struct {
-	// Section: req_header | resp_header | req_body | resp_body.
 	Section string `json:"s"`
 	Pointer string `json:"p"`
 	Mode    string `json:"m"`
 }
 
-// maxRedactionDetail bounds the per-record detail list (count stays exact).
 const maxRedactionDetail = 256
 
-// Recorder sanitizes captures and appends ndjson per upstream. SAMPLING ORDER
-// IS LOAD-BEARING: the observer taps every record; sampling gates only disk.
 type Recorder struct {
 	tok     *sanitize.Tokenizer
 	dataDir string
 	m       *Metrics
-	// filesMu guards files: Run's persist path adds entries while the
-	// agent's persist tick calls Sweep from another goroutine.
+
 	filesMu sync.Mutex
 	files   map[string]*store.NDJSON
 	maxFile int64
 	ttl     time.Duration
-	// sampleRate is the fraction of ROUTINE records persisted (1 = all);
-	// errors, observer-notable records and no-observer records always persist.
+
 	sampleRate float64
-	// acc is the Bresenham accumulator: deterministic, exact long-run rate,
-	// no RNG. Run is single-goroutine, so no lock.
+
 	acc float64
-	// observer taps EVERY sanitized record before the sampling decision;
-	// a true return marks a baseline-moving record (always persisted).
+
 	observer func(*Record) bool
-	// specRules: upstream → rules derived from its imported contract, applied
-	// to response bodies only. Nil for an upstream without a contract.
+
 	specRules map[string][]sanitize.Rule
 	done      chan struct{}
 }
 
-// Done is closed when Run has drained its captures channel and returned.
 func (rec *Recorder) Done() <-chan struct{} { return rec.done }
 
 func NewRecorder(dataDir string, tok *sanitize.Tokenizer, m *Metrics) *Recorder {
 	return &Recorder{tok: tok, dataDir: dataDir, m: m, files: map[string]*store.NDJSON{}, maxFile: 64 << 20, sampleRate: 1, done: make(chan struct{})}
 }
 
-// SetObserver wires the learn/diff/alert pipeline. Call before Run.
 func (rec *Recorder) SetObserver(fn func(*Record) bool) { rec.observer = fn }
 
-// SetSampling sets the routine-record persistence rate (clamped to [0,1];
-// call before Run).
 func (rec *Recorder) SetSampling(rate float64) {
 	if rate < 0 {
 		rate = 0
@@ -102,16 +84,10 @@ func (rec *Recorder) SetSampling(rate float64) {
 	rec.sampleRate = rate
 }
 
-// SetRetention arms the per-upstream logs' TTL (0 = size-only rotation;
-// call before Run).
 func (rec *Recorder) SetRetention(ttl time.Duration) { rec.ttl = ttl }
 
-// SetSpecRules installs contract-derived sanitizer rules per upstream (call
-// before Run). Built once at startup; the observe path only reads them.
 func (rec *Recorder) SetSpecRules(rules map[string][]sanitize.Rule) { rec.specRules = rules }
 
-// Sweep enforces retention on every open log (the periodic tick's hook —
-// a quiet upstream must still age out). Safe concurrently with Run.
 func (rec *Recorder) Sweep() {
 	rec.filesMu.Lock()
 	open := make([]*store.NDJSON, 0, len(rec.files))
@@ -124,14 +100,12 @@ func (rec *Recorder) Sweep() {
 	}
 }
 
-// Run consumes until the channel closes. Call in a goroutine.
 func (rec *Recorder) Run(captures <-chan *Exchange) {
 	defer close(rec.done)
 	for ex := range captures {
 		func() {
-			defer ex.Release() // return the bytes to the capture budget
-			// A recorder bug must not crash the process, but a swallowed panic
-			// would silently zero recording while /healthz says ok — so count it.
+			defer ex.Release()
+
 			defer func() {
 				if p := recover(); p != nil {
 					rec.m.ObserverPanics.Add(1)
@@ -143,7 +117,7 @@ func (rec *Recorder) Run(captures <-chan *Exchange) {
 				rec.m.RecordingErrors.Add(1)
 				return
 			}
-			// Learn from EVERYTHING (see the type comment); then decide disk.
+
 			notable := false
 			if rec.observer != nil {
 				notable = rec.observer(record)
@@ -167,8 +141,6 @@ func (rec *Recorder) Run(captures <-chan *Exchange) {
 	rec.filesMu.Unlock()
 }
 
-// takeSample is deterministic: rate 0.25 keeps exactly every 4th routine
-// record, not "25% eventually".
 func (rec *Recorder) takeSample() bool {
 	if rec.sampleRate >= 1 {
 		return true
@@ -226,8 +198,6 @@ func (rec *Recorder) sanitizeExchange(ex *Exchange) (*Record, error) {
 	reqBody, reqKind := rec.sanitizeBody("req_body", ex.ReqBody, ex.ReqHeader, nil, collect)
 	respBody, respKind := rec.sanitizeBody("resp_body", ex.RespBody, ex.RespHeader, rec.specRules[ex.Upstream], collect)
 
-	// Path may embed identifiers (tx_abc...); tokenize path segments that
-	// classify as identifiers so recorded paths are safe at rest too.
 	safePath := rec.sanitizePath(ex.Path, &redactions)
 
 	record := &Record{
@@ -242,8 +212,6 @@ func (rec *Recorder) sanitizeExchange(ex *Exchange) (*Record, error) {
 	return record, nil
 }
 
-// sanitizeBody decodes content-encoding, parses JSON or form bodies, and
-// sanitizes the parsed tree. Anything else is metadata-only ("binary").
 func (rec *Recorder) sanitizeBody(section string, raw []byte, h http.Header, rules []sanitize.Rule, collect func(string, []sanitize.Redaction)) (any, string) {
 	if len(raw) == 0 {
 		return nil, "none"
@@ -261,18 +229,16 @@ func (rec *Recorder) sanitizeBody(section string, raw []byte, h http.Header, rul
 	case strings.Contains(ct, "json") || looksLikeJSON(raw):
 		var v any
 		dec := json.NewDecoder(bytes.NewReader(raw))
-		// A 17-digit account number or amount must not lose precision through
-		// float64; the record of record keeps the literal digits.
+
 		dec.UseNumber()
 		if err := dec.Decode(&v); err == nil {
 			res := sanitize.Sanitize(v, rec.tok, rules, false)
 			collect(section, res.Redactions)
 			return res.Sanitized, "json"
 		}
-		return nil, "binary" // claimed JSON but unparseable → metadata only
+		return nil, "binary"
 	case ct == "application/x-www-form-urlencoded":
-		// Several major payment APIs use this wire format: parse to a flat
-		// map, then sanitize like JSON.
+
 		vals := map[string]any{}
 		for _, pair := range strings.Split(string(raw), "&") {
 			k, v, _ := strings.Cut(pair, "=")
@@ -295,8 +261,7 @@ func (rec *Recorder) sanitizePath(p string, redactions *int) string {
 		if seg == "" {
 			continue
 		}
-		// Decode before classifying (%40 must not defeat the email detector);
-		// any non-ALLOW verdict tokenizes, else paths would fail open.
+
 		useg := urlUnescape(seg)
 		if mode := sanitize.Classify("", useg, false); mode != sanitize.ModeAllow {
 			token, _ := rec.tok.Tokenize(useg)
@@ -306,12 +271,11 @@ func (rec *Recorder) sanitizePath(p string, redactions *int) string {
 	}
 	out := strings.Join(segs, "/")
 	if hasQuery {
-		// Query strings routinely carry identifiers/keys — sanitize pairwise.
+
 		pairs := strings.Split(query, "&")
 		for i, pair := range pairs {
 			k, v, _ := strings.Cut(pair, "=")
-			// KEYS too: a secret sitting left of the `=` must not persist raw.
-			// Value-SHAPED keys only; ordinary names pass through.
+
 			uk := urlUnescape(k)
 			if sanitize.KeyLooksLikeIdentifier(uk) {
 				token, _ := rec.tok.Tokenize(uk)

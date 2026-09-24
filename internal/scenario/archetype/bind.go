@@ -1,5 +1,3 @@
-// The deterministic archetype binder. A candidate resting SOLELY on extracted
-// facts is rejected; zero candidates is a first-class result with a reason.
 package archetype
 
 import (
@@ -14,13 +12,10 @@ import (
 )
 
 type Candidate struct {
-	Bindings     map[string]string `json:"bindings"` // role → operationId | webhook event
+	Bindings     map[string]string `json:"bindings"`
 	UsesInferred bool              `json:"usesInferred"`
 }
 
-// Binding is one archetype's applicability plus its ranked candidates.
-// InferredOnly holds candidates refused solely because every fact they rest
-// on is extracted, so a caller can offer them for the user to assert.
 type Binding struct {
 	ArchetypeID  string      `json:"archetypeId"`
 	Applicable   bool        `json:"applicable"`
@@ -38,7 +33,7 @@ type opFact struct {
 	ref            string
 	method         string
 	collectionPath string
-	crud           string // "" = none
+	crud           string
 	hasSuccess     bool
 	has4xx         bool
 	has5xx         bool
@@ -148,7 +143,7 @@ func buildOpFacts(apiDef *ir.ApiDefinition) []opFact {
 			for k := range e.RequestBody.Content {
 				reqSchemas = append(reqSchemas, &e.RequestBody.Content[k].Schema)
 			}
-			schemas = append(reqSchemas, schemas...) // request schemas first
+			schemas = append(reqSchemas, schemas...)
 		}
 		ref := e.ID
 		if e.OperationID != nil {
@@ -207,13 +202,10 @@ func opMatches(fact *opFact, req *RoleRequirement, partial map[string]any) bool 
 	return true
 }
 
-// Bind returns zero or more candidate bindings, ranked deterministically.
 func Bind(a *Archetype, apiDef *ir.ApiDefinition) Binding {
 	return BindWith(a, apiDef, nil)
 }
 
-// BindWith treats each asserted role (from --bind) as an explicit fact: the
-// named operation must exist and fit the role's shape, and it alone fills it.
 func BindWith(a *Archetype, apiDef *ir.ApiDefinition, asserted map[string]string) Binding {
 	ops := buildOpFacts(apiDef)
 	sort.SliceStable(ops, func(i, j int) bool { return ops[i].ref < ops[j].ref })
@@ -299,7 +291,6 @@ func BindWith(a *Archetype, apiDef *ir.ApiDefinition, asserted map[string]string
 	}
 	backtrack(0, map[string]any{})
 
-	// Deterministic ranking: by the concatenation of bound refs.
 	key := func(c Candidate) string {
 		parts := make([]string, 0, len(a.Requires))
 		for _, r := range a.Requires {
@@ -324,8 +315,6 @@ func BindWith(a *Archetype, apiDef *ir.ApiDefinition, asserted map[string]string
 	return Binding{ArchetypeID: a.ID, Applicable: false, Reason: reason, Candidates: []Candidate{}, InferredOnly: inferredOnly}
 }
 
-// assertedFact finds the fact a --bind names and checks it can play the role;
-// the user vouches for what the docs left out, not for the operation's shape.
 func assertedFact(ref string, req *RoleRequirement, partial map[string]any, ops []opFact, hooks []hookFact) (any, string) {
 	if req.Bind == "webhookEvent" {
 		for _, h := range hooks {
@@ -361,8 +350,6 @@ func assertedFact(ref string, req *RoleRequirement, partial map[string]any, ops 
 	return fact, ""
 }
 
-// matchJSONString serializes a match byte-stably: only the keys the archetype
-// set, in RoleMatch's declaration order — never the literal's insertion order.
 func matchJSONString(m *RoleMatch) string {
 	var parts []string
 	add := func(k string, v any) {

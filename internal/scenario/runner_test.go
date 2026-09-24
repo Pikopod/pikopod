@@ -11,7 +11,6 @@ import (
 	"github.com/pikopod/pikopod/internal/sandbox"
 )
 
-// A widgets API with bearer auth, so runs exercise credential auto-injection.
 const runnerSpec = `{
   "openapi": "3.0.0",
   "info": {"title": "Widgets", "version": "1.0.0"},
@@ -95,21 +94,18 @@ const happyPathDef = `{
   ]
 }`
 
-// The full loop: seed → create (capture id) → read-your-write → state read.
-// Two fresh engines with the same seed must produce identical results; the
-// bare engine still 401s, proving the runner injected the credential.
 func TestRunHappyPathDeterministic(t *testing.T) {
 	def := parseDef(t, happyPathDef)
 
 	run := func() *RunResult {
 		eng := runnerEngine(t, "seed-1")
-		// Auth is enforced for direct callers…
+
 		rec := httptest.NewRecorder()
 		eng.ServeHTTP(rec, httptest.NewRequest("GET", "/widgets", nil))
 		if rec.Code != 401 {
 			t.Fatalf("bare request should 401, got %d", rec.Code)
 		}
-		// …and the runner authenticates itself.
+
 		res, err := Run(eng, def, nil, "seed-1")
 		if err != nil {
 			t.Fatal(err)
@@ -127,7 +123,7 @@ func TestRunHappyPathDeterministic(t *testing.T) {
 	if a.ResultHash == "" || a.ResultHash != b.ResultHash {
 		t.Fatalf("same seed must reproduce the same result hash: %q vs %q", a.ResultHash, b.ResultHash)
 	}
-	// The captured id flowed into the read step's path.
+
 	readDetail := a.Steps[2].Detail["request"].(map[string]any)
 	if !strings.HasPrefix(readDetail["path"].(string), "/widgets/widgets_") {
 		t.Fatalf("capture did not flow into the path: %v", readDetail["path"])
@@ -184,8 +180,6 @@ func TestRunContinueOnFailureKeepsGoing(t *testing.T) {
 	}
 }
 
-// WAIT advances the virtual clock — the engine's too — and never wall-sleeps
-// (a 90-day wait completing at all is the proof).
 func TestRunWaitIsVirtual(t *testing.T) {
 	eng := runnerEngine(t, "s")
 	start := eng.VirtualClockMs()
@@ -207,8 +201,6 @@ func TestRunWaitIsVirtual(t *testing.T) {
 	}
 }
 
-// Fault lifecycle: arm error → request fails with the fault status and
-// execution.faultApplied is observable → clear → request succeeds again.
 func TestRunFaultInjectionAndClear(t *testing.T) {
 	def := parseDef(t, `{
 	  "steps": [
@@ -235,8 +227,6 @@ func TestRunFaultInjectionAndClear(t *testing.T) {
 	}
 }
 
-// Latency faults surface as the latencyMs assertion document; the transport
-// header that carried them is stripped from what assertions can see.
 func TestRunLatencyFaultVirtualized(t *testing.T) {
 	def := parseDef(t, `{
 	  "steps": [
@@ -260,8 +250,6 @@ func TestRunLatencyFaultVirtualized(t *testing.T) {
 	}
 }
 
-// runnerWebhookSpec: the runner spec plus a declared webhook — the outbox
-// switches on, so EXPECT_WEBHOOK and the webhook fault kinds are live.
 const runnerWebhookSpecExtra = `"webhooks": {
     "widgets.created": {"post": {"requestBody": {"content": {"application/json": {"schema": {"$ref": "#/components/schemas/Widget"}}}}, "responses": {"200": {"description": "ack"}}}}
   },`
@@ -289,8 +277,6 @@ func webhookRunnerEngine(t *testing.T, seed string) *sandbox.Engine {
 	return eng
 }
 
-// EXPECT_WEBHOOK, delivery present: no virtual-time cost, webhook docs are
-// assertable, and a capture from the delivery payload flows into later steps.
 func TestRunExpectWebhookPass(t *testing.T) {
 	def := parseDef(t, `{
 	  "steps": [
@@ -320,11 +306,11 @@ func TestRunExpectWebhookPass(t *testing.T) {
 	if a.Status != RunPassed {
 		t.Fatalf("expected PASSED, got %s (%s)", a.Status, a.Summary)
 	}
-	// A satisfied EXPECT_WEBHOOK costs no virtual time (timeout only on miss).
+
 	if a.Steps[1].VirtualEndMs != a.Steps[1].VirtualStartMs {
 		t.Fatalf("satisfied expect must not advance the clock: %d → %d", a.Steps[1].VirtualStartMs, a.Steps[1].VirtualEndMs)
 	}
-	// The webhook payload capture concretized the read path.
+
 	readDetail := a.Steps[2].Detail["request"].(map[string]any)
 	if !strings.HasPrefix(readDetail["path"].(string), "/widgets/widgets_") {
 		t.Fatalf("webhook capture did not flow into the path: %v", readDetail["path"])
@@ -334,8 +320,6 @@ func TestRunExpectWebhookPass(t *testing.T) {
 	}
 }
 
-// EXPECT_WEBHOOK, no delivery: the step burns its timeout virtually, and the
-// webhook docs honestly report zero deliveries — assertable both ways.
 func TestRunExpectWebhookTimeout(t *testing.T) {
 	quiet := parseDef(t, `{
 	  "steps": [
@@ -373,9 +357,6 @@ func TestRunExpectWebhookTimeout(t *testing.T) {
 	}
 }
 
-// The three webhook fault kinds arm through INJECT_FAULT (target = event) and
-// change what EXPECT_WEBHOOK observes: duplicate → 2, drop → 0, reorder →
-// swapped head (proven via the captured head payload).
 func TestRunWebhookFaultKinds(t *testing.T) {
 	dup := parseDef(t, `{
 	  "steps": [
@@ -456,9 +437,6 @@ func TestRunInputResolution(t *testing.T) {
 	}
 }
 
-// A delayed webhook ARRIVES when its due time falls inside the timeout
-// window (the clock advances to the arrival, not the whole timeout); a
-// timeout shorter than the delay misses it — all virtual, never a sleep.
 func TestRunDelayedWebhook(t *testing.T) {
 	run := func(timeoutMs int64) *RunResult {
 		def := parseDef(t, fmt.Sprintf(`{
@@ -479,7 +457,7 @@ func TestRunDelayedWebhook(t *testing.T) {
 		return res
 	}
 
-	hit := run(90000) // window covers the 60s delay
+	hit := run(90000)
 	if hit.Status != RunPassed {
 		t.Fatalf("delayed delivery within the window must pass, got %s (%s)", hit.Status, hit.Summary)
 	}
@@ -488,7 +466,7 @@ func TestRunDelayedWebhook(t *testing.T) {
 		t.Fatalf("clock must advance to the ARRIVAL (60s), not the timeout: %d", hookStep.VirtualEndMs-hookStep.VirtualStartMs)
 	}
 
-	miss := run(30000) // window too short
+	miss := run(30000)
 	if miss.Status != RunFailed {
 		t.Fatalf("delay beyond the timeout must fail the expectation, got %s", miss.Status)
 	}

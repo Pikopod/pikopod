@@ -1,5 +1,3 @@
-// Package config loads pikopod.yaml with env overrides. Listen safety is an
-// invariant: loopback by default, non-loopback requires a non-argv token.
 package config
 
 import (
@@ -25,19 +23,16 @@ import (
 )
 
 type Upstream struct {
-	// Listen is the route prefix on the agent, e.g. "/examplepay".
 	Listen string `yaml:"listen"`
-	// Target is the real base URL this upstream forwards to.
+
 	Target string `yaml:"target"`
-	// VolatileFields names fields excluded from learning, diffing, the replay
-	// gate and tier-1 hashing (by name, any depth, case-insensitive).
+
 	VolatileFields []string `yaml:"volatile_fields,omitempty"`
-	// Mute suppresses alerts for listed endpoint templates.
+
 	Mute []string `yaml:"mute,omitempty"`
-	// SpecSource arms the DECLARED-drift watcher: a spec location (http(s),
-	// file, or git:<ref>:<path>) re-checked on spec_watch.interval_minutes.
+
 	SpecSource string `yaml:"spec_source,omitempty"`
-	// Incidents tunes failed-exchange capture for this upstream.
+
 	Incidents Incidents `yaml:"incidents,omitempty"`
 }
 
@@ -46,12 +41,8 @@ type Incidents struct {
 	ClientErrorRate float64 `yaml:"client_error_rate,omitempty"`
 }
 
-// clientErrorFloor: minimum requests to an endpoint family before a 4xx rate
-// means anything. 20, not 10, because at 10 a single 4xx is already 10% and
-// clears the 5% default on its own — which is the case the floor exists for.
 const clientErrorFloor = 20
 
-// ClientErrorRateFor returns the configured 4xx threshold, defaulted.
 func (u Upstream) ClientErrorRateFor() float64 {
 	if u.Incidents.ClientErrorRate > 0 {
 		return u.Incidents.ClientErrorRate
@@ -61,10 +52,7 @@ func (u Upstream) ClientErrorRateFor() float64 {
 
 func ClientErrorFloor() int { return clientErrorFloor }
 
-// SpecWatch tunes the declared-drift watcher (armed per-upstream by
-// spec_source).
 type SpecWatch struct {
-	// IntervalMinutes between re-checks of each spec_source (default 60).
 	IntervalMinutes int `yaml:"interval_minutes,omitempty"`
 }
 
@@ -79,8 +67,7 @@ type LLM struct {
 	Provider string `yaml:"provider,omitempty"`
 	APIKey   string `yaml:"api_key,omitempty"`
 	Model    string `yaml:"model,omitempty"`
-	// OpenRouterKey is the deprecated OpenRouter-only alias for APIKey. finish
-	// also mirrors the resolved key here for existing internal callers.
+
 	OpenRouterKey string `yaml:"openrouter_key,omitempty"`
 }
 
@@ -88,55 +75,37 @@ type Behaviour struct {
 	Enabled bool `yaml:"enabled,omitempty"`
 }
 
-// Refine controls contract refinement from observed traffic, keeping one
-// behavioral model. Off by default.
 type Refine struct {
-	// Enabled turns the refiner tap on: a traffic overlay accumulates beside
-	// the spec-derived IR and matures into the effective contract.
 	Enabled bool `yaml:"enabled,omitempty"`
-	// PreferSpec flips type-conflict precedence back to spec-wins (the
-	// default is traffic-wins once the sustain gates clear).
+
 	PreferSpec bool `yaml:"prefer_spec,omitempty"`
 }
 
-// Sampling thins what recordings PERSIST — never what pikopod LEARNS from.
-// Errors, drift-bearing and pre-warmup records are kept at any rate.
 type Sampling struct {
-	// Rate is the fraction of routine records persisted, 0..1. A pointer so an
-	// explicit `rate: 0` is distinguishable from unset (1.0).
 	Rate *float64 `yaml:"rate,omitempty"`
 }
 
-// Retention ages recordings and the drift-event log out of disk.
 type Retention struct {
-	// MaxAgeHours arms TTL deletion: kept at least this long, gone by ~2× it
-	// (0 = size-only). Aged-out fingerprints can no longer be from-drift'd.
 	MaxAgeHours int `yaml:"max_age_hours,omitempty"`
 }
 
 type Warmup struct {
-	// MinSamples/MinHours gate alerting per endpoint (50 / 48h). MinHours is a
-	// pointer so an explicit `min_hours: 0` differs from unset.
 	MinSamples int  `yaml:"min_samples,omitempty"`
 	MinHours   *int `yaml:"min_hours,omitempty"`
 }
 
-// TLS serves both local ports over HTTPS. Both files or neither; self-signed
-// is fine, since CLI clients trust the configured cert file directly.
 type TLS struct {
 	CertFile string `yaml:"cert_file,omitempty"`
 	KeyFile  string `yaml:"key_file,omitempty"`
 }
 
-// Enabled reports whether native TLS is configured.
 func (t TLS) Enabled() bool { return t.CertFile != "" && t.KeyFile != "" }
 
 type Config struct {
-	// Listen is the bind address for both servers ("127.0.0.1" default).
 	Listen      string              `yaml:"listen,omitempty"`
-	AgentPort   int                 `yaml:"agent_port,omitempty"`   // default 4700
-	SandboxPort int                 `yaml:"sandbox_port,omitempty"` // default 4600
-	DataDir     string              `yaml:"data_dir,omitempty"`     // default ./pikopod-data
+	AgentPort   int                 `yaml:"agent_port,omitempty"`
+	SandboxPort int                 `yaml:"sandbox_port,omitempty"`
+	DataDir     string              `yaml:"data_dir,omitempty"`
 	TokenFile   string              `yaml:"token_file,omitempty"`
 	TLS         TLS                 `yaml:"tls,omitempty"`
 	Upstreams   map[string]Upstream `yaml:"upstreams"`
@@ -149,9 +118,8 @@ type Config struct {
 	Retention   Retention           `yaml:"retention,omitempty"`
 	SpecWatch   SpecWatch           `yaml:"spec_watch,omitempty"`
 
-	// token is resolved (env/file), never serialized.
 	token string
-	// sourcePath remembers where the yaml came from (perms checks).
+
 	sourcePath string
 }
 
@@ -164,7 +132,6 @@ const (
 
 const defaultLLMProvider = llmprovider.Default
 
-// SampleRate resolves sampling.rate (1.0 when unset — keep everything).
 func (c *Config) SampleRate() float64 {
 	if c.Sampling.Rate == nil {
 		return 1
@@ -172,12 +139,10 @@ func (c *Config) SampleRate() float64 {
 	return *c.Sampling.Rate
 }
 
-// RetentionTTL resolves retention.max_age_hours as a duration (0 = off).
 func (c *Config) RetentionTTL() time.Duration {
 	return time.Duration(c.Retention.MaxAgeHours) * time.Hour
 }
 
-// SpecWatchInterval resolves spec_watch.interval_minutes (60m when unset).
 func (c *Config) SpecWatchInterval() time.Duration {
 	if c.SpecWatch.IntervalMinutes <= 0 {
 		return time.Hour
@@ -185,8 +150,6 @@ func (c *Config) SpecWatchInterval() time.Duration {
 	return time.Duration(c.SpecWatch.IntervalMinutes) * time.Minute
 }
 
-// Load reads path (default pikopod.yaml in cwd), applies env overrides and
-// defaults, and enforces the listen-safety invariants.
 func Load(path string) (*Config, error) {
 	if path == "" {
 		path = "pikopod.yaml"
@@ -204,8 +167,7 @@ func Load(path string) (*Config, error) {
 	}
 	var cfg Config
 	dec := yaml.NewDecoder(bytes.NewReader(raw))
-	// Unknown keys are STARTUP ERRORS, not silent no-ops: a typo'd or removed
-	// knob must never let a user believe something is configured.
+
 	dec.KnownFields(true)
 	if err := dec.Decode(&cfg); err != nil && err != io.EOF {
 		return nil, errfmt.Newf("configuration is not valid", "fix the key or syntax named below (unknown keys are rejected — see the reference for every valid key)", "docs/config-reference.md", "%s: %v", path, err)
@@ -217,8 +179,6 @@ func Load(path string) (*Config, error) {
 	return &cfg, nil
 }
 
-// finish applies env overrides, defaults, and validation. Exported through
-// Load; split out so tests can build configs directly.
 func (c *Config) finish() error {
 	if v := os.Getenv("PIKOPOD_LISTEN"); v != "" {
 		c.Listen = v
@@ -254,14 +214,13 @@ func (c *Config) finish() error {
 			resolvedKey = v
 		}
 	}
-	// Provider-specific because the field itself is OpenRouter-named.
+
 	if resolvedKey == "" && c.LLM.Provider == defaultLLMProvider && fileLegacyOpenRouterKey != "" {
 		resolvedKey = fileLegacyOpenRouterKey
 		keyFromFile = true
 	}
 	c.LLM.APIKey = resolvedKey
-	// Keep the old field populated for existing internal callers while the
-	// public configuration contract moves to llm.api_key.
+
 	c.LLM.OpenRouterKey = resolvedKey
 
 	if c.LLM.Provider == defaultLLMProvider {
@@ -339,11 +298,9 @@ func (c *Config) finish() error {
 		}
 	}
 
-	// Token resolution: env wins, then token_file. Never a flag, never argv.
 	c.token = os.Getenv("PIKOPOD_TOKEN")
 	if c.token == "" && c.TokenFile != "" {
-		// The token authenticates the whole control surface: refuse a file
-		// other local users can read (same posture ssh takes with key files).
+
 		if info, err := os.Stat(c.TokenFile); err == nil && store.PermTooOpen(info.Mode()) {
 			return errfmt.New(
 				"token file is readable by other users",
@@ -368,8 +325,7 @@ func (c *Config) finish() error {
 
 	seenListen := map[string]string{}
 	for name, u := range c.Upstreams {
-		// The name becomes a file-path component, so an untrusted pikopod.yaml
-		// must not be able to write outside data_dir through it.
+
 		if !upstreamNameRE.MatchString(name) {
 			return errfmt.New("invalid upstream name", fmt.Sprintf("%q may only contain letters, digits, _ and -", name), "rename the upstream in pikopod.yaml (it is a slug, not a URL)", "docs/config-reference.md#upstreams")
 		}
@@ -394,8 +350,7 @@ func (c *Config) finish() error {
 		}
 		seenListen[route] = name
 	}
-	// Overlapping routes are refused at load: first-prefix-match routing would
-	// silently mis-attribute traffic between /pay and /pay/sub.
+
 	for route, name := range seenListen {
 		for other, otherName := range seenListen {
 			if name == otherName {
@@ -408,8 +363,7 @@ func (c *Config) finish() error {
 			}
 		}
 	}
-	// A BYOK key selected from pikopod.yaml must be private — the same posture
-	// token_file takes. Environment-selected keys do not make the file secret.
+
 	if keyFromFile && c.sourcePath != "" {
 		if info, err := os.Stat(c.sourcePath); err == nil && store.PermTooOpen(info.Mode()) {
 			return errfmt.New(
@@ -424,19 +378,14 @@ func (c *Config) finish() error {
 
 var upstreamNameRE = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
 
-// Token returns the resolved auth token ("" on loopback-only setups).
 func (c *Config) Token() string { return c.token }
 
-// UpstreamNames returns names sorted for deterministic iteration.
 func (c *Config) UpstreamNames() []string {
 	return slices.Sorted(maps.Keys(c.Upstreams))
 }
 
-// SaltPath is the per-install tokenization salt (0600). It sits inside
-// data_dir, so backups must exclude it or tokens become correlatable.
 func (c *Config) SaltPath() string { return filepath.Join(c.DataDir, ".salt") }
 
-// Scheme is the URL scheme pikopod's own servers answer on.
 func (c *Config) Scheme() string {
 	if c.TLS.Enabled() {
 		return "https"
@@ -444,8 +393,6 @@ func (c *Config) Scheme() string {
 	return "http"
 }
 
-// LocalClient is the HTTP client CLI commands use against the daemon. Under
-// TLS the configured cert is the ONLY trust root, so a swapped listener fails.
 func (c *Config) LocalClient(timeout time.Duration) *http.Client {
 	client := &http.Client{Timeout: timeout}
 	if !c.TLS.Enabled() {

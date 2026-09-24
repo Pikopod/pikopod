@@ -20,7 +20,6 @@ const draftPaySpec = `{"openapi":"3.1.0","info":{"title":"Pay","version":"1"},
   "/payment-intents/{id}":{"get":{"operationId":"getIntent","responses":{"200":{"description":"ok"}}}}
 }}`
 
-// draftSandbox registers "pay" the way a docs import does: every fact extracted.
 func draftSandbox(t *testing.T) *config.Config {
 	t.Helper()
 	cfg := testConfig(t, "https://example.invalid")

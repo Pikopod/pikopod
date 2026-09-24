@@ -37,7 +37,6 @@ func (s *sandboxServer) serveWebhookEmit(w http.ResponseWriter, r *http.Request,
 	json.NewEncoder(w).Encode(map[string]any{"emitted": req.Event})
 }
 
-// readEmitData accepts inline JSON or @path, and insists on an object.
 func readEmitData(arg string) (json.RawMessage, error) {
 	if arg == "" {
 		return nil, nil

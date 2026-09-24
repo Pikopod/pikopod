@@ -5,9 +5,6 @@ import (
 	"testing"
 )
 
-// Every matched response names its operation; unmatched responses name the
-// closest declared operations — "why didn't this match" answered on the
-// wire (headers only: response bodies are untouched).
 func TestDiagnosticHeaders(t *testing.T) {
 	e := newEngine(t, loadWidgets(t), Config{ID: "sbx_diag", Seed: "diag-1"})
 
@@ -16,7 +13,6 @@ func TestDiagnosticHeaders(t *testing.T) {
 		t.Fatalf("matched responses must name their operation: %v", got.headers)
 	}
 
-	// A typo'd path: the 404 suggests the real routes, body stays neutral.
 	miss := do(t, e, "GET", "/widgets_typo", "", nil)
 	if miss.status != 404 {
 		t.Fatalf("expected 404, got %d", miss.status)
@@ -29,8 +25,6 @@ func TestDiagnosticHeaders(t *testing.T) {
 		t.Fatalf("the 404 BODY must stay parity-neutral: %s", miss.body)
 	}
 
-	// Faulted responses carry the operation too — a 500 you armed is still
-	// attributable.
 	e.ArmFault(FaultRule{Method: "POST", Path: "/widgets", Kind: "error", Probability: 1})
 	faulted := do(t, e, "POST", "/widgets", `{"name":"g"}`, nil)
 	if faulted.status != 500 || faulted.headers[OperationHeader] == "" {
@@ -38,8 +32,6 @@ func TestDiagnosticHeaders(t *testing.T) {
 	}
 }
 
-// The trace narrates the pipeline in order and is exact under replay: two
-// traced replays of the same request produce the same narration.
 func TestTraceNarratesPipeline(t *testing.T) {
 	run := func() []string {
 		e := newEngine(t, loadWidgets(t), Config{ID: "sbx_trace", Seed: "trace-1"})
@@ -60,8 +52,6 @@ func TestTraceNarratesPipeline(t *testing.T) {
 	}
 }
 
-// Correlation echo: request ids reflect onto responses — success and
-// error paths alike — without clobbering anything the engine already set.
 func TestCorrelationEcho(t *testing.T) {
 	e := newEngine(t, loadWidgets(t), Config{ID: "sbx_echo", Seed: "echo-1"})
 	h := map[string]string{"X-Request-Id": "req-42", "Idempotency-Key": "ik-7"}

@@ -1,5 +1,3 @@
-// Package mcp is the minimum Model Context Protocol server pikopod needs:
-// JSON-RPC 2.0 over stdio, newline-delimited, tools only.
 package mcp
 
 import (
@@ -14,8 +12,6 @@ import (
 
 const ProtocolVersion = "2024-11-05"
 
-// Tool is one callable. The handler's result is returned as structured
-// content; an error becomes an error result, never a protocol failure.
 type Tool struct {
 	Name        string
 	Description string
@@ -27,8 +23,7 @@ type Tool struct {
 type Server struct {
 	name, version string
 	tools         map[string]Tool
-	// OnError turns a handler error into the structured result the client
-	// sees; nil means a plain text error.
+
 	OnError func(error) any
 }
 
@@ -71,7 +66,6 @@ type rpcError struct {
 	Message string `json:"message"`
 }
 
-// Serve reads requests until r ends; each line is one message.
 func (s *Server) Serve(ctx context.Context, r io.Reader, w io.Writer) error {
 	var wmu sync.Mutex
 	write := func(v any) error {
@@ -99,7 +93,7 @@ func (s *Server) Serve(ctx context.Context, r io.Reader, w io.Writer) error {
 			continue
 		}
 		if len(req.ID) == 0 || string(req.ID) == "null" {
-			continue // a notification wants no answer
+			continue
 		}
 		res := s.handle(ctx, &req)
 		if err := write(res); err != nil {

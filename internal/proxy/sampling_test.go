@@ -11,9 +11,6 @@ import (
 	"github.com/pikopod/pikopod/internal/sanitize"
 )
 
-// Sampling thins ROUTINE records only, deterministically; error responses
-// and observer-notable records always persist — and the observer sees
-// every record either way (learning is upstream of the sampling decision).
 func TestSamplingKeepsGuaranteedClasses(t *testing.T) {
 	dir := t.TempDir()
 	m := &Metrics{}
@@ -58,7 +55,7 @@ func TestSamplingKeepsGuaranteedClasses(t *testing.T) {
 			counts[r.Path]++
 		}
 	}
-	// Bresenham at 0.25 keeps exactly every 4th routine record.
+
 	if counts["/routine"] != 5 {
 		t.Fatalf("rate 0.25 over 20 routine records must persist exactly 5, got %d", counts["/routine"])
 	}
@@ -73,8 +70,6 @@ func TestSamplingKeepsGuaranteedClasses(t *testing.T) {
 	}
 }
 
-// With no observer wired (bare recorder), sampling never engages — a tool
-// used as a pure recorder keeps everything.
 func TestSamplingRequiresObserver(t *testing.T) {
 	dir := t.TempDir()
 	rec := NewRecorder(dir, sanitize.NewTokenizer("k", "local", 1), &Metrics{})

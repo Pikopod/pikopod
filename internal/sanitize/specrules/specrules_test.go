@@ -38,7 +38,6 @@ func TestRulesComeFromSuccessResponseEnumsOnly(t *testing.T) {
 	}
 }
 
-// A guess must never relax redaction: extracted enums unlock nothing.
 func TestExtractedEnumsUnlockNothing(t *testing.T) {
 	def, err := importer.NormalizeLLMExtracted([]byte(enumSpec))
 	if err != nil {

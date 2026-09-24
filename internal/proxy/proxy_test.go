@@ -31,12 +31,8 @@ func testServer(tb testing.TB, upstreamURL string, captureDepth int) *Server {
 	return s
 }
 
-// CRITICAL (fail-open): the proxied response must be byte-identical to the
-// upstream's even when observation is fully wedged (nobody drains the
-// channel and it overflows) — internal state can never touch the hot path.
 func TestCriticalFailOpen_ByteIdenticalUnderObserverPressure(t *testing.T) {
-	// 64 KiB: larger than ReverseProxy's 32 KiB copy buffer so the body
-	// still arrives in multiple writes, well under maxCapturedBody.
+
 	payload := make([]byte, 64<<10)
 	rand.Read(payload)
 	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -47,7 +43,7 @@ func TestCriticalFailOpen_ByteIdenticalUnderObserverPressure(t *testing.T) {
 	}))
 	defer up.Close()
 
-	s := testServer(t, up.URL, 1) // capture depth 1: overflows immediately, nobody drains
+	s := testServer(t, up.URL, 1)
 	front := httptest.NewServer(s)
 	defer front.Close()
 	client := &http.Client{Transport: &http.Transport{}}
@@ -97,13 +93,13 @@ func TestCriticalFailOpen_ByteIdenticalUnderObserverPressure(t *testing.T) {
 
 func TestUpstreamDiesMidBodyIsCounted(t *testing.T) {
 	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Length", "4096") // promise more than we send
+		w.Header().Set("Content-Length", "4096")
 		w.WriteHeader(200)
 		w.Write(make([]byte, 128))
 		if f, ok := w.(http.Flusher); ok {
 			f.Flush()
 		}
-		panic(http.ErrAbortHandler) // drop the connection mid-body
+		panic(http.ErrAbortHandler)
 	}))
 	defer up.Close()
 
@@ -147,12 +143,10 @@ func TestHealthyUpstreamCountsNoBodyError(t *testing.T) {
 	}
 }
 
-// Upstream unreachable → honest 502 with the marker, and NEVER a retry
-// (retrying a non-idempotent POST can double-charge).
 func TestUpstreamUnreachable502NoRetry(t *testing.T) {
 	var hits int
 	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { hits++ }))
-	up.Close() // dead upstream
+	up.Close()
 
 	s := testServer(t, up.URL, 8)
 	front := httptest.NewServer(s)
@@ -180,7 +174,7 @@ func TestTokenGateAndHeaderStripped(t *testing.T) {
 
 	t.Setenv("PIKOPOD_TOKEN", "tok123")
 	cfg := &config.Config{Upstreams: map[string]config.Upstream{"p": {Listen: "/p", Target: up.URL}}}
-	// finish() is unexported; emulate via Load-equivalent: set token by env through a scratch config file instead.
+
 	dir := t.TempDir()
 	cfgPath := filepath.Join(dir, "pikopod.yaml")
 	os.WriteFile(cfgPath, []byte("listen: 0.0.0.0\nupstreams:\n  p:\n    target: "+up.URL+"\n"), 0o644)
@@ -211,8 +205,6 @@ func TestTokenGateAndHeaderStripped(t *testing.T) {
 	}
 }
 
-// Recorder end-to-end: recordings are sanitized at write — canary sentinels
-// (secret key, email, card number) must NOT survive to disk; enum strings must.
 func TestRecorderRedactsAtWrite(t *testing.T) {
 	const canarySecret = "xpay_secret_CANARY0000000000000000"
 	const canaryEmail = "canary.person@example.com"
@@ -276,8 +268,6 @@ func TestRecorderRedactsAtWrite(t *testing.T) {
 	}
 }
 
-// Latency budget: p50 added latency ≤ 5ms. Loopback benchmark —
-// generous margin in CI, tight signal locally.
 func TestLatencyBudgetP50(t *testing.T) {
 	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte(`{"ok":true}`))
@@ -314,8 +304,6 @@ func timeRequests(t *testing.T, url string, n int) time.Duration {
 	return durs[n/2]
 }
 
-// Tokenless listeners refuse foreign Host headers (DNS-rebinding/CSRF
-// guard) while loopback spellings pass.
 func TestTokenlessListenerRefusesForeignHost(t *testing.T) {
 	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(200)
@@ -325,14 +313,12 @@ func TestTokenlessListenerRefusesForeignHost(t *testing.T) {
 	front := httptest.NewServer(s)
 	defer front.Close()
 
-	// httptest clients send Host: 127.0.0.1:<port> — allowed.
 	resp, err := http.Get(front.URL + "/examplepay/x")
 	if err != nil || resp.StatusCode != 200 {
 		t.Fatalf("loopback host must pass: %v %d", err, resp.StatusCode)
 	}
 	resp.Body.Close()
 
-	// A rebound page's request arrives with the attacker's Host.
 	req, _ := http.NewRequest("GET", front.URL+"/examplepay/x", nil)
 	req.Host = "attacker.example.com"
 	resp, err = http.DefaultClient.Do(req)
@@ -344,7 +330,6 @@ func TestTokenlessListenerRefusesForeignHost(t *testing.T) {
 		t.Fatalf("foreign Host on a tokenless listener must be refused: %d", resp.StatusCode)
 	}
 
-	// localhost spelling passes too.
 	req, _ = http.NewRequest("GET", front.URL+"/examplepay/x", nil)
 	req.Host = "localhost:4700"
 	resp, err = http.DefaultClient.Do(req)
@@ -354,15 +339,13 @@ func TestTokenlessListenerRefusesForeignHost(t *testing.T) {
 	resp.Body.Close()
 }
 
-// The token header never reaches the upstream — in EVERY configuration,
-// tokenless loopback included.
 func TestTokenHeaderNeverForwardedUpstream(t *testing.T) {
 	var sawToken string
 	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		sawToken = r.Header.Get("X-Pikopod-Token")
 	}))
 	defer up.Close()
-	s := testServer(t, up.URL, 8) // NO token configured
+	s := testServer(t, up.URL, 8)
 	front := httptest.NewServer(s)
 	defer front.Close()
 
@@ -378,9 +361,6 @@ func TestTokenHeaderNeverForwardedUpstream(t *testing.T) {
 	}
 }
 
-// captureWriter must expose Unwrap so ReverseProxy's protocol-upgrade path
-// (ResponseController → Hijacker) can reach the real conn — a WebSocket
-// upgrade through the proxy must not 502.
 func TestCaptureWriterUnwrapsForUpgrades(t *testing.T) {
 	var cw interface{ Unwrap() http.ResponseWriter } = &captureWriter{}
 	if cw == nil {

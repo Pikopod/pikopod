@@ -1,14 +1,9 @@
-// allOf is an INTERSECTION, so it flattens to one plain node; oneOf/anyOf are
-// choices and stay composed, because choice handling belongs to the consumer.
 package ir
 
 import "fmt"
 
-// maxFlattenDepth bounds ref-chain and nesting resolution (specs can cycle).
 const maxFlattenDepth = 32
 
-// FlattenAllOf merges an allOf (recursively, through refs) into one node; a
-// type conflict or a non-allOf node returns the original untouched.
 func FlattenAllOf(n *IrSchemaNode, table map[string]*IrSchemaNode) *IrSchemaNode {
 	return flattenAllOf(n, table, 0)
 }
@@ -40,16 +35,15 @@ func flattenAllOf(n *IrSchemaNode, table map[string]*IrSchemaNode, depth int) *I
 			continue
 		}
 		if m.Composition != nil {
-			return original // a non-allOf member: not mergeable, keep composed
+			return original
 		}
 		if m.Type.Value != "" && m.Type.Value != "unknown" {
 			if merged.Type.Value != "" && merged.Type.Value != m.Type.Value {
-				return original // conflicting member types: unsatisfiable as declared
+				return original
 			}
 			merged.Type = m.Type
 		}
-		// Nullable intersects: null passes only if every declaring member
-		// allows it.
+
 		if !m.Nullable.Value {
 			merged.Nullable = m.Nullable
 		}
@@ -71,7 +65,7 @@ func flattenAllOf(n *IrSchemaNode, table map[string]*IrSchemaNode, depth int) *I
 		for pi := range m.Properties {
 			p := m.Properties[pi]
 			if existing, ok := props[p.Name]; ok {
-				// Later member's schema wins; required-ness is sticky (OR).
+
 				if existing.Required.Value {
 					p.Required = existing.Required
 				}

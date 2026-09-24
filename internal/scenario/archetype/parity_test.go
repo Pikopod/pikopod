@@ -12,8 +12,6 @@ import (
 	"github.com/pikopod/pikopod/internal/ir"
 )
 
-// Goldens cover binding and expansion over the committed real-spec corpus.
-
 type scenarioGolden struct {
 	Spec       string           `json:"spec"`
 	Bindings   map[string]any   `json:"bindings"`
@@ -47,8 +45,6 @@ func loadIR(t *testing.T, specFile string) *ir.ApiDefinition {
 	return def
 }
 
-// jsonShape round-trips a Go value through JSON so it compares structurally
-// against the golden's parsed form (float64 numbers, map[string]any objects).
 func jsonShape(t *testing.T, v any) any {
 	t.Helper()
 	raw, err := json.Marshal(v)

@@ -8,8 +8,6 @@ import (
 	"github.com/pikopod/pikopod/internal/sanitize"
 )
 
-// Query-string KEYS are sanitized too — a bare credential left of
-// the '=' must not persist raw, while ordinary field-name keys pass through.
 func TestQueryKeysSanitized(t *testing.T) {
 	rec := NewRecorder(t.TempDir(), sanitize.NewTokenizer("test-salt-0123456789abcdef", "t", 1), &Metrics{})
 	redactions := 0
@@ -31,7 +29,6 @@ func TestQueryKeysSanitized(t *testing.T) {
 		t.Fatalf("redactions counted: %d (%s)", redactions, out)
 	}
 
-	// A valueless bare-token pair is the original hole: `?tok_live_x`.
 	redactions = 0
 	out = rec.sanitizePath("/cb?tok_live_zz9x8y7w6v", &redactions)
 	if strings.Contains(out, "tok_live_zz9x8y7w6v") || redactions == 0 {
@@ -39,8 +36,6 @@ func TestQueryKeysSanitized(t *testing.T) {
 	}
 }
 
-// D3: >2^53 integers survive recording losslessly (UseNumber), and payment-
-// party names are dropped by key.
 func TestLargeIntegerPrecisionPreserved(t *testing.T) {
 	rec := NewRecorder(t.TempDir(), sanitize.NewTokenizer("test-salt-0123456789abcdef", "t", 1), &Metrics{})
 	body := []byte(`{"amount_minor":90071992547409934,"currency":"NGN"}`)

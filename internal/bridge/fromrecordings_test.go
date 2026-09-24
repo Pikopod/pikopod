@@ -18,8 +18,6 @@ func trec(method, path string, status int, reqBody, respBody map[string]any) *pr
 	return r
 }
 
-// anyify keeps literal map[string]any (records round-trip through JSON in
-// production; tests hand plain maps).
 func anyify(m map[string]any) any {
 	if m == nil {
 		return nil
@@ -44,8 +42,6 @@ func TestFromRecordingsProducerConsumerChain(t *testing.T) {
 		t.Fatalf("name: %s", name)
 	}
 
-	// The generated definition must pass the REAL parser — a pack that does
-	// not validate is a generator bug.
 	def, errs := scenario.ParseDefinition(pack["definition"])
 	if len(errs) > 0 {
 		t.Fatalf("generated pack invalid: %+v", errs)
@@ -54,7 +50,6 @@ func TestFromRecordingsProducerConsumerChain(t *testing.T) {
 		t.Fatalf("steps: %d", len(def.Steps))
 	}
 
-	// Step 1 produced ch_…; it must carry the capture.
 	s1 := def.Steps[0]
 	if len(s1.Capture) != 1 {
 		t.Fatalf("producer capture missing: %+v", s1.Capture)
@@ -67,7 +62,6 @@ func TestFromRecordingsProducerConsumerChain(t *testing.T) {
 		t.Fatalf("capture expr: %s", expr)
 	}
 
-	// Step 2 consumes it in the PATH; step 3 in the BODY.
 	s2cfg := def.Steps[1].Config.(*scenario.RequestConfig)
 	if s2cfg.Path != "/charges/{{"+varName+"}}" {
 		t.Fatalf("path interpolation: %s", s2cfg.Path)
@@ -77,7 +71,6 @@ func TestFromRecordingsProducerConsumerChain(t *testing.T) {
 		t.Fatalf("body interpolation: %+v", s3cfg.Body)
 	}
 
-	// Status assertions in recorded order.
 	for i, want := range []int{201, 200, 201} {
 		a := def.Steps[i].Assertions[0]
 		if a.Target != "response.status" || a.Op != "equals" {
@@ -151,11 +144,9 @@ func fmtAny(v any) string {
 	}
 }
 
-// A value seen in a request BEFORE any response produced it never chains —
-// temporal order is part of the proof.
 func TestFromRecordingsTemporalOrderRequired(t *testing.T) {
 	records := []*proxy.Record{
-		// The consumer comes FIRST — the id has no producer yet.
+
 		trec("GET", "/charges/ch_a1b2c3d4e5", 200, nil,
 			map[string]any{"data": map[string]any{"id": "ch_a1b2c3d4e5"}}),
 	}
@@ -189,11 +180,11 @@ func TestFromRecordingsChainableGate(t *testing.T) {
 	yes := []string{
 		"ch_a1b2c3d4e5", "tok_ABC123xyz", "0123456789abcdef",
 		"550e8400-e29b-41d4-a716-446655440000", "12345678901",
-		"AXJ39dkKD93jdAq29", // long mixed
+		"AXJ39dkKD93jdAq29",
 	}
 	no := []string{
 		"NGN", "pending", "true", "500", "active", "on_hold",
-		"short1", "has space in it", "customer", "12345", // digits too short
+		"short1", "has space in it", "customer", "12345",
 	}
 	for _, v := range yes {
 		if !chainable(v) {

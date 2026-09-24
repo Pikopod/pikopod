@@ -10,7 +10,6 @@ import (
 	"testing"
 )
 
-// One triggered event, one declared with neither trigger nor emit-only.
 const hookSpecUntriggered = `{"openapi":"3.1.0","info":{"title":"Bank","version":"1"},
 "paths":{"/virtual-accounts":{"post":{"responses":{"201":{"description":"created"}}}}},
 "webhooks":{
@@ -18,7 +17,6 @@ const hookSpecUntriggered = `{"openapi":"3.1.0","info":{"title":"Bank","version"
   "settlement.report":{"post":{"responses":{"200":{"description":"ack"}}}}
 }}`
 
-// Same, with the orphan marked emit-only.
 const hookSpecEmitOnly = `{"openapi":"3.1.0","info":{"title":"Bank","version":"1"},
 "paths":{"/virtual-accounts":{"post":{"responses":{"201":{"description":"created"}}}}},
 "webhooks":{
@@ -35,8 +33,6 @@ func writeSpec(t *testing.T, body string) string {
 	return p
 }
 
-// A declared event that can never fire is a fact worth stating at import,
-// with both ways to fix it.
 func TestImportWarnsOnUntriggerableWebhook(t *testing.T) {
 	cfg := testConfig(t, "https://example.invalid")
 	var out strings.Builder

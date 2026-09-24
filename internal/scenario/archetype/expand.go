@@ -1,5 +1,3 @@
-// The deterministic expander — the SAME code path the NL layer uses. It resolves
-// `<<role.field>>` tokens; `{{name}}` is left for the engine. No model involved.
 package archetype
 
 import (
@@ -13,10 +11,9 @@ import (
 )
 
 type resolvedRole struct {
-	// operation roles
 	method         string
 	collectionPath string
-	// webhookEvent roles
+
 	event   string
 	isEvent bool
 }
@@ -126,13 +123,11 @@ func substitute(value any, resolved map[string]resolvedRole) (any, error) {
 	}
 }
 
-// Expanded is the raw definition map (steps + requiresFidelity).
 type Expanded struct {
 	Definition       map[string]any `json:"definition"`
 	RequiresFidelity string         `json:"requiresFidelity"`
 }
 
-// Expand substitutes resolved bindings into the archetype's step templates.
 func Expand(a *Archetype, bindings map[string]string, apiDef *ir.ApiDefinition) (*Expanded, error) {
 	resolved, err := resolveBindings(a, bindings, apiDef)
 	if err != nil {

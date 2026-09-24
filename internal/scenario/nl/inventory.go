@@ -1,5 +1,3 @@
-// Package nl is natural-language scenario authoring: the model NEVER emits steps,
-// only a grounded INTENT the archetype expander deterministically expands.
 package nl
 
 import (
@@ -12,7 +10,6 @@ import (
 	"github.com/pikopod/pikopod/internal/scenario/archetype"
 )
 
-// InventoryOperation is one operation the intent may bind.
 type InventoryOperation struct {
 	ID      string  `json:"id"`
 	Method  string  `json:"method"`
@@ -20,26 +17,22 @@ type InventoryOperation struct {
 	Summary *string `json:"summary"`
 }
 
-// InventoryArchetypeRole mirrors the archetype role summary in the inventory.
 type InventoryArchetypeRole struct {
 	Role string `json:"role"`
 	Bind string `json:"bind"`
 }
 
-// InventoryArchetype is one applicable archetype offered to the model.
 type InventoryArchetype struct {
 	ID       string                   `json:"id"`
 	Expects  []string                 `json:"expects"`
 	Requires []InventoryArchetypeRole `json:"requires"`
 }
 
-// Inventory is the grounded firewall a hallucinating model cannot cross:
-// derived structurally from the pinned ApiDefinition, never from model output.
 type Inventory struct {
 	Operations       []InventoryOperation `json:"operations"`
 	Resources        []string             `json:"resources"`
 	WebhookEvents    []string             `json:"webhookEvents"`
-	DocumentedErrors []string             `json:"documentedErrors"` // e.g. "createOrder:409"
+	DocumentedErrors []string             `json:"documentedErrors"`
 	Archetypes       []InventoryArchetype `json:"archetypes"`
 }
 
@@ -117,7 +110,6 @@ func BuildInventory(apiDef *ir.ApiDefinition, archetypes []archetype.Archetype) 
 	return inv
 }
 
-// KnownBindingRefs is the set of identifiers an intent's bindings may name.
 func KnownBindingRefs(inv *Inventory) map[string]bool {
 	out := map[string]bool{}
 	for _, o := range inv.Operations {

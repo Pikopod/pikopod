@@ -1,5 +1,3 @@
-// Package scenario is the scenario engine: definition language, static
-// validation, template/capture/assertion machinery, and the run executor.
 package scenario
 
 import (
@@ -11,21 +9,18 @@ import (
 	"github.com/pikopod/pikopod/internal/sandbox"
 )
 
-// Limits on a scenario definition.
 const (
 	MaxSteps             = 200
 	MaxAssertionsPerStep = 50
 	MaxAssertionsTotal   = 1000
-	MaxWaitMs            = int64(90 * 24 * 3600 * 1000) // 90 virtual days
+	MaxWaitMs            = int64(90 * 24 * 3600 * 1000)
 	MaxStepKeyLength     = 80
 	MaxInputs            = 50
 	MaxSeedResources     = 1000
 )
 
-// Subjects an assertion may target.
 var validSubjects = map[string]bool{"SANDBOX": true, "CLIENT": true, "PRODUCTION": true}
 
-// Assertion targets.
 var validTargets = map[string]bool{
 	"response.status": true, "response.headers": true, "response.body": true,
 	"response.latencyMs": true, "state.resource": true, "state.resourceCount": true,
@@ -34,7 +29,6 @@ var validTargets = map[string]bool{
 	"sandbox.request.headers": true, "sandbox.request.query": true,
 }
 
-// Assertion operators.
 var validOps = map[string]bool{
 	"equals": true, "notEquals": true, "contains": true, "notContains": true,
 	"in": true, "matches": true, "matchesSchema": true, "exists": true,
@@ -49,15 +43,14 @@ var (
 	inputNameRe = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 )
 
-// Assertion is one declarative check evaluated against a step.
 type Assertion struct {
-	Subject      string         `json:"subject"` // default SANDBOX
+	Subject      string         `json:"subject"`
 	Target       string         `json:"target"`
-	Path         *string        `json:"path,omitempty"` // JSONPath
-	Key          *string        `json:"key,omitempty"`  // header key
+	Path         *string        `json:"path,omitempty"`
+	Key          *string        `json:"key,omitempty"`
 	ResourceType *string        `json:"resourceType,omitempty"`
 	ResourceID   *string        `json:"resourceId,omitempty"`
-	Match        map[string]any `json:"match,omitempty"` // webhook predicate
+	Match        map[string]any `json:"match,omitempty"`
 	Op           string         `json:"op"`
 	Expected     any            `json:"expected,omitempty"`
 	HasExpected  bool           `json:"-"`
@@ -90,45 +83,35 @@ type InjectFaultConfig struct {
 	Status      *int     `json:"status,omitempty"`
 	DelayMs     *int64   `json:"delayMs,omitempty"`
 	Probability *float64 `json:"probability,omitempty"`
-	Target      *string  `json:"target,omitempty"` // webhook event, for webhook faults
-	// Wallclock opts this fault into REAL wire delay (default: virtualized).
+	Target      *string  `json:"target,omitempty"`
+
 	Wallclock bool `json:"wallclock,omitempty"`
-	// Times fires the fault only for the first N matching requests, then
-	// it RECOVERS (deterministic — probability is ignored when set).
+
 	Times *int `json:"times,omitempty"`
-	// Per scopes the Times window: global | idempotency-key | resource.
+
 	Per *string `json:"per,omitempty"`
-	// DelayDistribution samples the delay from a seeded model instead of a
-	// fixed delayMs: {type: lognormal|uniform|band, ...} (see faults.go).
+
 	DelayDistribution map[string]any `json:"delayDistribution,omitempty"`
 }
 
-// VerifyRequestsConfig filters the sandbox's request journal: assertions then
-// target sandbox.requestCount and sandbox.request — client-behavior checks.
 type VerifyRequestsConfig struct {
 	Method string `json:"method,omitempty"`
 	Path   string `json:"path"`
 }
 
-// VerifySequenceConfig asserts an ORDERED subsequence of journaled requests.
-// Unmatched requests between matches are allowed; order is not.
 type VerifySequenceConfig struct {
 	Requests []SequenceMatcher `json:"requests"`
 }
 
-// SequenceMatcher is one expected request. All set fields must match; unset
-// fields are ignored.
 type SequenceMatcher struct {
 	Method   string            `json:"method,omitempty"`
 	Path     string            `json:"path,omitempty"`
 	Headers  map[string]string `json:"headers,omitempty"`
 	Query    map[string]string `json:"query,omitempty"`
-	MinGapMs *int64            `json:"minGapMs,omitempty"` // since the previous match
+	MinGapMs *int64            `json:"minGapMs,omitempty"`
 	MaxGapMs *int64            `json:"maxGapMs,omitempty"`
 }
 
-// EmitWebhookConfig fires a DECLARED event on demand, for events no API call
-// causes. Data overlays the documented payload; undeclared names are refused.
 type EmitWebhookConfig struct {
 	Event   string `json:"event"`
 	Data    any    `json:"data,omitempty"`
@@ -163,8 +146,6 @@ type NoteConfig struct {
 	Text string `json:"text"`
 }
 
-// Step mirrors the Step discriminated union. Config holds exactly one of the
-// typed *Config pointers above, selected by Type.
 type Step struct {
 	Key               string            `json:"key"`
 	Description       string            `json:"description,omitempty"`
@@ -176,8 +157,6 @@ type Step struct {
 	Config            any               `json:"config"`
 }
 
-// StepClass: conditioning steps leave persistent effects on the sandbox;
-// driving steps are transient traffic.
 var StepClass = map[string]string{
 	"REQUEST":         "driving",
 	"WAIT":            "driving",
@@ -195,7 +174,7 @@ var StepClass = map[string]string{
 
 type InputDecl struct {
 	Name       string `json:"name"`
-	Type       string `json:"type"` // string | number | boolean
+	Type       string `json:"type"`
 	Required   bool   `json:"required"`
 	Default    any    `json:"default,omitempty"`
 	HasDefault bool   `json:"-"`
@@ -205,10 +184,9 @@ type ScenarioDefinition struct {
 	Inputs           []InputDecl    `json:"inputs"`
 	Defaults         map[string]any `json:"defaults"`
 	Steps            []Step         `json:"steps"`
-	RequiresFidelity *string        `json:"requiresFidelity,omitempty"` // L0..L3
+	RequiresFidelity *string        `json:"requiresFidelity,omitempty"`
 }
 
-// ValidationError is one static-validation failure.
 type ValidationError struct {
 	Code    string `json:"code"`
 	Message string `json:"message"`
@@ -216,22 +194,17 @@ type ValidationError struct {
 	Pointer string `json:"pointer,omitempty"`
 }
 
-// ValidationResult is the outcome of static validation.
 type ValidationResult struct {
 	Valid  bool              `json:"valid"`
 	Errors []ValidationError `json:"errors"`
 }
 
-// parser accumulates SCHEMA errors while decoding a raw (JSON-shaped) value
-// into the typed definition, rather than failing on the first one.
 type parser struct{ errs []ValidationError }
 
 func (p *parser) fail(pointer, format string, args ...any) {
 	p.errs = append(p.errs, ValidationError{Code: "SCHEMA", Message: fmt.Sprintf(format, args...), Pointer: pointer})
 }
 
-// ParseDefinition decodes a JSON-shaped value into a typed ScenarioDefinition,
-// applying schema defaults strictly; returns SCHEMA errors on a bad shape.
 func ParseDefinition(raw any) (*ScenarioDefinition, []ValidationError) {
 	p := &parser{}
 	root, ok := raw.(map[string]any)
@@ -298,7 +271,6 @@ func ParseDefinition(raw any) (*ScenarioDefinition, []ValidationError) {
 	return def, nil
 }
 
-// ParseDefinitionJSON is ParseDefinition over raw JSON bytes.
 func ParseDefinitionJSON(raw []byte) (*ScenarioDefinition, []ValidationError) {
 	var v any
 	if err := json.Unmarshal(raw, &v); err != nil {
@@ -395,7 +367,6 @@ func (p *parser) intIn(pointer string, v any, min, max int64) (int64, bool) {
 	return n, true
 }
 
-// optGapMs reads a non-negative millisecond gap; absent stays nil.
 func (p *parser) optGapMs(pointer string, obj map[string]any, key string) *int64 {
 	v, has := obj[key]
 	if !has {
@@ -726,8 +697,7 @@ func (p *parser) parseConfig(pointer, stepType string, cfg map[string]any) any {
 			p.checkKeys(rp, obj, "type", "resourceKey", "attributes")
 			r := SeedResource{Type: p.str(rp+"/type", obj, "type", true, 400)}
 			r.ResourceKey = p.optStr(rp+"/resourceKey", obj, "resourceKey", 400)
-			// An empty key is invisible to every list endpoint (keyset pagination's
-			// first-page sentinel) yet still counts against quotas — refuse it.
+
 			if r.ResourceKey != nil && *r.ResourceKey == "" {
 				p.fail(rp+"/resourceKey", "resourceKey must not be empty (omit it to autogenerate)")
 			}

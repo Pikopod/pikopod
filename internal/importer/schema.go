@@ -7,9 +7,6 @@ import (
 	"github.com/pikopod/pikopod/internal/ir"
 )
 
-// Normalizes an OpenAPI Schema Object into an IrSchemaNode, canonicalizing the
-// variants the differ must never special-case (3.0 nullable vs 3.1 type lists).
-
 var constraintKeys = []string{
 	"minLength",
 	"maxLength",
@@ -45,7 +42,7 @@ func normalizeSchema(raw any, parentID, role, pointer string, res *refResolver, 
 			return normalizeSchema(resolved, parentID, role, pointer, res, limits, depth+1)
 		}
 		if refName == "" {
-			// Non-schema or remote ref where a schema was expected → hard reject.
+
 			return ir.IrSchemaNode{}, &SpecError{Code: SpecRefUnresolvable, Message: fmt.Sprintf("unsupported schema $ref %q", refPtr), Pointer: refPtr}
 		}
 		node.Type = ir.Derived("unknown", pointer)
@@ -60,7 +57,6 @@ func normalizeSchema(raw any, parentID, role, pointer string, res *refResolver, 
 		return node, nil
 	}
 
-	// Composition: allOf / oneOf / anyOf.
 	for _, kind := range compositionKinds {
 		members, isArr := obj.GetOr(kind).([]any)
 		if !isArr {
@@ -147,7 +143,6 @@ func normalizeSchema(raw any, parentID, role, pointer string, res *refResolver, 
 func normalizeType(obj *OrdMap, pointer string) (ir.Prov[string], ir.Prov[bool]) {
 	rawType := obj.GetOr("type")
 
-	// OpenAPI 3.1: type may be an array, possibly including "null".
 	if arr, isArr := rawType.([]any); isArr {
 		var nonNull []any
 		hasNull := false
@@ -170,7 +165,6 @@ func normalizeType(obj *OrdMap, pointer string) (ir.Prov[string], ir.Prov[bool])
 		return ir.Explicit(s, pointer+"/type"), nullableFrom(obj, pointer)
 	}
 
-	// No explicit type: derive from shape.
 	derivedType := "unknown"
 	if obj.Has("properties") {
 		derivedType = "object"
@@ -181,7 +175,7 @@ func normalizeType(obj *OrdMap, pointer string) (ir.Prov[string], ir.Prov[bool])
 }
 
 func nullableFrom(obj *OrdMap, pointer string) ir.Prov[bool] {
-	// OpenAPI 3.0 nullable keyword.
+
 	if b, ok := obj.GetOr("nullable").(bool); ok && b {
 		return ir.Explicit(true, pointer+"/nullable")
 	}
@@ -212,8 +206,6 @@ type entry struct {
 	value any
 }
 
-// objectEntries mirrors JS Object.entries over the parsed value model; arrays
-// yield index keys, anything else yields nil.
 func objectEntries(value any) []entry {
 	switch v := value.(type) {
 	case *OrdMap:

@@ -1,4 +1,3 @@
-// `source$jsonpath` capture extraction.
 package scenario
 
 import (
@@ -11,7 +10,7 @@ var knownCaptureSources = []string{"response.body", "response.headers", "webhook
 
 type parsedCapture struct {
 	source string
-	path   string // starts with '$'
+	path   string
 }
 
 func parseCaptureExpr(expr string) (parsedCapture, error) {
@@ -29,19 +28,15 @@ func parseCaptureExpr(expr string) (parsedCapture, error) {
 	return parsedCapture{}, fmt.Errorf("capture source '%s' is not one of %s", source, strings.Join(knownCaptureSources, ", "))
 }
 
-// captureDocuments maps source name → document; a missing key means the step
-// did not produce that document.
 type captureDocuments map[string]any
 
-// applyCaptures applies a step's capture map to the documents it produced. An
-// absent source document or unresolved path errors — never a silent binding.
 func applyCaptures(captureMap map[string]string, docs captureDocuments) (map[string]any, error) {
 	out := map[string]any{}
 	names := make([]string, 0, len(captureMap))
 	for name := range captureMap {
 		names = append(names, name)
 	}
-	sort.Strings(names) // deterministic error attribution (Go maps are unordered)
+	sort.Strings(names)
 	for _, name := range names {
 		expr := captureMap[name]
 		pc, err := parseCaptureExpr(expr)

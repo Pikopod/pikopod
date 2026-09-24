@@ -17,7 +17,6 @@ import (
 	"github.com/pikopod/pikopod/internal/config"
 )
 
-// captureSink records delivered alerts for assertions.
 type captureSink struct {
 	mu    chan struct{}
 	texts []string
@@ -34,8 +33,6 @@ func (c *captureSink) Deliver(text string) error {
 	return nil
 }
 
-// snapshot returns a copy of delivered texts under the sink's lock — tests
-// must never read c.texts directly while the pipeline is live.
 func (c *captureSink) snapshot() []string {
 	c.mu <- struct{}{}
 	out := append([]string(nil), c.texts...)
@@ -43,8 +40,6 @@ func (c *captureSink) snapshot() []string {
 	return out
 }
 
-// The scripted story as a test: record → warmup → provider mutates →
-// EXACTLY ONE alert per fingerprint → canary sentinels never egress.
 func TestScriptedStory_DriftDetectedOncePerFingerprint(t *testing.T) {
 	const canaryEmail = "story.canary@example.com"
 	var mutated atomic.Bool
@@ -53,8 +48,8 @@ func TestScriptedStory_DriftDetectedOncePerFingerprint(t *testing.T) {
 		status := "success"
 		extra := ""
 		if mutated.Load() {
-			status = "succeeded"               // enum drift
-			extra = `,"fee_bearer":"merchant"` // new-field drift
+			status = "succeeded"
+			extra = `,"fee_bearer":"merchant"`
 		}
 		fmt.Fprintf(w, `{"id":"tx_9a8b7c6d5e","status":%q,"amount":5000,"customer_email":%q%s}`, status, canaryEmail, extra)
 	}))
@@ -86,16 +81,16 @@ func TestScriptedStory_DriftDetectedOncePerFingerprint(t *testing.T) {
 		}
 	}
 
-	hit(20) // warmup (MinSamples 15) + a few frozen-reference clean samples
+	hit(20)
 	waitFor(t, func() bool { return a.Metrics.RecordingsWritten.Load() >= 20 })
 	if got := sink.n.Load(); got != 0 {
 		t.Fatalf("no alerts expected during clean traffic, got %d: %v", got, sink.texts)
 	}
 
 	mutated.Store(true)
-	hit(8) // several occurrences of both drifts → threshold crossed once each
+	hit(8)
 	waitFor(t, func() bool { return sink.n.Load() >= 2 })
-	hit(8) // MORE drifted traffic must NOT re-alert (dedupe per fingerprint)
+	hit(8)
 	waitFor(t, func() bool { return a.Metrics.RecordingsWritten.Load() >= 36 })
 
 	if got := sink.n.Load(); got != 2 {
@@ -107,7 +102,7 @@ func TestScriptedStory_DriftDetectedOncePerFingerprint(t *testing.T) {
 			t.Errorf("alert text missing %q:\n%s", want, joined)
 		}
 	}
-	// Egress enforcement: templated endpoint, no concrete tx id, no canary.
+
 	if !strings.Contains(joined, "tx_{id}") {
 		t.Errorf("alerts must carry the path TEMPLATE, got:\n%s", joined)
 	}
@@ -116,7 +111,7 @@ func TestScriptedStory_DriftDetectedOncePerFingerprint(t *testing.T) {
 			t.Fatalf("CANARY LEAK in alert text: %q", leak)
 		}
 	}
-	// ...and the local event log carries valid schema-shaped events, also leak-free.
+
 	raw, err := os.ReadFile(filepath.Join(dir, "events.ndjson"))
 	if err != nil {
 		t.Fatal(err)
@@ -135,14 +130,13 @@ func TestScriptedStory_DriftDetectedOncePerFingerprint(t *testing.T) {
 	}
 }
 
-// Flapping provider: brief wobble under the occurrence threshold must stay silent.
 func TestFlappingProviderNoStorm(t *testing.T) {
 	var flap atomic.Bool
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		if flap.Load() {
 			fmt.Fprint(w, `{"id":"tx_1a2b3c4d5e","status":"success","blip":"x"}`)
-			flap.Store(false) // single-occurrence blip
+			flap.Store(false)
 			return
 		}
 		fmt.Fprint(w, `{"id":"tx_1a2b3c4d5e","status":"success"}`)
@@ -164,13 +158,13 @@ func TestFlappingProviderNoStorm(t *testing.T) {
 	front := httptest.NewServer(a.Proxy)
 	defer front.Close()
 
-	for i := 0; i < 15; i++ { // warmup
+	for i := 0; i < 15; i++ {
 		resp, _ := http.Get(front.URL + "/p/tx/tx_00000000000" + fmt.Sprint(i%10))
 		io.ReadAll(resp.Body)
 		resp.Body.Close()
 	}
 	flap.Store(true)
-	for i := 0; i < 5; i++ { // one blip inside otherwise-clean traffic
+	for i := 0; i < 5; i++ {
 		resp, _ := http.Get(front.URL + "/p/tx/tx_000000000001")
 		io.ReadAll(resp.Body)
 		resp.Body.Close()

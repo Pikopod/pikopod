@@ -6,10 +6,6 @@ import (
 	"testing"
 )
 
-// The type-independence contract: a secret is the same secret whatever its
-// JSON type. This test is the direct assertion behind every
-// knownStricterKeyRE pruning in parity_test.go — each divergence pruned there
-// must be pinned here.
 func TestSecretsRedactedRegardlessOfJSONType(t *testing.T) {
 	tok := NewTokenizer("strictness-test-key-0123456789ab", "local", 1)
 
@@ -33,11 +29,9 @@ func TestSecretsRedactedRegardlessOfJSONType(t *testing.T) {
 		}
 	}
 
-	// End to end through the walker, at every level the sanitizer walks:
-	// top level, nested object, array element, and a header map.
 	body := map[string]any{
 		"cvv":    float64(947),
-		"amount": float64(5000), // control: legitimately allowed
+		"amount": float64(5000),
 		"card": map[string]any{
 			"cvc2":      "9471",
 			"exp_month": float64(12),
@@ -58,7 +52,6 @@ func TestSecretsRedactedRegardlessOfJSONType(t *testing.T) {
 		t.Errorf("control field wrongly redacted (amounts must survive):\n%s", text)
 	}
 
-	// Header level: a custom header carrying a short numeric secret.
 	headers := map[string]any{"x-card-cvv": "947", "x-otp": "91736408", "content-type": "application/json"}
 	hres := Sanitize(headers, tok, nil, true)
 	hraw, _ := json.Marshal(hres.Sanitized)

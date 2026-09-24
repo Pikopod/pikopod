@@ -7,11 +7,6 @@ import (
 	"testing"
 )
 
-// A compact collection exercising the rules that broke or lost data in the
-// external converter pikopod replaced: nested folders, :param and {{var}}
-// path segments, query params, bearer auth, documented 4xx responses, schema
-// inference from JSON examples, and a MALFORMED example that must be
-// tolerated, never a crash.
 const testCollection = `{
   "info": {"name": "Test Payments", "schema": "https://schema.getpostman.com/json/collection/v2.0.0/collection.json"},
   "auth": {"type": "bearer", "bearer": [{"key": "token", "value": "{{secret}}"}]},
@@ -67,8 +62,6 @@ func TestPostmanNativeConversion(t *testing.T) {
 		t.Fatalf("{{var}} segment must become {chargeId}: %v", keys(byKey))
 	}
 
-	// Auth carried: one enforceable bearer scheme + global requirement — the
-	// exact thing the external converter dropped.
 	if len(def.AuthSchemes) != 1 || def.AuthSchemes[0].Kind.Value != "http" || def.AuthSchemes[0].Scheme.Value != "bearer" {
 		t.Fatalf("bearer auth not carried: %+v", def.AuthSchemes)
 	}
@@ -76,7 +69,6 @@ func TestPostmanNativeConversion(t *testing.T) {
 		t.Fatal("global security requirement not applied to operations")
 	}
 
-	// Documented 400 registered (invalid_request archetype fuel).
 	codes := map[string]bool{}
 	for _, r := range def.Endpoints[create].Responses {
 		codes[r.StatusCode] = true
@@ -85,7 +77,6 @@ func TestPostmanNativeConversion(t *testing.T) {
 		t.Fatalf("create must document 200 and 400, got %v", codes)
 	}
 
-	// Schema inferred from the response example: fetch's 200 has status/id.
 	found := false
 	for _, r := range def.Endpoints[fetch].Responses {
 		if r.StatusCode != "200" {
@@ -103,7 +94,6 @@ func TestPostmanNativeConversion(t *testing.T) {
 		t.Fatal("response schema not inferred from the JSON example")
 	}
 
-	// The malformed pair survived as an operation: 202 registered bodiless.
 	broken := byKey["POST /v1/charges/{chargeId}/refund"]
 	has202 := false
 	for _, r := range def.Endpoints[broken].Responses {
@@ -118,7 +108,6 @@ func TestPostmanNativeConversion(t *testing.T) {
 		t.Fatal("documented 202 must survive a malformed body")
 	}
 
-	// Request-body schema inferred with types.
 	rb := def.Endpoints[create].RequestBody
 	if rb == nil || len(rb.Content) == 0 {
 		t.Fatal("request body schema not inferred")
@@ -140,11 +129,6 @@ func keys(m map[string]int) []string {
 	return out
 }
 
-// A production-scale collection: 59 requests across nested folders, bearer
-// auth, documented 4xx examples, malformed bodies, and an HTML description
-// whose <body> tag lands in the first 512 bytes (the Detect regression).
-// SYNTHETIC (tools/gen-synthetic-fixtures.py) — the shape mirrors real
-// payment providers whose docs are Postman-only, without their content.
 func TestPostmanProductionScaleCollection(t *testing.T) {
 	raw, err := os.ReadFile(filepath.Join("..", "..", "testdata", "parity", "importer", "specs", "synthetic-payments.postman.json"))
 	if err != nil {
@@ -154,7 +138,7 @@ func TestPostmanProductionScaleCollection(t *testing.T) {
 	if err != nil || kind != KindPostman {
 		t.Fatalf("detect: %v %v", kind, err)
 	}
-	def, err := NormalizeOpenAPI(raw) // the single entry point routes by kind
+	def, err := NormalizeOpenAPI(raw)
 	if err != nil {
 		t.Fatal(err)
 	}

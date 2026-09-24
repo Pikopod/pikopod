@@ -7,8 +7,6 @@ import (
 	"github.com/pikopod/pikopod/internal/ir"
 )
 
-// --------------------------------------------------------------- the law
-
 func TestDeriveLevelLaw(t *testing.T) {
 	cases := []struct {
 		effect Effect
@@ -57,8 +55,6 @@ func TestDeriveLevelLaw(t *testing.T) {
 		}
 	}
 }
-
-// ---------------------------------------------------------------- builders
 
 func ep(method, template string, mut ...func(*ir.Endpoint)) ir.Endpoint {
 	segs := strings.Split(template, "/")
@@ -131,8 +127,6 @@ func assertAbsent(t *testing.T, findings []Finding, id string) {
 	}
 }
 
-// ------------------------------------------------------------------ checks
-
 func TestEndpointRemovedAndAdded(t *testing.T) {
 	old := def(ep("GET", "/widgets"), ep("GET", "/legacy"))
 	niw := def(ep("GET", "/widgets"), ep("POST", "/widgets"))
@@ -168,7 +162,7 @@ func TestPathParamRenameIsComparedNotReAdded(t *testing.T) {
 	if f := find(t, fs, "param-renamed"); f.Level != Info {
 		t.Fatalf("param-renamed: %+v", f)
 	}
-	// The renamed param's TYPE change is still caught — proof it was compared.
+
 	if f := find(t, fs, "request-type-changed"); f.Level != Err {
 		t.Fatalf("renamed param type change should still be ERR: %+v", f)
 	}
@@ -236,12 +230,12 @@ func TestResponseEnumAsymmetry(t *testing.T) {
 		s.EnumValues = &ir.Prov[[]any]{Value: vals, Provenance: ir.ProvenanceExplicit}
 		return def(ep("GET", "/status", with200(objSchema(prop("state", true, s)))))
 	}
-	// Value ADDED to a response enum: WARN (exhaustive switches).
+
 	fs := Diff(mkDef([]any{"active", "failed"}), mkDef([]any{"active", "failed", "on_hold"}))
 	if f := find(t, fs, "response-enum-value-added"); f.Level != Warn {
 		t.Fatalf("response enum add: %+v", f)
 	}
-	// Value REMOVED from a response enum: INFO (consumers tolerate by construction).
+
 	fs = Diff(mkDef([]any{"active", "failed"}), mkDef([]any{"active"}))
 	if f := find(t, fs, "response-enum-value-removed"); f.Level != Info {
 		t.Fatalf("response enum remove: %+v", f)
@@ -276,7 +270,7 @@ func TestResponsePropertyLifecycle(t *testing.T) {
 	if f := find(t, fs, "response-required-property-removed"); f.Level != Warn {
 		t.Fatalf("guaranteed property removed widens the response set, WARN by law: %+v", f)
 	}
-	// Additive response property is INFO (Tolerated guard), not WARN.
+
 	if f := find(t, fs, "response-property-added"); f.Level != Info {
 		t.Fatalf("additive property: %+v", f)
 	}
@@ -372,14 +366,13 @@ func TestRefResolutionAndCycleSafety(t *testing.T) {
 		return d
 	}
 	fs := Diff(mkDef("id"), mkDef("uid"))
-	find(t, fs, "response-required-property-removed") // proves the ref was followed
+	find(t, fs, "response-required-property-removed")
 	find(t, fs, "response-property-added")
 
-	// Self-referencing schema must terminate, not hang.
 	self := "sch_self"
 	selfDef := def(ep("GET", "/w", with200(ir.IrSchemaNode{Ref: &self})))
 	selfDef.Schemas = []ir.NamedSchema{{ID: self, Name: "Self", Schema: ir.IrSchemaNode{Ref: &self}}}
-	_ = Diff(selfDef, selfDef) // no findings expected; must return
+	_ = Diff(selfDef, selfDef)
 }
 
 func TestNoFindingsOnIdenticalSpecs(t *testing.T) {
@@ -389,11 +382,6 @@ func TestNoFindingsOnIdenticalSpecs(t *testing.T) {
 	}
 }
 
-// ------------------------------------------------------------ fingerprints
-
-// Pinned: the fingerprint scheme is persisted state (dedupe store). Changing
-// the formula re-alerts every known declared drift — this test makes that a
-// deliberate act.
 func TestFingerprintPinned(t *testing.T) {
 	f := Finding{ID: "endpoint-removed", Method: "GET", Template: "/legacy"}
 	if got := f.Fingerprint(); got != "fp_710dbf2fd875" {

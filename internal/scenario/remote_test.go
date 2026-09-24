@@ -9,10 +9,6 @@ import (
 	"time"
 )
 
-// A remote target runs REQUEST steps against a real HTTP endpoint with the
-// same assertion machinery: headers injected on every request, real wall
-// latency mapped into response.latencyMs, transport failure surfaced as an
-// assertable 599 rather than an aborted run.
 func TestRemoteTargetRunsRequestSteps(t *testing.T) {
 	var gotAuth string
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -49,7 +45,6 @@ func TestRemoteTargetRunsRequestSteps(t *testing.T) {
 		t.Fatalf("target headers must reach the endpoint: %q", gotAuth)
 	}
 
-	// A dead endpoint: the failure is a RESULT (599), not an abort.
 	upstream.Close()
 	res, err = Run(target, def, nil, "remote-2")
 	if err != nil {
@@ -60,8 +55,6 @@ func TestRemoteTargetRunsRequestSteps(t *testing.T) {
 	}
 }
 
-// The honest subset: conditioning/state/webhook/journal/WAIT steps are
-// refused up front with a reason, never silently skipped.
 func TestRemoteRefusesUnsupportedSteps(t *testing.T) {
 	def := parseDef(t, `{
 	  "steps": [

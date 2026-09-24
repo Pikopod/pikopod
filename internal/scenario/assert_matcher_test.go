@@ -5,8 +5,6 @@ import (
 	"testing"
 )
 
-// The ReDoS guard on the customer-supplied `matches` op is a security
-// enforcement path — it needs its denied-case tests, not just faith.
 func TestMatchesOpRefusesCatastrophicRegex(t *testing.T) {
 	if _, err := applyOp("matches", "aaaaaaaaaaaaaaaaaaaa", "(a+)+$", true); err == nil {
 		t.Fatal("nested unbounded quantifier must be refused")
@@ -25,11 +23,10 @@ func TestMatchesOpRefusesCatastrophicRegex(t *testing.T) {
 }
 
 func TestMatchesOpBoundsInputLength(t *testing.T) {
-	// A huge input must terminate quickly whatever the pattern does.
+
 	huge := strings.Repeat("a", 1<<20)
 	if _, err := applyOp("matches", huge, `^a+$`, true); err == nil {
-		// Either outcome is fine as long as it returns; an error on oversized
-		// input is acceptable, a hang is not. Nothing to assert beyond return.
+
 		t.Log("oversized input matched without guard error (bounded engine)")
 	}
 }
@@ -39,7 +36,7 @@ func TestAnyMatchers(t *testing.T) {
 		matcher string
 		yes, no string
 	}{
-		{"{{any:string}}", "hello", ""}, // "" for no-case: skip
+		{"{{any:string}}", "hello", ""},
 		{"{{any:uuid}}", "550e8400-e29b-41d4-a716-446655440000", "not-a-uuid"},
 		{"{{any:iso8601}}", "2026-09-07T10:00:00Z", "yesterday"},
 	}
@@ -56,7 +53,7 @@ func TestAnyMatchers(t *testing.T) {
 			t.Fatalf("%s must reject %q: ok=%v err=%v", c.matcher, c.no, ok, err)
 		}
 	}
-	// number/boolean matchers gate on the VALUE's type, not its spelling.
+
 	if ok, _ := applyOp("equals", float64(42), "{{any:number}}", true); !ok {
 		t.Fatal("any:number must accept a number")
 	}

@@ -1,5 +1,3 @@
-// Deterministic cursor pagination. The cursor is an opaque base64url
-// encoding of the last resource key returned.
 package sandbox
 
 import (
@@ -14,7 +12,6 @@ const (
 	paginationMaxLimit     = 100
 )
 
-// jsNumber approximates JS Number(str): trimmed, "" → 0, else float parse.
 func jsNumber(raw string) (float64, bool) {
 	s := strings.TrimSpace(raw)
 	if s == "" {
@@ -46,8 +43,6 @@ func encodeCursor(resourceKey string) string {
 	return base64.RawURLEncoding.EncodeToString([]byte(resourceKey))
 }
 
-// decodeCursor decodes a cursor to a resource key; nil for a missing/garbled
-// one (Node's base64url decoder is lenient about padding).
 func decodeCursor(raw *string) *string {
 	if raw == nil || *raw == "" {
 		return nil

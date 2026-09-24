@@ -47,7 +47,6 @@ func TestResolveVersionFromBuildInfo(t *testing.T) {
 		t.Fatalf("clean tree: got commit=%q date=%q", c, d)
 	}
 
-	// go install pkg@version: no vcs.* settings, module version is set.
 	v, c, d = resolveVersion("dev", "", "", nil, "v0.1.0")
 	if v != "v0.1.0" || c != "" || d != "" {
 		t.Fatalf("go install: got %q %q %q", v, c, d)

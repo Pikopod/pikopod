@@ -1,5 +1,3 @@
-// Package specwatch re-fetches each upstream spec (ETag- then hash-gated) and
-// diffs it against the operator-reviewed pin, which the watcher NEVER advances.
 package specwatch
 
 import (
@@ -26,23 +24,18 @@ import (
 	"github.com/pikopod/pikopod/internal/specdiff"
 )
 
-// Source is one watched upstream spec.
 type Source struct {
 	Upstream   string
 	SpecSource string
-	// Pinned is the sandbox's imported IR; nil means the watcher keeps its own
-	// pin instead, seeded from the first successful fetch.
+
 	Pinned *ir.ApiDefinition
 }
 
-// Reporter receives each declared finding (the agent adapts this onto the
-// alerter's ReportDeclared).
 type Reporter func(upstream string, f specdiff.Finding)
 
-// Result of one source's check (for CLI/status rendering).
 type Result struct {
 	Upstream string
-	Checked  bool // false = not due yet
+	Checked  bool
 	Changed  bool
 	Findings int
 	Err      error
@@ -55,12 +48,10 @@ type sourceState struct {
 	LastChanged time.Time `json:"last_changed,omitempty"`
 	SpecVersion string    `json:"spec_version,omitempty"`
 	Findings    int       `json:"findings,omitempty"`
-	// LastError records the most recent fetch/parse failure ("" = healthy)
-	// so a silently broken source is visible in state.json.
+
 	LastError string `json:"last_error,omitempty"`
 }
 
-// FetchFunc fetches a source; etag is the previous ETag ("" first time).
 type FetchFunc func(source, etag string) (raw []byte, newETag string, notModified bool, err error)
 
 type Watcher struct {
@@ -89,11 +80,9 @@ func New(dataDir string, sources []Source, interval time.Duration, report Report
 	return w
 }
 
-// SetFetch and SetClock are test seams.
 func (w *Watcher) SetFetch(f FetchFunc)          { w.fetch = f }
 func (w *Watcher) SetClock(now func() time.Time) { w.now = now }
 
-// SourceHealth is one watched source's state for /healthz.
 type SourceHealth struct {
 	Upstream    string    `json:"upstream"`
 	LastChecked time.Time `json:"last_checked"`
@@ -103,7 +92,6 @@ type SourceHealth struct {
 	LastError   string    `json:"last_error,omitempty"`
 }
 
-// Health snapshots every watched source (for /healthz and `pikopod status`).
 func (w *Watcher) Health() []SourceHealth {
 	w.mu.Lock()
 	defer w.mu.Unlock()
@@ -119,8 +107,6 @@ func (w *Watcher) Health() []SourceHealth {
 	return out
 }
 
-// Check runs one pass over every due source. Concurrent calls collapse to
-// one (the agent tick fires it as a goroutine; overlap must not stack).
 func (w *Watcher) Check() []Result {
 	if !w.checking.CompareAndSwap(false, true) {
 		return nil
@@ -156,8 +142,7 @@ func (w *Watcher) checkOne(s *Source) Result {
 
 	raw, newETag, notModified, err := w.fetch(s.SpecSource, etag)
 	if err != nil {
-		// A failing source still consumed its check: unstamped, the 30s agent
-		// tick would re-fetch a broken/hostile source 2,880×/day.
+
 		w.mu.Lock()
 		st.LastChecked = now
 		st.LastError = err.Error()
@@ -177,7 +162,7 @@ func (w *Watcher) checkOne(s *Source) Result {
 	sameBytes := hash == lastHash
 	w.mu.Unlock()
 	if sameBytes {
-		// Already normalized these bytes; refresh the validator only.
+
 		w.mu.Lock()
 		st.ETag, st.LastError = newETag, ""
 		w.mu.Unlock()
@@ -186,8 +171,7 @@ func (w *Watcher) checkOne(s *Source) Result {
 
 	def, err := importer.NormalizeOpenAPI(raw)
 	if err != nil {
-		// ETag and Hash are PROCESSED-successfully markers: advancing them past
-		// a document that failed to normalize makes the source go dark silently.
+
 		w.mu.Lock()
 		st.LastError = err.Error()
 		w.mu.Unlock()
@@ -197,7 +181,6 @@ func (w *Watcher) checkOne(s *Source) Result {
 		return res
 	}
 
-	// Normalized: these bytes are now the processed high-water mark.
 	w.mu.Lock()
 	st.ETag, st.Hash, st.LastError = newETag, hash, ""
 	w.mu.Unlock()
@@ -207,7 +190,7 @@ func (w *Watcher) checkOne(s *Source) Result {
 		pin = w.loadPin(s.Upstream)
 	}
 	if pin == nil {
-		// First sight with no sandbox pin: this fetch BECOMES the pin.
+
 		if err := w.savePin(s.Upstream, def); err != nil {
 			res.Err = err
 			return res
@@ -268,12 +251,9 @@ func (w *Watcher) savePin(upstream string, def *ir.ApiDefinition) error {
 	return store.WriteFileAtomic(p, raw)
 }
 
-// ResetPin clears the watcher-owned pin and cached state so the next check
-// re-seeds against a freshly imported contract.
 func ResetPin(dataDir, upstream string) error {
 	statePath := filepath.Join(dataDir, "specwatch", "state.json")
-	// Cross-process lock: a running daemon's watcher tick persists this
-	// same file; last-writer-wins could resurrect the just-reset state.
+
 	return store.WithFileLock(statePath, func() error { return resetPinLocked(dataDir, upstream, statePath) })
 }
 
@@ -283,7 +263,7 @@ func resetPinLocked(dataDir, upstream, statePath string) error {
 	}
 	raw, err := os.ReadFile(statePath)
 	if err != nil {
-		return nil // no state yet — nothing to reset
+		return nil
 	}
 	var state map[string]*sourceState
 	if json.Unmarshal(raw, &state) != nil {
@@ -304,8 +284,7 @@ func (w *Watcher) statePath() string {
 func (w *Watcher) persist() {
 	_ = store.WithFileLock(w.statePath(), func() error {
 		w.mu.Lock()
-		// Honor a concurrent `import --update`: a vanished watcher-owned pin
-		// means another process reset it, so this persist must not resurrect it.
+
 		for name, st := range w.state {
 			if st.Hash == "" {
 				continue
@@ -325,7 +304,6 @@ func (w *Watcher) persist() {
 	})
 }
 
-// sourceHasOwnPin reports whether an upstream relies on the watcher-owned pin.
 func (w *Watcher) sourceHasOwnPin(upstream string) bool {
 	for i := range w.sources {
 		if w.sources[i].Upstream == upstream {
@@ -351,8 +329,6 @@ func hashOf(raw []byte) string {
 	return hex.EncodeToString(h[:])
 }
 
-// Fetch loads a spec source: http(s) with If-None-Match, git:<ref>:<path>
-// via `git show`, anything else as a local file.
 type Origin struct {
 	Kind string
 	Ref  string
@@ -449,8 +425,7 @@ func fetchHTTP(source, etag string) ([]byte, string, bool, error) {
 		return nil, "", false, err
 	}
 	if int64(len(raw)) > maxSpecBytes {
-		// Never truncate: YAML is prefix-tolerant, so a cut document still
-		// parses and diffs as a storm of bogus endpoint-removed findings.
+
 		return nil, "", false, errfmt.New("watched spec exceeds the size cap",
 			fmt.Sprintf("%s served more than %d MiB", source, maxSpecBytes>>20),
 			"a document this size is almost certainly not the spec; check spec_source", "docs/config-reference.md#spec_watch")
@@ -458,8 +433,6 @@ func fetchHTTP(source, etag string) ([]byte, string, bool, error) {
 	return raw, resp.Header.Get("ETag"), false, nil
 }
 
-// maxSpecBytes caps every fetched/loaded spec source (the importer's cap),
-// enforced as an ERROR past the cap, never a truncation.
 const maxSpecBytes = 32 << 20
 
 func gitShow(refspec string) ([]byte, error) {

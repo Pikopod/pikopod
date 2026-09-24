@@ -8,8 +8,6 @@ import (
 	"github.com/pikopod/pikopod/internal/proxy"
 )
 
-// allOf responses are flattened and checked member-wise; oneOf responses
-// pass on ANY fitting variant and violate only when none fits.
 const compositionSpec = `{
   "openapi": "3.0.0", "info": {"title": "C", "version": "1"},
   "paths": {
@@ -43,15 +41,14 @@ func compRec(path string, body any) *proxy.Record {
 
 func TestAllOfIsFlattenedAndChecked(t *testing.T) {
 	def := compositionDef(t)
-	// Missing "status" (required by the SECOND allOf member) must now be a
-	// violation — the pre-flattening code skipped composed schemas entirely.
+
 	report := Check(def, []*proxy.Record{
 		compRec("/merged", map[string]any{"id": "x_1"}),
 	})
 	if len(report.Violations) != 1 || report.Violations[0].Code != "required" || report.Violations[0].Pointer != "/status" {
 		t.Fatalf("violations: %+v", report.Violations)
 	}
-	// Both members satisfied → clean.
+
 	report = Check(def, []*proxy.Record{
 		compRec("/merged", map[string]any{"id": "x_1", "status": "ok"}),
 	})
@@ -63,8 +60,8 @@ func TestAllOfIsFlattenedAndChecked(t *testing.T) {
 func TestOneOfPassesOnAnyVariant(t *testing.T) {
 	def := compositionDef(t)
 	report := Check(def, []*proxy.Record{
-		compRec("/choice", map[string]any{"card": "tok_1"}), // fits variant 1
-		compRec("/choice", map[string]any{"bank": "058"}),   // fits variant 2
+		compRec("/choice", map[string]any{"card": "tok_1"}),
+		compRec("/choice", map[string]any{"bank": "058"}),
 	})
 	if len(report.Violations) != 0 {
 		t.Fatalf("fitting variants flagged: %+v", report.Violations)
@@ -74,7 +71,7 @@ func TestOneOfPassesOnAnyVariant(t *testing.T) {
 func TestOneOfNoVariantFitsIsCertainViolation(t *testing.T) {
 	def := compositionDef(t)
 	report := Check(def, []*proxy.Record{
-		compRec("/choice", map[string]any{"wallet": "w_1"}), // fits neither
+		compRec("/choice", map[string]any{"wallet": "w_1"}),
 	})
 	if len(report.Violations) != 1 || report.Violations[0].Code != "composition" {
 		t.Fatalf("violations: %+v", report.Violations)

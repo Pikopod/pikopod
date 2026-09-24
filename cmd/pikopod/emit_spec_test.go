@@ -19,8 +19,6 @@ const docsSiteSpec = `{"openapi":"3.1.0","info":{"title":"Pay","version":"1"},
   "intent.failed":{"post":{"responses":{"200":{"description":"ack"}}}}
 }}`
 
-// A docs site with nothing but prose on the page and the spec at a
-// well-known path: the platform rung, no model.
 func docsSite(t *testing.T) *httptest.Server {
 	t.Helper()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -67,8 +65,6 @@ func TestEmitSpecWritesTheFetchedSpecAndReimportIsDeterministic(t *testing.T) {
 	}
 }
 
-// An emitted extraction carries a marker; it stays DRAFT until a person
-// removes it.
 func TestEmittedExtractionReimportsAsDraftUntilMarkerRemoved(t *testing.T) {
 	cfg := testConfig(t, "https://example.invalid")
 	marked := strings.Replace(docsSiteSpec, `"openapi":"3.1.0",`, `"openapi":"3.1.0","x-pikopod-origin":"llm-extracted",`, 1)

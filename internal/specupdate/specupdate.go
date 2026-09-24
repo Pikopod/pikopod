@@ -1,5 +1,3 @@
-// Package specupdate turns traffic evidence into RFC-6902 patches. Only
-// contract-WIDENING ones are applied; the rest are suggestions, always annotated.
 package specupdate
 
 import (
@@ -11,20 +9,18 @@ import (
 	"github.com/pikopod/pikopod/internal/contract"
 )
 
-// ChangeKind is a semantic intent, derived before any document surgery.
 type ChangeKind string
 
 const (
-	AddStatus    ChangeKind = "add-status"    // additive
-	EnumUnion    ChangeKind = "enum-union"    // additive
-	NullableWrap ChangeKind = "nullable-wrap" // additive
-	AddProperty  ChangeKind = "add-property"  // additive
-	Retype       ChangeKind = "retype"        // suggestion — narrows/contradicts
-	MakeOptional ChangeKind = "make-optional" // suggestion — withdraws a guarantee
-	AddEndpoint  ChangeKind = "add-endpoint"  // suggestion — too much to author blind
+	AddStatus    ChangeKind = "add-status"
+	EnumUnion    ChangeKind = "enum-union"
+	NullableWrap ChangeKind = "nullable-wrap"
+	AddProperty  ChangeKind = "add-property"
+	Retype       ChangeKind = "retype"
+	MakeOptional ChangeKind = "make-optional"
+	AddEndpoint  ChangeKind = "add-endpoint"
 )
 
-// Additive reports whether the kind is auto-applicable.
 func (k ChangeKind) Additive() bool {
 	switch k {
 	case AddStatus, EnumUnion, NullableWrap, AddProperty:
@@ -33,52 +29,43 @@ func (k ChangeKind) Additive() bool {
 	return false
 }
 
-// Evidence is the observed backing for a change (rendered into the
-// x-pikopod-observed annotation and the PR body).
 type Evidence struct {
 	Occurrences int     `json:"occurrences,omitempty"`
 	Presence    float64 `json:"presence,omitempty"`
 	Since       string  `json:"since,omitempty"`
 }
 
-// Change is one semantic spec amendment.
 type Change struct {
 	Kind        ChangeKind `json:"kind"`
 	Method      string     `json:"method"`
 	Template    string     `json:"template"`
-	Status      int        `json:"status,omitempty"`       // exact observed code (AddStatus, conformance-derived)
-	StatusClass string     `json:"status_class,omitempty"` // overlay-derived changes carry the class
-	Pointer     string     `json:"pointer,omitempty"`      // response-body pointer, /data/fee style; /*: array items
-	Value       string     `json:"value,omitempty"`        // enum value / observed type / property name
-	PropType    string     `json:"prop_type,omitempty"`    // add-property: observed dominant type
+	Status      int        `json:"status,omitempty"`
+	StatusClass string     `json:"status_class,omitempty"`
+	Pointer     string     `json:"pointer,omitempty"`
+	Value       string     `json:"value,omitempty"`
+	PropType    string     `json:"prop_type,omitempty"`
 	Reason      string     `json:"reason"`
 	Evidence    Evidence   `json:"evidence"`
 }
 
-// Op is one RFC-6902 operation over the ORIGINAL spec document.
 type Op struct {
 	Op    string `json:"op"`
 	Path  string `json:"path"`
 	Value any    `json:"value,omitempty"`
 }
 
-// Patch pairs a change with its concrete ops (paths resolved through any
-// $ref indirection to where the edit actually lands).
 type Patch struct {
 	Change
 	Ops []Op `json:"ops,omitempty"`
 }
 
-// DeriveChanges merges conformance violations with warmup-gated overlay
-// admissions, collapsing duplicates both streams saw.
 func DeriveChanges(rep *conformance.Report, ov *contract.Overlay) []Change {
 	var out []Change
 	seen := map[string]bool{}
 	add := func(c Change) {
 		key := string(c.Kind) + "|" + c.Method + "|" + c.Template + "|"
 		if c.Kind == AddStatus {
-			// Both streams can see the same undeclared status; the class is
-			// derivable from the code, so key on the code alone.
+
 			key += fmt.Sprint(c.Status)
 		} else {
 			key += fmt.Sprint(c.Status) + "|" + c.StatusClass + "|" + c.Pointer + "|" + c.Value
@@ -154,13 +141,11 @@ func DeriveChanges(rep *conformance.Report, ov *contract.Overlay) []Change {
 	return out
 }
 
-// dottedToPointer converts overlay field paths ("data.entries[].fee") into
-// the conformance pointer form ("/data/entries/*/fee").
 func dottedToPointer(field string) string {
 	if field == "" {
 		return ""
 	}
-	// Each "x[]" contributes "x" then "*" (array items).
+
 	var segs []string
 	for _, s := range strings.Split(field, ".") {
 		base := s

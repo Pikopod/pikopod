@@ -28,7 +28,6 @@ func TestVerifyRequestsSeesTheIdempotencyKey(t *testing.T) {
 	}
 }
 
-// A header assertion that should not hold must fail the run.
 func TestVerifyRequestsHeaderMismatchFails(t *testing.T) {
 	def := parseDef(t, `{
 	  "steps": [
@@ -51,7 +50,6 @@ func TestVerifyRequestsHeaderMismatchFails(t *testing.T) {
 	}
 }
 
-// Query values the sanitizer allows survive verbatim and are assertable.
 func TestVerifyRequestsAssertsOnRequestQuery(t *testing.T) {
 	def := parseDef(t, `{
 	  "steps": [
@@ -73,8 +71,6 @@ func TestVerifyRequestsAssertsOnRequestQuery(t *testing.T) {
 	}
 }
 
-// A credential must never reach an assertion verbatim: redaction happens
-// before the journal, so the assertion sees the substituted value.
 func TestJournaledAuthorizationIsRedactedBeforeAssertions(t *testing.T) {
 	def := parseDef(t, `{
 	  "steps": [

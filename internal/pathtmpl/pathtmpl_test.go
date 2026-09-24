@@ -5,12 +5,10 @@ import (
 	"testing"
 )
 
-// Golden classification over realistic provider paths — the shapes payment
-// APIs actually serve, including tokenized forms (recorder output).
 func TestTemplatizeGoldens(t *testing.T) {
 	cases := map[string]string{
 		"/transaction/tx_8f3a91b2c4d5":                    "/transaction/tx_{id}",
-		"/transaction/tx_mq4kf8zu2n1p":                    "/transaction/tx_{id}", // tokenized form, same template
+		"/transaction/tx_mq4kf8zu2n1p":                    "/transaction/tx_{id}",
 		"/customers/cus_9s6XKzkNRiz8i3/payment_methods":   "/customers/cus_{id}/payment_methods",
 		"/v1/charges/ch_3MtwBwLkdIwHu7ix0snN0B15/refunds": "/v1/charges/ch_{id}/refunds",
 		"/transfers/550e8400-e29b-41d4-a716-446655440000": "/transfers/{uuid}",
@@ -29,19 +27,15 @@ func TestTemplatizeGoldens(t *testing.T) {
 	}
 }
 
-// Cardinality guard: a bare-word id scheme (classifies static) must be
-// force-promoted once distinct values pass the threshold — the "endpoint
-// family won't converge" killer.
 func TestGuardPromotesRunawayPosition(t *testing.T) {
 	g := NewGuard(10)
-	// "summary" is a real static route seen repeatedly BEFORE the blowup —
-	// frequency-pinning must keep it static after promotion.
+
 	for i := 0; i < 3; i++ {
 		g.Apply("/orders/summary")
 	}
 	var promo *Promotion
 	for i := 0; i < 12; i++ {
-		// /orders/customerworda... word-like ids that dodge classification
+
 		_, p := g.Apply(fmt.Sprintf("/orders/customerword%c/items", 'a'+rune(i)))
 		if p != nil {
 			promo = p
@@ -54,7 +48,7 @@ func TestGuardPromotesRunawayPosition(t *testing.T) {
 	if got != "/orders/{id}/items" {
 		t.Fatalf("post-promotion template = %q, want /orders/{id}/items", got)
 	}
-	// The pinned literal survives the promotion.
+
 	tpl, _ := g.Apply("/orders/summary")
 	if tpl != "/orders/summary" {
 		t.Fatalf("pinned static literal must survive promotion, got %q", tpl)
@@ -65,7 +59,7 @@ func TestGuardMergeKey(t *testing.T) {
 	g := NewGuard(2)
 	g.Apply("/x/aaa")
 	g.Apply("/x/bbb")
-	g.Apply("/x/ccc") // promotion at position 2
+	g.Apply("/x/ccc")
 	if got := g.MergeKey("/x/bbb"); got != "/x/{id}" {
 		t.Fatalf("MergeKey should re-templatize old families, got %q", got)
 	}

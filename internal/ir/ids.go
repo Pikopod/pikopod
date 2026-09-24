@@ -7,9 +7,6 @@ import (
 	"strings"
 )
 
-// Every id is <prefix>_<hex12>, a sha256 of the node's own semantic key —
-// never its array index — and is pinned byte-for-byte by the goldens.
-
 func shortHash(input string) string {
 	sum := sha256.Sum256([]byte(input))
 	return hex.EncodeToString(sum[:])[:12]
@@ -17,8 +14,6 @@ func shortHash(input string) string {
 
 var pathParamRe = regexp.MustCompile(`\{[^}]*\}`)
 
-// CanonicalPathTemplate collapses parameter names to positional markers so
-// /users/{id} and /users/{userId} produce identical structure.
 func CanonicalPathTemplate(path string) string {
 	return pathParamRe.ReplaceAllString(path, "{}")
 }
@@ -43,8 +38,6 @@ func NamedSchemaID(name string) string {
 	return "sc_" + shortHash(name)
 }
 
-// SchemaNodeID derives schema-node identity from the parent id and the node's
-// role (a property name, "items", a composition member index).
 func SchemaNodeID(parentID, role string) string {
 	return "sn_" + shortHash(parentID+":"+role)
 }

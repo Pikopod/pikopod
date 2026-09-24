@@ -14,8 +14,6 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// newSpecDiffCmd diffs two spec versions as IR-vs-IR findings. Exit codes are the
-// API: 0 = nothing at/above the --fail-on floor, 1 = findings, 2 = config error.
 func newSpecDiffCmd() *cobra.Command {
 	c := &cobra.Command{
 		Use:   "spec-diff <old> <new>",

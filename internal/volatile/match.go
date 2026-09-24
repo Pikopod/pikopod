@@ -31,7 +31,7 @@ type entry struct {
 type Matcher struct {
 	entries []entry
 	mu      sync.Mutex
-	drops   map[string]map[string]int // entry → path → count
+	drops   map[string]map[string]int
 }
 
 const maxDropPaths = 2000

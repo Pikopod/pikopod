@@ -32,15 +32,11 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// loadConfig resolves the inherited --config flag. Every command reads the
-// configuration through here so the flag works the same everywhere.
 func loadConfig(cmd *cobra.Command) (*config.Config, error) {
 	path, _ := cmd.Flags().GetString("config")
 	return config.Load(path)
 }
 
-// newLLMClient builds the BYOK client. Model precedence is explicit override,
-// then llm.model, then the package default; the base URL override is test-only.
 func newLLMClient(cfg *config.Config, model string) *nl.Client {
 	if model == "" {
 		model = cfg.LLM.Model
@@ -100,8 +96,6 @@ func newInitCmd() *cobra.Command {
 		}}
 }
 
-// newImportCmd is the front-door spelling of `sandbox add`: import a spec, get a
-// sandbox. Same registry; it adds --update, which re-imports an existing one.
 func newImportCmd() *cobra.Command {
 	c := &cobra.Command{Use: "import <provider>", Short: "Import an API spec → a deterministic sandbox at /<provider>/", Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -173,8 +167,6 @@ func newUpCmd() *cobra.Command {
 				cfg.Scheme(), cfg.Listen, cfg.AgentPort, strings.Join(cfg.UpstreamNames(), ", "))
 			fmt.Fprintf(out, "point your app's provider base URL at %s://%s:%d/<upstream>; /healthz shows progress\n", cfg.Scheme(), cfg.Listen, cfg.AgentPort)
 
-			// Sandbox server: its own port, its own panic boundary. A fault in
-			// one subsystem never takes down the other.
 			sbx, err := newSandboxServer(cfg)
 			if err != nil {
 				return err
@@ -185,8 +177,7 @@ func newUpCmd() *cobra.Command {
 			}
 			defer sbx.Close()
 			sbxAddr := net.JoinHostPort(cfg.Listen, fmt.Sprint(cfg.SandboxPort))
-			// Header-only deadline: armed hang/slow_body faults act on the
-			// RESPONSE and are unaffected by it.
+
 			sbxSrv := &http.Server{Addr: sbxAddr, Handler: sbx, ReadHeaderTimeout: 20 * time.Second}
 			sbxErr := make(chan error, 1)
 			go func() {
@@ -200,8 +191,7 @@ func newUpCmd() *cobra.Command {
 				shutdownCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 				defer cancel()
 				if err := sbxSrv.Shutdown(shutdownCtx); err != nil {
-					// Same rule as the agent server: after the drain grace, stragglers
-					// are hard-closed so a stop never hangs on a client's conn pool.
+
 					sbxSrv.Close()
 				}
 			}()
@@ -213,8 +203,7 @@ func newUpCmd() *cobra.Command {
 
 			go func() {
 				if err := <-sbxErr; err != nil && err != http.ErrServerClosed {
-					// The sandbox listener failing is loud but non-fatal: the
-					// drift agent keeps running.
+
 					fmt.Fprintf(cmd.ErrOrStderr(), "sandbox server stopped: %v\n", err)
 				}
 			}()
@@ -226,11 +215,9 @@ func newUpCmd() *cobra.Command {
 
 func out2(cmd *cobra.Command) io.Writer { return cmd.OutOrStdout() }
 
-// buildSpecWatcher arms the declared-drift watcher for every upstream with a
-// spec_source. Pins come from the linked sandbox's IR, else the first fetch.
 func buildSpecWatcher(cfg *config.Config, a *agent.Agent) (*specwatch.Watcher, int) {
 	var sources []specwatch.Source
-	pins, _ := contractsForUpstreams(cfg) // best-effort: nil map on error is fine
+	pins, _ := contractsForUpstreams(cfg)
 	for _, name := range cfg.UpstreamNames() {
 		u := cfg.Upstreams[name]
 		if u.SpecSource == "" {
@@ -242,8 +229,7 @@ func buildSpecWatcher(cfg *config.Config, a *agent.Agent) (*specwatch.Watcher, i
 		return nil, 0
 	}
 	w := specwatch.New(cfg.DataDir, sources, cfg.SpecWatchInterval(), func(upstream string, f specdiff.Finding) {
-		// The declared×observed join: traffic evidence can raise the level
-		// and sharpen the detail; the fingerprint (identity) never moves.
+
 		a.EnrichDeclared(upstream, &f)
 		a.Alerter.ReportDeclared(upstream, f.Fingerprint(), alert.DriftEvent{
 			Method:   f.Method,
@@ -256,8 +242,6 @@ func buildSpecWatcher(cfg *config.Config, a *agent.Agent) (*specwatch.Watcher, i
 	return w, len(sources)
 }
 
-// contractsForUpstreams loads the IR for every upstream a registered sandbox
-// links to (explicit `upstream` link, or name equality — the common case).
 func contractsForUpstreams(cfg *config.Config) (map[string]*ir.ApiDefinition, error) {
 	entries, err := loadRegistry(cfg.DataDir)
 	if err != nil {
@@ -439,11 +423,11 @@ func newDoctorCmd() *cobra.Command {
 					resp, hErr := cfg.LocalClient(2 * time.Second).Get(cfg.Scheme() + "://" + addr + "/healthz")
 					if hErr == nil {
 						resp.Body.Close()
-						return nil // running pikopod — fine
+						return nil
 					}
 					return fmt.Errorf("port %s is taken by something that is not pikopod", addr)
 				}
-				return nil // free
+				return nil
 			}())
 			for _, name := range cfg.UpstreamNames() {
 				target := cfg.Upstreams[name].Target
@@ -567,8 +551,6 @@ func newStatusCmd() *cobra.Command {
 		}}
 }
 
-// volatileCollateral lints an upstream's volatile_fields against its persisted
-// baselines at startup; informational only, never blocking.
 func volatileCollateral(cfg *config.Config, upstream string) []volatile.Refusal {
 	m, refusals, err := volatile.Compile(cfg.Upstreams[upstream].VolatileFields)
 	if err != nil || len(m.Entries()) == 0 {

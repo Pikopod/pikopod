@@ -1,5 +1,3 @@
-// Match a scenario REQUEST against the pinned ApiDefinition's endpoints.
-// Deterministic and pure.
 package scenario
 
 import (
@@ -34,16 +32,14 @@ func pathSegments(path string) []string {
 
 func segmentMatches(scenarioSeg, endpointSeg string) bool {
 	if templateParamRe.MatchString(endpointSeg) {
-		return true // endpoint param accepts any value
+		return true
 	}
 	if scenarioVarRe.MatchString(scenarioSeg) {
-		return false // a var can only fill a param slot
+		return false
 	}
 	return scenarioSeg == endpointSeg
 }
 
-// MatchEndpoint returns the endpoint serving method+path, or nil. Most
-// specific (fewest template params) first; stable code-point tiebreak.
 func MatchEndpoint(endpoints []ir.Endpoint, method, path string) *ir.Endpoint {
 	target := pathSegments(path)
 	upper := strings.ToUpper(method)
@@ -90,8 +86,6 @@ func MatchEndpoint(endpoints []ir.Endpoint, method, path string) *ir.Endpoint {
 	return candidates[0]
 }
 
-// ResourceTypeOf is the collection-path resource type for an endpoint (drop a
-// trailing param).
 func ResourceTypeOf(endpoint *ir.Endpoint) string {
 	segs := pathSegments(endpoint.PathTemplate.Value)
 	if len(segs) > 0 && templateParamRe.MatchString(segs[len(segs)-1]) {
@@ -104,7 +98,6 @@ func IsAbsoluteURL(path string) bool {
 	return absoluteURLRe.MatchString(path) || strings.HasPrefix(path, "//")
 }
 
-// ExtractVarExprs extracts `{{...}}` expressions from a string.
 func ExtractVarExprs(text string) []string {
 	var out []string
 	for _, m := range varExprRe.FindAllStringSubmatch(text, -1) {
@@ -113,7 +106,6 @@ func ExtractVarExprs(text string) []string {
 	return out
 }
 
-// IsGeneratorExpr: a generator / matcher expression resolves itself.
 func IsGeneratorExpr(expr string) bool {
 	return generatorRe.MatchString(expr)
 }

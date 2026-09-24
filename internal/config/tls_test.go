@@ -46,7 +46,6 @@ func TestTLSMissingFilesRefused(t *testing.T) {
 	}
 }
 
-// selfSigned writes a fresh self-signed localhost cert+key pair.
 func selfSigned(t *testing.T, dir string) (certPath, keyPath string) {
 	t.Helper()
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
@@ -89,8 +88,6 @@ func TestSchemeAndLocalClientTrustConfiguredCert(t *testing.T) {
 		t.Fatalf("scheme: %s", cfg.Scheme())
 	}
 
-	// Serve with the configured pair; the LocalClient must trust it while a
-	// default client (system roots) must refuse it.
 	pair, err := tls.LoadX509KeyPair(certPath, keyPath)
 	if err != nil {
 		t.Fatal(err)

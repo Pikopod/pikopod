@@ -1,5 +1,3 @@
-// The declared×observed join: spec-diff knows what the provider DECLARED, the
-// learner what traffic does. Presentation only — fingerprints never change.
 package agent
 
 import (
@@ -13,8 +11,6 @@ import (
 	"github.com/pikopod/pikopod/internal/specwatch"
 )
 
-// AnnotateDocumented downgrades observed findings whose change the
-// provider's new spec version declares (per the specwatch journal).
 func AnnotateDocumented(findings []drift.Finding, doc *specwatch.Documented) {
 	if doc == nil {
 		return
@@ -37,8 +33,6 @@ func AnnotateDocumented(findings []drift.Finding, doc *specwatch.Documented) {
 	}
 }
 
-// EnrichDeclaredFinding joins observed-traffic evidence onto a declared finding.
-// Response-side only — the join never guesses, and Level only ever RISES.
 func EnrichDeclaredFinding(f *specdiff.Finding, fams []*baseline.Family) {
 	matching := func(statusClass string) []*baseline.Family {
 		var out []*baseline.Family
@@ -81,8 +75,7 @@ func EnrichDeclaredFinding(f *specdiff.Finding, fams []*baseline.Family) {
 		}
 		ratio := fam.PresenceRatio(path)
 		f.Detail += fmt.Sprintf(" — consumers receive this field today (presence %.0f%%, %d samples)", ratio*100, fam.Samples)
-		// Same floor as drift's presenceFloor: ~always-present is the bar for
-		// "consumers depend on it".
+
 		if ratio >= presenceEvidenceFloor {
 			raiseTo(f, specdiff.Err)
 		}
@@ -134,8 +127,6 @@ func EnrichDeclaredFinding(f *specdiff.Finding, fams []*baseline.Family) {
 	}
 }
 
-// famAndPath resolves a response finding's family (status class from args[0],
-// e.g. "200 application/json") and field path (args[1]).
 func famAndPath(f *specdiff.Finding, matching func(string) []*baseline.Family) (*baseline.Family, string) {
 	if len(f.Args) < 2 {
 		return nil, ""
@@ -149,7 +140,7 @@ func famAndPath(f *specdiff.Finding, matching func(string) []*baseline.Family) (
 	if len(fams) == 0 {
 		return nil, ""
 	}
-	// Declared paths are dot-joined; the learner's field map slash-joins.
+
 	return fams[0], specwatch.CanonicalFieldPath(f.Args[1])
 }
 
@@ -160,8 +151,6 @@ func classOf(status string) string {
 	return status[:1] + "xx"
 }
 
-// presenceEvidenceFloor mirrors drift.presenceFloor (0.98): the presence
-// ratio at which a field counts as a guarantee consumers rely on.
 const presenceEvidenceFloor = 0.98
 
 func raiseTo(f *specdiff.Finding, floor specdiff.Level) {
@@ -170,20 +159,16 @@ func raiseTo(f *specdiff.Finding, floor specdiff.Level) {
 	}
 }
 
-// EnrichDeclared is the agent-side entry: joins the upstream's learned
-// families onto the finding.
 func (a *Agent) EnrichDeclared(upstream string, f *specdiff.Finding) {
 	a.mu.Lock()
 	l, ok := a.learners[upstream]
 	a.mu.Unlock()
 	if !ok {
-		return // no observed traffic for this upstream yet — nothing to join
+		return
 	}
 	EnrichDeclaredFinding(f, l.Families())
 }
 
-// documentedFor returns the upstream's declared-changes journal, cached and
-// reloaded at most once a minute (the observe path is hot).
 func (a *Agent) documentedFor(upstream string) *specwatch.Documented {
 	now := time.Now()
 	a.mu.Lock()

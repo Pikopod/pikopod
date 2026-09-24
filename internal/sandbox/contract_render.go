@@ -1,5 +1,3 @@
-// Rendering the traffic overlay: spec truth first, traffic-admitted behavior
-// layered on. With no Effective attached, behavior is byte-identical to spec-only.
 package sandbox
 
 import (
@@ -12,13 +10,10 @@ import (
 	"github.com/pikopod/pikopod/internal/contract"
 )
 
-// ContractVersionHeader marks every overlay-aware response.
 const ContractVersionHeader = "x-pikopod-contract-version"
 
-// presenceAlwaysFloor: at or above this observed rate a field is always present.
 const presenceAlwaysFloor = 0.98
 
-// applyContract layers the Effective view onto a served response.
 func (e *Engine) applyContract(resp *RawResponse, method, template, innerPath string) {
 	if e.effective == nil || resp == nil {
 		return
@@ -39,14 +34,13 @@ func (e *Engine) applyContract(resp *RawResponse, method, template, innerPath st
 	}
 	doc, err := parseJSONValue(string(resp.Body))
 	if err != nil {
-		return // non-object bodies pass through untouched
+		return
 	}
 	obj, ok := doc.(*JSONObject)
 	if !ok {
 		return
 	}
 
-	// Anchor for per-resource determinism: the resource id, else the path.
 	anchor := innerPath
 	if id, ok := obj.Get("id"); ok {
 		if s, isStr := id.(string); isStr {
@@ -60,10 +54,9 @@ func (e *Engine) applyContract(resp *RawResponse, method, template, innerPath st
 	for _, fieldPath := range sortedStrings(added) {
 		spec := added[fieldPath]
 		if strings.Contains(fieldPath, "[]") {
-			continue // array-interior paths: only object paths are rendered
+			continue
 		}
-		// Seeded per (resource, field): clients must handle absence exactly as
-		// often as the provider omits.
+
 		if spec.Presence < presenceAlwaysFloor {
 			roll := NewPrng(e.seed + ":presence:" + template + ":" + fieldPath + ":" + anchor).Next()
 			if roll >= spec.Presence {
@@ -82,8 +75,6 @@ func (e *Engine) applyContract(resp *RawResponse, method, template, innerPath st
 	}
 }
 
-// observedValue prefers a REAL observed value (deterministic pick), else
-// synthesizes from the observed type.
 func (e *Engine) observedValue(spec contract.ObservedFieldSpec, template, fieldPath, anchor string) any {
 	prng := NewPrng(e.seed + ":observed:" + template + ":" + fieldPath + ":" + anchor)
 	if len(spec.Values) > 0 {
@@ -103,8 +94,6 @@ func (e *Engine) observedValue(spec contract.ObservedFieldSpec, template, fieldP
 	}
 }
 
-// overrideSynthesizedField re-renders a spec field as its traffic-won type, ONLY
-// when the current value looks synthesized-typed — read-your-write is sacred.
 func overrideSynthesizedField(obj *JSONObject, fieldPath, wantType string, e *Engine, template, anchor string) {
 	parent, last := walkToParent(obj, fieldPath)
 	if parent == nil {
@@ -117,8 +106,7 @@ func overrideSynthesizedField(obj *JSONObject, fieldPath, wantType string, e *En
 	prng := NewPrng(e.seed + ":override:" + template + ":" + fieldPath + ":" + anchor)
 	switch wantType {
 	case "string":
-		// Docs said integer, wire says string: preserve the value, change the
-		// type — "100", not a random token.
+
 		switch n := cur.(type) {
 		case float64:
 			parent.Set(last, strconv.FormatFloat(n, 'f', -1, 64))
@@ -141,8 +129,6 @@ func overrideSynthesizedField(obj *JSONObject, fieldPath, wantType string, e *En
 	}
 }
 
-// serveObserved answers an endpoint the SPEC never declared but traffic
-// established, from its admitted fields.
 func (e *Engine) serveObserved(method, innerPath string) *RawResponse {
 	if e.effective == nil {
 		return nil
@@ -173,13 +159,11 @@ func (e *Engine) serveObserved(method, innerPath string) *RawResponse {
 	resp := &RawResponse{Status: 200, Headers: map[string]string{
 		"content-type":        jsonContentType,
 		ContractVersionHeader: strconv.Itoa(e.effective.Version),
-		"x-pikopod-contract":  "observed-endpoint", // the WHOLE route is traffic-derived
+		"x-pikopod-contract":  "observed-endpoint",
 	}, Body: body}
 	return resp
 }
 
-// observedTemplateFor matches a concrete path against admitted observed
-// templates, with the router's param-matching segment rules.
 func (e *Engine) observedTemplateFor(method, innerPath string) string {
 	for key := range e.effective.AddedEndpoints {
 		parts := strings.SplitN(key, "|", 3)
@@ -216,7 +200,7 @@ func setDotted(obj *JSONObject, dotted string, value any) {
 		return
 	}
 	if _, exists := parent.Get(last); exists {
-		return // never clobber spec-rendered or stored fields
+		return
 	}
 	parent.Set(last, value)
 }

@@ -1,5 +1,3 @@
-// `pikopod conformance <upstream>` — checks recorded traffic against the spec IR.
-// Complements drift: drift is baseline-relative, conformance is spec-relative.
 package main
 
 import (
@@ -89,8 +87,6 @@ func newConformanceCmd() *cobra.Command {
 	return c
 }
 
-// irForUpstream loads the IR of the sandbox linked to the upstream (the
-// same link `pikopod contract` uses: explicit Upstream, else name match).
 func irForUpstream(cfg *config.Config, upstream string) (*ir.ApiDefinition, error) {
 	entries, err := loadRegistry(cfg.DataDir)
 	if err != nil {
@@ -114,8 +110,6 @@ func irForUpstream(cfg *config.Config, upstream string) (*ir.ApiDefinition, erro
 	return nil, errfmt.New("no sandbox linked to upstream "+upstream, "conformance needs the spec IR of a registered sandbox with the same name (or an explicit --upstream link)", "import one: `pikopod import "+upstream+" --spec …`", "docs/config-reference.md#refine")
 }
 
-// readRecordings loads every record from both generations (previous first,
-// so occurrences count in rough time order).
 func readRecordings(dataDir, upstream string) ([]*proxy.Record, error) {
 	var out []*proxy.Record
 	base := filepath.Join(dataDir, "recordings", upstream+".ndjson")
@@ -124,8 +118,7 @@ func readRecordings(dataDir, upstream string) ([]*proxy.Record, error) {
 		if err != nil {
 			continue
 		}
-		// Stream line-by-line (a generation can be 64 MiB), with UseNumber so
-		// re-parsed amounts keep the recorder's lossless precision.
+
 		sc := bufio.NewScanner(f)
 		sc.Buffer(make([]byte, 0, 64<<10), 8<<20)
 		for sc.Scan() {

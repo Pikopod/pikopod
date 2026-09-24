@@ -6,8 +6,6 @@ import (
 	"strings"
 )
 
-// WebhookEnvelope is how a provider wraps and signs the documented payload on
-// the wire; the outbox keeps the payload, the sink sees the envelope.
 type WebhookEnvelope struct {
 	Wrap      map[string]string `json:"wrap,omitempty"`
 	Headers   map[string]string `json:"headers,omitempty"`
@@ -49,7 +47,6 @@ var (
 	envelopeLocations  = map[string]bool{"body": true, "header": true}
 )
 
-// TemplateRefs lists every {{ref}} in a template, trimmed, in order.
 func TemplateRefs(tpl string) []string {
 	var refs []string
 	for rest := tpl; ; {
@@ -66,7 +63,6 @@ func TemplateRefs(tpl string) []string {
 	}
 }
 
-// Validate refuses anything the renderer could not honour, naming the field.
 func (env *WebhookEnvelope) Validate() error {
 	if env == nil {
 		return nil

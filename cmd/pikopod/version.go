@@ -6,9 +6,6 @@ import (
 	"strings"
 )
 
-// version, commit, and date are stamped by goreleaser via -ldflags.
-// Source builds fill commit/date from VCS build info. `go install`
-// embeds no vcs.* settings, so we fall back to the module version.
 var (
 	version = "dev"
 	commit  = ""
@@ -37,7 +34,7 @@ func resolveVersion(version, commit, date string, settings []debug.BuildSetting,
 		}
 	}
 	if strings.TrimSpace(date) == "" {
-		// vcs.time is the commit timestamp, not the local build time.
+
 		if t := vcsSetting(settings, "vcs.time"); t != "" {
 			date = t
 		}

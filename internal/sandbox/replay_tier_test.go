@@ -36,8 +36,6 @@ func loadRecordings(t *testing.T, recs []proxy.Record) *replay.Set {
 	return set
 }
 
-// The recordings tier answers what neither the spec nor admitted traffic
-// can, names its tier on the response, and NEVER shadows a spec route.
 func TestRecordingsTierServesUnroutablePaths(t *testing.T) {
 	set := loadRecordings(t, []proxy.Record{
 		{Method: "GET", Path: "/balance", Status: 200, RespKind: "json",
@@ -47,7 +45,6 @@ func TestRecordingsTierServesUnroutablePaths(t *testing.T) {
 	})
 	e := newEngine(t, loadWidgets(t), Config{ID: "sbx_rt", Seed: "rt-1", Recordings: set})
 
-	// Unroutable path → served from recordings, tier named.
 	got := do(t, e, "GET", "/balance", "", nil)
 	if got.status != 200 {
 		t.Fatalf("recorded exchange must serve: %d %s", got.status, got.body)
@@ -61,8 +58,6 @@ func TestRecordingsTierServesUnroutablePaths(t *testing.T) {
 		t.Fatalf("recorded body must serve verbatim: %s", got.body)
 	}
 
-	// A path the SPEC declares (/widgets/{id}) is never answered from
-	// recordings — the spec's own 404 for a missing resource stands.
 	specSide := do(t, e, "GET", "/widgets/tok_1", "", nil)
 	if specSide.headers[ReplayTierHeader] != "" {
 		t.Fatal("recordings must never shadow spec routes")
@@ -72,10 +67,8 @@ func TestRecordingsTierServesUnroutablePaths(t *testing.T) {
 	}
 }
 
-// Admitted observed endpoints outrank raw recordings: an admission cleared
-// warmup + presence gates; a recording is a single unvetted exchange.
 func TestObservedEndpointOutranksRecording(t *testing.T) {
-	ov := buildOverlay(t) // admits GET /limits as an observed endpoint
+	ov := buildOverlay(t)
 	eff := contract.ResolveAt(ov, ov.Version)
 	set := loadRecordings(t, []proxy.Record{
 		{Method: "GET", Path: "/limits", Status: 200, RespKind: "json",
@@ -91,8 +84,6 @@ func TestObservedEndpointOutranksRecording(t *testing.T) {
 		t.Fatalf("observed-endpoint responses must not claim a replay tier: %v", got.headers)
 	}
 
-	// A path only the recordings know still falls through to the tier —
-	// with the contract version stamped alongside, one behavioral surface.
 	set2 := loadRecordings(t, []proxy.Record{
 		{Method: "GET", Path: "/balance", Status: 200, RespKind: "json",
 			RespBody: map[string]any{"available": float64(1)}},
@@ -104,8 +95,6 @@ func TestObservedEndpointOutranksRecording(t *testing.T) {
 	}
 }
 
-// A degraded recordings serve names WHY the higher tier missed, and a
-// full miss names the closest RECORDED endpoint on the 404.
 func TestRecordingsTierMissDiagnostics(t *testing.T) {
 	set := loadRecordings(t, []proxy.Record{
 		{Method: "POST", Path: "/transfers", Status: 200, RespKind: "json",
@@ -114,7 +103,6 @@ func TestRecordingsTierMissDiagnostics(t *testing.T) {
 	})
 	e := newEngine(t, loadWidgets(t), Config{ID: "sbx_md", Seed: "md-1", Recordings: set})
 
-	// Same shape, different value → shape tier, missed-on names the field.
 	got := do(t, e, "POST", "/transfers", `{"amount":250,"currency":"NGN"}`, map[string]string{"content-type": "application/json"})
 	if got.headers[ReplayTierHeader] != string(replay.TierShape) {
 		t.Fatalf("tier: %v", got.headers)
@@ -123,7 +111,6 @@ func TestRecordingsTierMissDiagnostics(t *testing.T) {
 		t.Fatalf("shape serve must say why exact missed: %q", missed)
 	}
 
-	// Different field set → sequence tier, +/- field names.
 	got = do(t, e, "POST", "/transfers", `{"amount":100,"reason":"gift"}`, map[string]string{"content-type": "application/json"})
 	if got.headers[ReplayTierHeader] != string(replay.TierSequence) {
 		t.Fatalf("tier: %v", got.headers)
@@ -132,8 +119,6 @@ func TestRecordingsTierMissDiagnostics(t *testing.T) {
 		t.Fatalf("sequence serve must name the field-set gap: %q", missed)
 	}
 
-	// Nothing recorded for the endpoint at all → 404 carries the closest
-	// RECORDED endpoint.
 	got = do(t, e, "POST", "/transfer", "", nil)
 	if got.status != 404 {
 		t.Fatalf("expected miss, got %d", got.status)

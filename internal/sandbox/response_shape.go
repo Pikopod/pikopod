@@ -8,16 +8,12 @@ import (
 	"github.com/pikopod/pikopod/internal/ir"
 )
 
-// responseShape separates the declared response from the resource it carries:
-// slot names the wrapper property when the response is an envelope.
 type responseShape struct {
 	outer *ir.IrSchemaNode
 	inner *ir.IrSchemaNode
 	slot  string
 }
 
-// shapeFor picks the object in the declared response that shares the most
-// property names with the resource's keys; the top level wins ties.
 func shapeFor(schema *ir.IrSchemaNode, keys []string, ctx *synthContext) responseShape {
 	resolved := derefSchema(schema, ctx, 0)
 	shape := responseShape{outer: schema, inner: schema}
@@ -52,8 +48,6 @@ func overlap(schema *ir.IrSchemaNode, want map[string]bool) int {
 	return n
 }
 
-// wrap places the resource into the envelope, synthesizing the fields around
-// it; without a slot the resource is the body.
 func (s responseShape) wrap(resource any, ctx *synthContext) any {
 	if s.slot == "" {
 		return resource
@@ -66,8 +60,6 @@ func (s responseShape) wrap(resource any, ctx *synthContext) any {
 	return outer
 }
 
-// resourceKeys is what the client sent plus what the request schema declares,
-// so an empty body still finds the envelope slot.
 func resourceKeys(provided *JSONObject, requestSchema *ir.IrSchemaNode, ctx *synthContext) []string {
 	var keys []string
 	if provided != nil {
@@ -81,7 +73,6 @@ func resourceKeys(provided *JSONObject, requestSchema *ir.IrSchemaNode, ctx *syn
 	return keys
 }
 
-// wrapStored shapes a stored resource for the endpoint's declared response.
 func (e *Engine) wrapStored(endpoint *ir.Endpoint, status int, raw json.RawMessage, seedParts ...string) any {
 	ctx := e.synthCtx(append([]string{"wrap"}, seedParts...)...)
 	var keys []string
@@ -104,7 +95,6 @@ func parseJSONValueOK(raw json.RawMessage) (*JSONObject, bool) {
 	return obj, ok
 }
 
-// successResponse mirrors successSchema's matching: exact code, then range.
 func successResponse(endpoint *ir.Endpoint, status int) *ir.ResponseDef {
 	code := strconv.Itoa(status)
 	for i := range endpoint.Responses {
@@ -120,8 +110,6 @@ func successResponse(endpoint *ir.Endpoint, status int) *ir.ResponseDef {
 	return nil
 }
 
-// declaredExample returns the spec's JSON example for a node, lowest id first
-// so the choice never depends on document order.
 func (e *Engine) declaredExample(forNodeID string) (any, bool) {
 	var best *ir.Example
 	for i := range e.def.Examples {

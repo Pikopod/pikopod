@@ -11,9 +11,6 @@ import (
 	"github.com/pikopod/pikopod/internal/specdiff"
 )
 
-// The spec-diff handoff must round-trip through the REAL producer
-// serialization — the hand-written fixtures in pr_test.go would stay green
-// across a field rename that breaks the actual pipeline.
 func TestHandoffRoundTripsFromRealProducer(t *testing.T) {
 	fs := []specdiff.Finding{{
 		ID: "endpoint-removed", Level: specdiff.Err, Method: "GET",
@@ -33,8 +30,6 @@ func TestHandoffRoundTripsFromRealProducer(t *testing.T) {
 		}
 	}
 }
-
-// --------------------------------------------------------- GitLab writes
 
 func fakeGitLabServer(t *testing.T, notes *[]map[string]any, failWrites bool) *httptest.Server {
 	t.Helper()
@@ -141,15 +136,13 @@ func TestForgeWriteFailureIsReadOnlyClassified(t *testing.T) {
 	}
 }
 
-// A hostile forge returning a full page forever must be bounded, not an
-// infinite loop + OOM.
 func TestPaginationBounded(t *testing.T) {
 	page := make([]map[string]any, perPage)
 	for i := range page {
 		page[i] = map[string]any{"id": i, "body": "x", "user": map[string]any{"id": 1}}
 	}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		json.NewEncoder(w).Encode(page) // ALWAYS full
+		json.NewEncoder(w).Encode(page)
 	}))
 	defer srv.Close()
 	g := &GitHub{BaseURL: srv.URL, Repo: "o/r", Number: 1, Token: "t"}
@@ -157,8 +150,6 @@ func TestPaginationBounded(t *testing.T) {
 		t.Fatal("unbounded pagination must error out")
 	}
 }
-
-// ------------------------------------------------------------- git guards
 
 func TestGitIsAncestorRefusesOptionLikeArgs(t *testing.T) {
 	if GitIsAncestor("-x", "HEAD") || GitIsAncestor("HEAD", "--upload-pack=/tmp/x") {

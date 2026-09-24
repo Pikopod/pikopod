@@ -60,8 +60,6 @@ var enumRules = map[string][]sanitize.Rule{"examplepay": {
 	{Field: "status", Mode: sanitize.ModeAllow, AllowedValues: []string{"ACTIVE", "PENDING"}},
 }}
 
-// The whole point: a declared uppercase vocabulary reaches disk readably,
-// while the same field carrying an undeclared value is treated as today.
 func TestSpecRulesKeepDeclaredEnumsOnDisk(t *testing.T) {
 	rec := recordOne(t, enumRules, `{"status":"ACTIVE","currency":"NGN","note":"free text"}`, `{"currency":"NGN"}`)
 	body, _ := rec.RespBody.(map[string]any)
@@ -82,7 +80,6 @@ func TestSpecRulesKeepDeclaredEnumsOnDisk(t *testing.T) {
 	}
 }
 
-// No contract, no change: pinned so the fallback stays the safety property.
 func TestNoSpecRulesIsByteIdenticalToToday(t *testing.T) {
 	body := `{"status":"ACTIVE","currency":"NGN","amount":5000}`
 	a := recordOne(t, nil, body, `{}`)

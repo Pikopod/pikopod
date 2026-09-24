@@ -13,14 +13,12 @@ import (
 	"github.com/pikopod/pikopod/internal/proxy"
 )
 
-// A --recordings-fallback sandbox serves the linked upstream's recordings for
-// requests neither the spec nor admitted traffic can answer.
 func TestRecordingsFallbackThroughServer(t *testing.T) {
 	cfg := testConfig(t, "https://example.invalid")
 	if err := sandboxAdd(cfg, "widgets", widgetsSpecPath, "rec-seed-1", "", "", true, io.Discard); err != nil {
 		t.Fatalf("add: %v", err)
 	}
-	// Recordings for the auto-linked upstream (name == "widgets").
+
 	recDir := filepath.Join(cfg.DataDir, "recordings")
 	if err := os.MkdirAll(recDir, 0o700); err != nil {
 		t.Fatal(err)
@@ -57,7 +55,6 @@ func TestRecordingsFallbackThroughServer(t *testing.T) {
 	}
 }
 
-// Without the opt-in the same request 404s: the tier never turns itself on.
 func TestRecordingsFallbackIsOptIn(t *testing.T) {
 	cfg := testConfig(t, "https://example.invalid")
 	if err := sandboxAdd(cfg, "widgets", widgetsSpecPath, "rec-seed-2", "", "", false, io.Discard); err != nil {
@@ -87,8 +84,6 @@ func TestRecordingsFallbackIsOptIn(t *testing.T) {
 	}
 }
 
-// The admin journal surface: what the client sent is inspectable over
-// /_pikopod/sandboxes/<name>/requests, and DELETE resets it.
 func TestAdminRequestJournal(t *testing.T) {
 	cfg := testConfig(t, "https://example.invalid")
 	if err := sandboxAdd(cfg, "widgets", widgetsSpecPath, "adm-seed-1", "", "", false, io.Discard); err != nil {

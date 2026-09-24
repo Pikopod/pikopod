@@ -17,8 +17,6 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// defaultIncidentLimit bounds output. A silently truncated list is the same bug
-// class as a silently empty one, so truncation is always reported.
 const defaultIncidentLimit = 50
 
 func newIncidentsCmd() *cobra.Command {
@@ -94,8 +92,6 @@ func newIncidentsCmd() *cobra.Command {
 	return c
 }
 
-// incidentReport is the JSON projection. total_matching and truncated are
-// mandatory: a silently shortened list reads as a clean bill of health.
 type incidentReport struct {
 	SchemaVersion string             `json:"schema_version"`
 	TotalMatching int                `json:"total_matching"`
@@ -202,14 +198,13 @@ func loadEvents(dataDir string) ([]alert.DriftEvent, error) {
 	f, err := os.Open(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return nil, nil // no events yet is not an error
+			return nil, nil
 		}
 		return nil, errfmt.Newf("cannot read the event log", "check permissions on "+path,
 			"docs/config-reference.md#data_dir", "%v", err)
 	}
 	defer f.Close()
 
-	// Last write wins per fingerprint: occurrence counters only grow.
 	latest := map[string]alert.DriftEvent{}
 	var order []string
 	sc := bufio.NewScanner(f)

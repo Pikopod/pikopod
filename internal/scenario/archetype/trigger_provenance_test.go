@@ -10,8 +10,6 @@ const triggeredSpec = `{"openapi":"3.1.0","info":{"title":"Pay","version":"1"},
 "paths":{"/charges":{"post":{"operationId":"createCharge","responses":{"201":{"description":"created"}}}}},
 "webhooks":{"charge.created":{"post":{"x-pikopod-trigger":{"method":"post","path":"/charges"},"responses":{"200":{"description":"ack"}}}}}}`
 
-// A trigger a person wrote into the spec is an explicit fact; the same text
-// written by the model on a docs import stays extracted.
 func TestUserAuthoredTriggerIsExplicitAndModelWrittenIsNot(t *testing.T) {
 	authored, err := importer.NormalizeOpenAPI([]byte(triggeredSpec))
 	if err != nil {

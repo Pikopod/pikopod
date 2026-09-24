@@ -14,8 +14,6 @@ func oneOf(members ...ir.IrSchemaNode) ir.IrSchemaNode {
 	return ir.IrSchemaNode{Composition: &ir.SchemaComposition{Kind: "oneOf", Members: members}}
 }
 
-// allOf is flattened before diffing: a required property removed from one
-// MEMBER must surface as a normal property finding, not a silent skip.
 func TestAllOfMembersAreDiffed(t *testing.T) {
 	oldEp := ep("GET", "/widgets", with200(allOf(
 		objSchema(prop("id", true, strSchema())),
@@ -48,9 +46,7 @@ func TestOneOfVariantRemovedIsReported(t *testing.T) {
 	oldEp := ep("GET", "/widgets", with200(oneOf(strSchema(), objSchema(), strSchema())))
 	newEp := ep("GET", "/widgets", with200(oneOf(strSchema(), objSchema())))
 	fs := Diff(def(oldEp), def(newEp))
-	// Narrows × Response with tolerance derives INFO by the severity law (the output space
-	// contracts; consumers that handled the shape keep working) — the same
-	// level as response-enum-value-removed.
+
 	f := find(t, fs, "response-variant-removed")
 	if f.Level != Info {
 		t.Fatalf("removed response variant shrinks — INFO by law: %+v", f)
@@ -64,8 +60,6 @@ func TestOneOfVariantAddedIsReported(t *testing.T) {
 	find(t, fs, "response-variant-added")
 }
 
-// A reorder of same-count variants must stay SILENT — member identity is
-// positional and pairwise diffing would flood false findings.
 func TestOneOfReorderIsSilent(t *testing.T) {
 	oldEp := ep("GET", "/widgets", with200(oneOf(strSchema(), objSchema(prop("id", true, strSchema())))))
 	newEp := ep("GET", "/widgets", with200(oneOf(objSchema(prop("id", true, strSchema())), strSchema())))

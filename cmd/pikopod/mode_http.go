@@ -10,16 +10,12 @@ import (
 	"github.com/pikopod/pikopod/internal/scenario/resolve"
 )
 
-// modeRequest names the scenario whose conditioning prefix becomes the
-// sandbox's standing state.
 type modeRequest struct {
 	Name  string            `json:"name"`
 	Seed  string            `json:"seed,omitempty"`
 	Binds map[string]string `json:"bind,omitempty"`
 }
 
-// serveMode puts a RUNNING sandbox into a scenario's standing state, so the
-// developer's own code meets the failure rather than a pack's own requests.
 func (s *sandboxServer) serveMode(w http.ResponseWriter, r *http.Request, name string, engine *sandbox.Engine) {
 	switch r.Method {
 	case http.MethodGet:

@@ -17,25 +17,21 @@ const (
 	maxJournalQueryValues = 64
 )
 
-// JournalEntry is one request the sandbox received, as the client sent it.
 type JournalEntry struct {
 	Seq      int64  `json:"seq"`
 	Method   string `json:"method"`
-	Path     string `json:"path"`               // concrete request path
-	Template string `json:"template,omitempty"` // matched spec template ("" = unrouted)
+	Path     string `json:"path"`
+	Template string `json:"template,omitempty"`
 	Status   int    `json:"status"`
-	// Body is the parsed JSON request body (nil when absent/non-JSON/too
-	// large — see BodyTruncated).
+
 	Body             any               `json:"body,omitempty"`
 	BodyTruncated    bool              `json:"bodyTruncated,omitempty"`
 	Headers          map[string]string `json:"headers,omitempty"`
 	HeadersTruncated bool              `json:"headersTruncated,omitempty"`
-	// Query is the parsed query string. Keys are case-sensitive, so nothing
-	// here is lower-cased.
+
 	Query          map[string][]string `json:"query,omitempty"`
 	QueryTruncated bool                `json:"queryTruncated,omitempty"`
-	// AtMs is the VIRTUAL clock when the request was journaled. Never the wall
-	// clock: transcript parity depends on it.
+
 	AtMs int64 `json:"atMs"`
 }
 
@@ -46,8 +42,6 @@ type journal struct {
 	evicted int64
 }
 
-// journalHeaders redacts BEFORE the journal, not on read: a scenario driven by
-// a real client journals Authorization, Cookie and signature headers.
 func (e *Engine) journalHeaders(h map[string]string) (map[string]string, bool) {
 	if len(h) == 0 {
 		return nil, false
@@ -70,7 +64,6 @@ func (e *Engine) journalHeaders(h map[string]string) (map[string]string, bool) {
 	return out, false
 }
 
-// journalQuery redacts query values the same way, keeping keys case-sensitive.
 func (e *Engine) journalQuery(q map[string][]string) (map[string][]string, bool) {
 	if len(q) == 0 {
 		return nil, false
@@ -82,8 +75,7 @@ func (e *Engine) journalQuery(q map[string][]string) (map[string][]string, bool)
 	if total > maxJournalQueryValues {
 		return nil, true
 	}
-	// One Sanitize walk rather than a hand-rolled mode switch: DROP must drop,
-	// not become a token that looks like data the client sent.
+
 	flat := make(map[string]any, len(q))
 	for k, vs := range q {
 		vals := make([]any, len(vs))
@@ -111,8 +103,6 @@ func (e *Engine) journalQuery(q map[string][]string) (map[string][]string, bool)
 	return out, false
 }
 
-// plainJSON normalizes the ingress parser's internal value types into plain Go
-// JSON values, so journal consumers see ordinary maps and numbers.
 func plainJSON(v any) any {
 	raw, err := marshalJSValue(v)
 	if err != nil {
@@ -138,8 +128,6 @@ func (j *journal) record(entry JournalEntry) {
 	}
 }
 
-// matches compares STRUCTURALLY, so authors write `/widgets/{id}` without
-// knowing the spec's parameter name, and unrouted concrete paths stay countable.
 func (entry *JournalEntry) matches(method, template string) bool {
 	if method != "" && !strings.EqualFold(entry.Method, method) {
 		return false
@@ -163,7 +151,7 @@ func templateSegmentsMatch(query, target string) bool {
 		queryTemplated := strings.Contains(q[i], "{")
 		targetTemplated := strings.Contains(tg[i], "{")
 		if queryTemplated || targetTemplated {
-			continue // a parameter position matches any segment
+			continue
 		}
 		if q[i] != tg[i] {
 			return false
@@ -172,8 +160,6 @@ func templateSegmentsMatch(query, target string) bool {
 	return true
 }
 
-// JournalCount reports whether the journal has ever evicted; the caller decides
-// whether its assertion is still provable.
 func (e *Engine) JournalCount(method, template string) (count int, evicted bool) {
 	e.journal.mu.Lock()
 	defer e.journal.mu.Unlock()
@@ -185,7 +171,6 @@ func (e *Engine) JournalCount(method, template string) (count int, evicted bool)
 	return count, e.journal.evicted > 0
 }
 
-// JournalLast returns the most recent matching entry.
 func (e *Engine) JournalLast(method, template string) (entry *JournalEntry, found, evicted bool) {
 	e.journal.mu.Lock()
 	defer e.journal.mu.Unlock()
@@ -198,8 +183,6 @@ func (e *Engine) JournalLast(method, template string) (entry *JournalEntry, foun
 	return nil, false, e.journal.evicted > 0
 }
 
-// JournalEntries snapshots the newest entries (newest LAST), up to limit
-// (0 = all retained), plus how many older entries were evicted.
 func (e *Engine) JournalEntries(limit int) (entries []JournalEntry, evicted int64) {
 	e.journal.mu.Lock()
 	defer e.journal.mu.Unlock()
@@ -212,8 +195,6 @@ func (e *Engine) JournalEntries(limit int) (entries []JournalEntry, evicted int6
 	return out, e.journal.evicted
 }
 
-// ResetJournal drops all entries AND the eviction taint — an explicit
-// reset declares history irrelevant (a filtered clear would not).
 func (e *Engine) ResetJournal() {
 	e.journal.mu.Lock()
 	defer e.journal.mu.Unlock()
@@ -221,14 +202,12 @@ func (e *Engine) ResetJournal() {
 	e.journal.evicted = 0
 }
 
-// SequenceFields is the subset of a matcher the journal compares against.
 type SequenceFields struct {
 	Method  string
 	Headers map[string]string
 	Query   map[string]string
 }
 
-// MatchesSequence reports whether this entry satisfies every SET field.
 func (entry *JournalEntry) MatchesSequence(f SequenceFields, path string) bool {
 	if !entry.matches(f.Method, path) {
 		return false

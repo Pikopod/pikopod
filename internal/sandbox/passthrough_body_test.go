@@ -9,8 +9,6 @@ import (
 	"github.com/pikopod/pikopod/internal/importer"
 )
 
-// Item-POST and non-CRUD collection methods are the shapes deriveOperation
-// leaves as passthrough; each declares a different tier of response fact.
 const passthroughSpec = `{"openapi":"3.1.0","info":{"title":"P","version":"1"},"paths":{
 "/v1/charges/{id}":{"post":{"responses":{"200":{"description":"ok","content":{"application/json":{
   "schema":{"type":"object","required":["id","captured"],"properties":{"id":{"type":"string"},"captured":{"type":"boolean"}}},
@@ -89,8 +87,6 @@ func TestPassthroughDeterministic(t *testing.T) {
 	}
 }
 
-// A create whose response schema wraps the resource: the resource must land
-// inside the wrapper, and a read-back must show the same shape.
 const wrappedCreateSpec = `{"openapi":"3.1.0","info":{"title":"P","version":"1"},"paths":{
 "/payment-intents":{"post":{
   "requestBody":{"content":{"application/json":{"schema":{"type":"object","properties":{"amount":{"type":"integer"},"currency":{"type":"string"}}}}}},

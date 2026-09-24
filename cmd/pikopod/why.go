@@ -1,5 +1,3 @@
-// `pikopod why` replays a request against an ephemeral fork with the narrator on.
-// Deterministic replay means the trace is the truth, not an approximation.
 package main
 
 import (
@@ -33,8 +31,7 @@ func newWhyCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			// Ephemeral fork over the CURRENT persisted state: replaying here mutates
-			// nothing real, so `why` is always safe to poke with.
+
 			eng, done, err := scenarioEngine(cfg, entry, def, false, 0)
 			if err != nil {
 				return err

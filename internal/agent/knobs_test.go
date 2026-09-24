@@ -18,8 +18,6 @@ import (
 	"github.com/pikopod/pikopod/internal/ir"
 )
 
-// knobAgent runs a full agent against a mutating upstream and returns the
-// sink + data dir. mute/volatile come from the config under test.
 func knobAgent(t *testing.T, upstream *httptest.Server, up config.Upstream) (*captureSink, *Agent, string) {
 	t.Helper()
 	dir := t.TempDir()
@@ -65,7 +63,6 @@ func drive(t *testing.T, a *Agent, n int) {
 	}
 }
 
-// mute: a muted endpoint template still LEARNS but never alerts.
 func TestMuteSuppressesAlerts(t *testing.T) {
 	var mutated atomic.Bool
 	upstream := driftingUpstream(&mutated)
@@ -91,31 +88,28 @@ func TestMuteSuppressesAlerts(t *testing.T) {
 			t.Fatalf("muted template must not log events: %s", raw)
 		}
 	}
-	// Learning still happened: baselines persisted despite the mute.
+
 	if _, err := os.Stat(filepath.Join(dir, "baselines", "prov.json")); err != nil {
 		t.Fatal("muted endpoints must still learn baselines")
 	}
 }
 
-// volatile_fields: a churning field named volatile causes no alerts, while a
-// real drift on the same endpoint still fires.
 func TestVolatileFieldsExcludedFromDrift(t *testing.T) {
 	var mutated atomic.Bool
 	upstream := driftingUpstream(&mutated)
 	defer upstream.Close()
 
 	sink, a, _ := knobAgent(t, upstream, config.Upstream{
-		VolatileFields: []string{"request_ref"}, // churns every response pre-mutation
+		VolatileFields: []string{"request_ref"},
 	})
-	drive(t, a, 10) // request_ref changes every hit; must not prevent freeze or alert
+	drive(t, a, 10)
 	waitFor(t, func() bool { return a.Metrics.RecordingsWritten.Load() >= 10 })
 	if got := sink.n.Load(); got != 0 {
 		t.Fatalf("volatile churn alone must not alert, got %d: %v", got, sink.snapshot())
 	}
 	mutated.Store(true)
 	drive(t, a, 6)
-	// Settle the WHOLE pipeline before reading deliveries: late observers
-	// both race the slice and can add a second fingerprint.
+
 	waitFor(t, func() bool { return a.Metrics.RecordingsWritten.Load() >= 16 && sink.n.Load() >= 1 })
 	joined := strings.Join(sink.snapshot(), "\n")
 	if strings.Contains(joined, "request_ref") {
@@ -126,7 +120,6 @@ func TestVolatileFieldsExcludedFromDrift(t *testing.T) {
 	}
 }
 
-// ack: the /ack endpoint acknowledges a live fingerprint; Active() empties.
 func TestAckEndpoint(t *testing.T) {
 	var mutated atomic.Bool
 	upstream := driftingUpstream(&mutated)
@@ -137,8 +130,7 @@ func TestAckEndpoint(t *testing.T) {
 	waitFor(t, func() bool { return a.Metrics.RecordingsWritten.Load() >= 10 })
 	mutated.Store(true)
 	drive(t, a, 6)
-	// Let the WHOLE pipeline settle: every capture recorded and observed —
-	// otherwise a second fingerprint can alert after the Active() snapshot.
+
 	waitFor(t, func() bool { return a.Metrics.RecordingsWritten.Load() >= 16 && sink.n.Load() >= 1 })
 
 	active := a.Alerter.Active()
@@ -148,15 +140,13 @@ func TestAckEndpoint(t *testing.T) {
 	front := httptest.NewServer(a.Proxy)
 	defer front.Close()
 
-	// GET refused; unknown fp 404s; real fp acks.
 	if resp, _ := http.Get(front.URL + "/ack?fp=" + active[0].Fingerprint); resp.StatusCode != http.StatusMethodNotAllowed {
 		t.Fatalf("GET /ack must 405, got %d", resp.StatusCode)
 	}
 	if resp, _ := http.Post(front.URL+"/ack?fp=fp_nope", "", nil); resp.StatusCode != http.StatusNotFound {
 		t.Fatalf("unknown fp must 404, got %d", resp.StatusCode)
 	}
-	// Ack until drained (bounded): late observer work may mint one more
-	// fingerprint between snapshots.
+
 	for attempt := 0; attempt < 5; attempt++ {
 		for _, ev := range a.Alerter.Active() {
 			resp, err := http.Post(front.URL+"/ack?fp="+ev.Fingerprint, "", nil)
@@ -173,9 +163,6 @@ func TestAckEndpoint(t *testing.T) {
 	}
 }
 
-// accept: the drifted behavior becomes the new baseline — further drifted
-// traffic generates ZERO findings (not merely deduped alerts), closing the
-// permanent overlay/baseline divergence.
 func TestAcceptRefreezesBaseline(t *testing.T) {
 	var mutated atomic.Bool
 	upstream := driftingUpstream(&mutated)
@@ -201,15 +188,13 @@ func TestAcceptRefreezesBaseline(t *testing.T) {
 	}
 
 	emittedBefore := a.EventsEmitted.Load()
-	drive(t, a, 8) // still drifted — but drifted IS the baseline now
+	drive(t, a, 8)
 	waitFor(t, func() bool { return a.Metrics.RecordingsWritten.Load() >= 24 })
 	if a.EventsEmitted.Load() != emittedBefore {
 		t.Fatalf("accepted drift must generate ZERO new findings, got %d more", a.EventsEmitted.Load()-emittedBefore)
 	}
 }
 
-// refine.enabled: the full pipeline grows a traffic overlay with journaled
-// admissions for fields the spec never declared — the refiner's acceptance.
 func TestRefinementLearnsUndeclaredField(t *testing.T) {
 	var mutated atomic.Bool
 	upstream := driftingUpstream(&mutated)
@@ -227,8 +212,7 @@ func TestRefinementLearnsUndeclaredField(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Spec declares id/status/amount only — fee_bearer arrives post-mutation
-	// and request_ref was never declared either.
+
 	def, err := importer.NormalizeOpenAPI([]byte(`{
 	  "openapi": "3.0.0", "info": {"title": "p", "version": "1"},
 	  "paths": {"/tx": {"get": {"responses": {"200": {"description": "ok", "content": {"application/json": {"schema": {
@@ -241,10 +225,10 @@ func TestRefinementLearnsUndeclaredField(t *testing.T) {
 	a.SetContracts(map[string]*ir.ApiDefinition{"prov": def})
 	startPipeline(t, a)
 
-	mutated.Store(true) // fee_bearer present from the start
+	mutated.Store(true)
 	drive(t, a, 12)
 	waitFor(t, func() bool { return a.Metrics.RecordingsWritten.Load() >= 12 })
-	a.persistAll() // admission pass + overlay persist
+	a.persistAll()
 
 	raw, err := os.ReadFile(filepath.Join(dir, "apis", "prov.observed.json"))
 	if err != nil {

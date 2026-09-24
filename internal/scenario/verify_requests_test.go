@@ -7,9 +7,6 @@ import (
 	"testing"
 )
 
-// VERIFY_REQUESTS: client-behavior verification against the sandbox's
-// request journal — count by template (param names structural), and body
-// claims on the last matching request.
 func TestVerifyRequestsAssertions(t *testing.T) {
 	def := parseDef(t, `{
 	  "steps": [
@@ -33,8 +30,6 @@ func TestVerifyRequestsAssertions(t *testing.T) {
 		t.Fatalf("verification must pass: %s (%s)", res.Status, res.Summary)
 	}
 
-	// The negative direction: a wrong count FAILS the run — this is the
-	// "did the app double-charge?" assertion doing its job.
 	defWrong := parseDef(t, `{
 	  "steps": [
 	    {"key": "c1", "type": "REQUEST",
@@ -53,14 +48,11 @@ func TestVerifyRequestsAssertions(t *testing.T) {
 	}
 }
 
-// Fail-closed: once the journal has evicted, upper-bound count assertions
-// FAIL with an honest message — never a silent false green; lower bounds
-// (gte) remain provable and pass.
 func TestVerifyRequestsFailsClosedOnEviction(t *testing.T) {
 	eng := runnerEngine(t, "vr-evict")
 	srv := httptest.NewServer(eng)
 	defer srv.Close()
-	// Overflow the journal ring directly through the serving path.
+
 	for i := 0; i < 1030; i++ {
 		rec := httptest.NewRecorder()
 		req := httptest.NewRequest("GET", fmt.Sprintf("/widgets/w_%04d", i), nil)

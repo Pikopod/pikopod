@@ -11,8 +11,6 @@ import (
 	"github.com/pikopod/pikopod/internal/importer"
 )
 
-// wallclockEngine: widgets engine served over a REAL TCP listener, so an
-// actual net/http client (with its real timeout machinery) is on the wire.
 func wallclockServer(t *testing.T) (*Engine, *httptest.Server) {
 	t.Helper()
 	e := newEngine(t, loadWidgets(t), Config{ID: "sbx_wall", Seed: "wall-1"})
@@ -21,9 +19,6 @@ func wallclockServer(t *testing.T) (*Engine, *httptest.Server) {
 	return e, srv
 }
 
-// THE claim under test: with a wallclock latency fault armed, a real HTTP
-// client with a short timeout ACTUALLY times out — and with the default
-// virtualized mode, the same fault costs nothing.
 func TestWallclockLatencyTripsRealClientTimeout(t *testing.T) {
 	e, srv := wallclockServer(t)
 	e.ArmFault(FaultRule{Method: "GET", Path: "/widgets", Kind: "latency", DelayMs: 3000, Probability: 1, Wallclock: true})
@@ -41,7 +36,6 @@ func TestWallclockLatencyTripsRealClientTimeout(t *testing.T) {
 		t.Fatalf("client should give up at ITS timeout, not the fault's: %v", elapsed)
 	}
 
-	// Same fault, VIRTUALIZED (default): instant, annotated, deterministic.
 	e2 := newEngine(t, loadWidgets(t), Config{ID: "sbx_virt", Seed: "wall-1"})
 	srv2 := httptest.NewServer(e2)
 	defer srv2.Close()
@@ -60,7 +54,6 @@ func TestWallclockLatencyTripsRealClientTimeout(t *testing.T) {
 	}
 }
 
-// hang: hold, then drop the connection with no response.
 func TestWallclockHangDropsConnection(t *testing.T) {
 	e, srv := wallclockServer(t)
 	e.ArmFault(FaultRule{Method: "GET", Path: "/widgets", Kind: "hang", DelayMs: 5000, Probability: 1, Wallclock: true})
@@ -70,8 +63,6 @@ func TestWallclockHangDropsConnection(t *testing.T) {
 	}
 }
 
-// slow_body: headers arrive immediately; the body dribbles — a client whose
-// timeout covers the whole exchange dies mid-read.
 func TestWallclockSlowBodyStallsBodyRead(t *testing.T) {
 	e, srv := wallclockServer(t)
 	e.ArmFault(FaultRule{Method: "GET", Path: "/widgets", Kind: "slow_body", DelayMs: 2000, Probability: 1, Wallclock: true})
@@ -90,8 +81,6 @@ func TestWallclockSlowBodyStallsBodyRead(t *testing.T) {
 	}
 }
 
-// delay-then-error: an error fault with DelayMs and wallclock sleeps first,
-// then serves the error — the slow-500 shape.
 func TestWallclockDelayThenError(t *testing.T) {
 	e, srv := wallclockServer(t)
 	e.ArmFault(FaultRule{Method: "GET", Path: "/widgets", Kind: "error", Status: 500, DelayMs: 400, Probability: 1, Wallclock: true})
@@ -109,21 +98,17 @@ func TestWallclockDelayThenError(t *testing.T) {
 	}
 }
 
-// The global engine switch: rules WITHOUT the per-rule flag act on the wire
-// when Config.WallclockFaults is on (`up --wallclock-faults`).
 func TestWallclockGlobalConfig(t *testing.T) {
 	e := newEngine(t, loadWidgets(t), Config{ID: "sbx_gwall", Seed: "wall-1", WallclockFaults: true})
 	srv := httptest.NewServer(e)
 	defer srv.Close()
-	e.ArmFault(FaultRule{Method: "GET", Path: "/widgets", Kind: "latency", DelayMs: 3000, Probability: 1}) // no per-rule flag
+	e.ArmFault(FaultRule{Method: "GET", Path: "/widgets", Kind: "latency", DelayMs: 3000, Probability: 1})
 	client := &http.Client{Timeout: 250 * time.Millisecond}
 	if _, err := client.Get(srv.URL + "/widgets"); err == nil {
 		t.Fatal("global wallclock mode must apply to every fault")
 	}
 }
 
-// A DRAFT/LLM_EXTRACTED contract still ENFORCES its auth — honesty about
-// provenance must not weaken the simulation (the IsGuess/IsUncertain split).
 func TestLLMExtractedContractStillEnforces(t *testing.T) {
 	def, err := importer.NormalizeLLMExtracted([]byte(runnerLikeLLMSpec))
 	if err != nil {

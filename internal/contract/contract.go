@@ -1,5 +1,3 @@
-// Package contract is the traffic overlay layered beside the spec-derived IR.
-// Admissions are journaled and versioned, so ResolveAt reproduces any version.
 package contract
 
 import (
@@ -19,7 +17,6 @@ import (
 	"github.com/pikopod/pikopod/internal/proxy"
 )
 
-// Caps mirror the baseline discipline: bounded under hostile upstreams.
 const (
 	maxEndpoints      = 500
 	maxFieldsPerKey   = 2000
@@ -28,16 +25,14 @@ const (
 	maxAdmissions     = 5000
 )
 
-// ObservedField is one field's accumulated traffic evidence.
 type ObservedField struct {
-	Seen    int64            `json:"seen"`             // records containing the field
-	Samples int64            `json:"samples"`          // records for the endpoint while tracked
-	Types   map[string]int64 `json:"types,omitempty"`  // ALLOW-mode only
-	Values  map[string]int64 `json:"values,omitempty"` // ALLOW-mode strings only, capped
-	// HighCardinality latches when Values exceeds the cap; values reset.
+	Seen    int64            `json:"seen"`
+	Samples int64            `json:"samples"`
+	Types   map[string]int64 `json:"types,omitempty"`
+	Values  map[string]int64 `json:"values,omitempty"`
+
 	HighCardinality bool `json:"highCardinality,omitempty"`
-	// Redactions counts non-ALLOW sightings per mode — evidence the field
-	// exists even though its content never reached disk.
+
 	Redactions map[string]int64 `json:"redactions,omitempty"`
 }
 
@@ -48,7 +43,6 @@ func (f *ObservedField) PresenceRate() float64 {
 	return float64(f.Seen) / float64(f.Samples)
 }
 
-// ObservedEndpoint accumulates per (method, template, statusClass).
 type ObservedEndpoint struct {
 	Method      string                    `json:"method"`
 	Template    string                    `json:"template"`
@@ -58,22 +52,19 @@ type ObservedEndpoint struct {
 	LastSeen    time.Time                 `json:"lastSeen"`
 	Fields      map[string]*ObservedField `json:"fields,omitempty"`
 	StatusCodes map[string]int64          `json:"statusCodes,omitempty"`
-	FieldsLatch bool                      `json:"fieldsLatch,omitempty"` // maxFieldsPerKey hit
+	FieldsLatch bool                      `json:"fieldsLatch,omitempty"`
 }
 
-// AdmissionKind enumerates the ways traffic changes the effective contract.
 type AdmissionKind string
 
 const (
-	AdmitField    AdmissionKind = "field"    // undeclared field joins the contract
-	AdmitValue    AdmissionKind = "value"    // observed enum value joins a field
-	AdmitType     AdmissionKind = "type"     // traffic-wins type override (gated)
-	AdmitStatus   AdmissionKind = "status"   // undeclared status code
-	AdmitEndpoint AdmissionKind = "endpoint" // undeclared endpoint template
+	AdmitField    AdmissionKind = "field"
+	AdmitValue    AdmissionKind = "value"
+	AdmitType     AdmissionKind = "type"
+	AdmitStatus   AdmissionKind = "status"
+	AdmitEndpoint AdmissionKind = "endpoint"
 )
 
-// Admission is one journaled change to the effective contract. The journal
-// is append-only; Version is monotonic across the whole overlay.
 type Admission struct {
 	Version     int           `json:"version"`
 	Kind        AdmissionKind `json:"kind"`
@@ -83,34 +74,30 @@ type Admission struct {
 	Field       string        `json:"field,omitempty"`
 	Value       string        `json:"value,omitempty"`
 	Type        string        `json:"type,omitempty"`
-	// Presence at admission time (confidence for the resolved Prov).
+
 	Presence float64   `json:"presence,omitempty"`
 	At       time.Time `json:"at"`
-	// SourceKey is the traffic-form overlay key the admission came from — how
-	// ResolveAt finds observed stats when Template is the spec's spelling.
+
 	SourceKey string `json:"sourceKey,omitempty"`
 }
 
-// Contradiction records spec-vs-traffic disagreement. Never auto-erased:
-// `pikopod contract` shows both sides.
 type Contradiction struct {
 	Method      string    `json:"method"`
 	Template    string    `json:"template"`
 	StatusClass string    `json:"statusClass"`
 	Field       string    `json:"field"`
-	SpecClaim   string    `json:"specClaim"` // e.g. declared type
-	Observed    string    `json:"observed"`  // dominant observed type
-	Rate        float64   `json:"rate"`      // fraction of ALLOW samples agreeing with Observed
+	SpecClaim   string    `json:"specClaim"`
+	Observed    string    `json:"observed"`
+	Rate        float64   `json:"rate"`
 	FirstSeen   time.Time `json:"firstSeen"`
-	// Winner: "traffic" (gates cleared, admitted) or "spec" (still gated).
+
 	Winner string `json:"winner"`
 }
 
-// Overlay is the persisted traffic half of the behavioral model.
 type Overlay struct {
 	Upstream       string                       `json:"upstream"`
-	Version        int                          `json:"version"`   // last admitted version
-	Endpoints      map[string]*ObservedEndpoint `json:"endpoints"` // key: METHOD|template|class
+	Version        int                          `json:"version"`
+	Endpoints      map[string]*ObservedEndpoint `json:"endpoints"`
 	Admissions     []Admission                  `json:"admissions"`
 	Contradictions []Contradiction              `json:"contradictions,omitempty"`
 	UpdatedAt      time.Time                    `json:"updatedAt"`
@@ -120,22 +107,18 @@ func endpointKey(method, template, statusClass string) string {
 	return strings.ToUpper(method) + "|" + template + "|" + statusClass
 }
 
-// Refiner grows the overlay from the sanitized record stream — a SIBLING of the
-// drift learner, never a reader of its state. Admission gates run on Persist.
 type Refiner struct {
 	mu      sync.Mutex
 	overlay *Overlay
 	guard   *pathtmpl.Guard
 	path    string
-	// Gates (config): an endpoint may admit only after warmup, and a field
-	// only at sufficient presence.
+
 	minSamples    int
 	minAge        time.Duration
 	presenceFloor float64
 	now           func() time.Time
 }
 
-// NewRefiner loads or starts the overlay for one upstream.
 func NewRefiner(upstream, dataDir string, minSamples int, minAge time.Duration) *Refiner {
 	r := &Refiner{
 		overlay:       &Overlay{Upstream: upstream, Endpoints: map[string]*ObservedEndpoint{}},
@@ -155,8 +138,6 @@ func NewRefiner(upstream, dataDir string, minSamples int, minAge time.Duration) 
 	return r
 }
 
-// LoadOverlay reads a persisted overlay (nil, nil when none exists) — the
-// renderer's entry point; it never needs a live Refiner.
 func LoadOverlay(dataDir, upstream string) (*Overlay, error) {
 	raw, err := os.ReadFile(filepath.Join(dataDir, "apis", upstream+".observed.json"))
 	if err != nil {
@@ -174,8 +155,6 @@ func LoadOverlay(dataDir, upstream string) (*Overlay, error) {
 
 func (r *Refiner) SetClock(now func() time.Time) { r.now = now }
 
-// Observe folds one sanitized record into the overlay stats. It NEVER
-// admits — admission is a separate, journaled act (Admit).
 func (r *Refiner) Observe(rec *proxy.Record) {
 	if rec.RespKind != "json" {
 		return
@@ -206,8 +185,6 @@ func (r *Refiner) Observe(rec *proxy.Record) {
 	ep.LastSeen = r.now()
 	ep.StatusCodes[itoa(rec.Status)]++
 
-	// Sanitizer-aware: surviving fields teach presence (ALLOW also type+value) and
-	// redaction pointers teach it for content that never reached disk.
 	seen := map[string]bool{}
 	walkFields(rec.RespBody, "", func(path string, value any) {
 		f := r.fieldFor(ep, path)
@@ -217,7 +194,7 @@ func (r *Refiner) Observe(rec *proxy.Record) {
 		seen[path] = true
 		f.Seen++
 		if !isAllowedVerbatim(path, rec) {
-			return // tokenized/etc: presence only
+			return
 		}
 		t := jsonTypeOf(value)
 		if f.Types == nil {
@@ -253,7 +230,7 @@ func (r *Refiner) Observe(rec *proxy.Record) {
 		}
 		f.Redactions[red.Mode]++
 	}
-	// Samples per field lag endpoint samples from when tracking began.
+
 	for _, f := range ep.Fields {
 		f.Samples++
 	}
@@ -272,7 +249,6 @@ func (r *Refiner) fieldFor(ep *ObservedEndpoint, path string) *ObservedField {
 	return f
 }
 
-// Persist writes the overlay atomically (0600).
 func (r *Refiner) Persist() error {
 	r.mu.Lock()
 	r.overlay.UpdatedAt = r.now()
@@ -311,13 +287,11 @@ func statusClass(status int) string {
 
 func itoa(n int) string {
 	if n < 100 || n > 999 {
-		return "0" // status codes only; anything else is a caller bug
+		return "0"
 	}
 	return strconv.Itoa(n)
 }
 
-// walkFields visits every leaf with dotted paths; array elements collapse to
-// "[]" like baseline.Flatten so lists of objects share field identity.
 func walkFields(node any, path string, visit func(path string, value any)) {
 	switch n := node.(type) {
 	case map[string]any:
@@ -339,8 +313,6 @@ func walkFields(node any, path string, visit func(path string, value any)) {
 	}
 }
 
-// isAllowedVerbatim: was the value stored as the provider sent it? True unless a
-// redaction pointer covers it (pointers use "/", field paths "." — normalize).
 func isAllowedVerbatim(fieldPath string, rec *proxy.Record) bool {
 	needle := "/" + strings.ReplaceAll(fieldPath, ".", "/")
 	for _, red := range rec.Redacted {
@@ -366,7 +338,6 @@ func jsonTypeOf(v any) string {
 	}
 }
 
-// sortedKeys for deterministic iteration in admission passes.
 func sortedKeys[V any](m map[string]V) []string {
 	return slices.Sorted(maps.Keys(m))
 }

@@ -1,5 +1,3 @@
-// from-drift: DriftEvent → pinned-baseline scenario → immediate replay. The pack
-// lands in <data_dir>/scenarios so it keeps running in CI after this one-shot.
 package main
 
 import (

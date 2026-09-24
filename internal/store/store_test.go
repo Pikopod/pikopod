@@ -11,12 +11,10 @@ type row struct {
 	N int `json:"n"`
 }
 
-// Rotation is drop-oldest with at most two generations: disk stays bounded
-// however long the agent runs (recording must never fill the disk).
 func TestNDJSONRotationDropOldest(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "log.ndjson")
-	// Each row ~10 bytes; cap at ~5 rows per generation.
+
 	nd, err := OpenNDJSON(path, 50)
 	if err != nil {
 		t.Fatal(err)
@@ -27,7 +25,7 @@ func TestNDJSONRotationDropOldest(t *testing.T) {
 			t.Fatalf("append %d: %v", i, err)
 		}
 	}
-	// Exactly two generations, both bounded.
+
 	cur, err := os.Stat(path)
 	if err != nil {
 		t.Fatal(err)
@@ -43,7 +41,7 @@ func TestNDJSONRotationDropOldest(t *testing.T) {
 	if len(entries) != 2 {
 		t.Fatalf("at most two generations may exist: %v", entries)
 	}
-	// The current generation holds the NEWEST rows.
+
 	last, err := nd.ReadLast(1)
 	if err != nil || len(last) != 1 {
 		t.Fatalf("ReadLast: %v %v", last, err)
@@ -55,11 +53,9 @@ func TestNDJSONRotationDropOldest(t *testing.T) {
 	}
 }
 
-// ReadLast returns the most-recent records, honors the limit, and never
-// hands back a torn (newline-less) tail line as if it were complete.
 func TestNDJSONReadLast(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "log.ndjson")
-	nd, err := OpenNDJSON(path, 0) // 0 = no rotation
+	nd, err := OpenNDJSON(path, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -68,7 +64,6 @@ func TestNDJSONReadLast(t *testing.T) {
 	}
 	nd.Close()
 
-	// Simulate a crash mid-write: a torn tail with no newline.
 	f, _ := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0o600)
 	f.WriteString(`{"n":`)
 	f.Close()
@@ -88,9 +83,6 @@ func TestNDJSONReadLast(t *testing.T) {
 	}
 }
 
-// The salt is created 0600, stays byte-stable across loads (tokens must
-// keep correlating), and loudly refuses group/other-readable files and
-// truncated content instead of silently weakening tokenization.
 func TestSaltLifecycle(t *testing.T) {
 	path := filepath.Join(t.TempDir(), ".salt")
 	s1, err := LoadOrCreateSalt(path)

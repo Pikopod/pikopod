@@ -1,5 +1,3 @@
-// Recording exports (curl, HAR 1.2). Everything exported is POST-SANITIZER —
-// tokens and placeholders, never raw payloads — which is what makes it safe.
 package main
 
 import (
@@ -14,7 +12,6 @@ import (
 	"github.com/pikopod/pikopod/internal/proxy"
 )
 
-// renderCurl renders one sanitized record as curl against the upstream's real base URL.
 func renderCurl(out io.Writer, target string, rec *proxy.Record) {
 	var b strings.Builder
 	b.WriteString("curl -X " + rec.Method + " " + shellQuote(strings.TrimRight(target, "/")+rec.Path))
@@ -30,7 +27,6 @@ func renderCurl(out io.Writer, target string, rec *proxy.Record) {
 	fmt.Fprintf(out, "# %s → %d (%dms)\n%s\n\n", rec.TS.Format(time.RFC3339), rec.Status, rec.DurMS, b.String())
 }
 
-// harArchive renders records as a minimal valid HAR 1.2 document.
 func harArchive(target string, records []*proxy.Record) map[string]any {
 	entries := make([]any, 0, len(records))
 	for _, rec := range records {
@@ -85,8 +81,6 @@ func sortedHeaderKeys(h map[string]any) []string {
 	return slices.Sorted(maps.Keys(h))
 }
 
-// shellQuote single-quotes for POSIX shells (the only metacharacter inside
-// single quotes is the single quote itself).
 func shellQuote(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }

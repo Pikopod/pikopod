@@ -1,5 +1,3 @@
-// Executes a store operation for a matched endpoint. CRUD mechanics only — no
-// inferred relationship or state-machine enforcement (behaviour overlay, deferred).
 package sandbox
 
 import (
@@ -15,7 +13,6 @@ import (
 	"github.com/pikopod/pikopod/internal/ir"
 )
 
-// QuotaLimits bounds one sandbox's resource usage.
 type QuotaLimits struct {
 	MaxResources     int64
 	MaxStorageBytes  int64
@@ -36,7 +33,6 @@ type idemRecord struct {
 	body        []byte
 }
 
-// storeCtx carries one matched request through the CRUD handlers.
 type storeCtx struct {
 	endpoint   *ir.Endpoint
 	op         operation
@@ -74,7 +70,6 @@ func requestSchema(endpoint *ir.Endpoint) *ir.IrSchemaNode {
 
 var slugPattern = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
 
-// typeSlug: last static segment of a type path `/a/b/posts` → `posts`.
 func typeSlug(typ string) string {
 	parts := pathSegments(typ)
 	if len(parts) == 0 {
@@ -87,8 +82,6 @@ func typeSlug(typ string) string {
 	return "res"
 }
 
-// synthCtx builds a synthesis context seeded so a DETERMINISTIC sandbox
-// replays byte-for-byte; a NONDETERMINISTIC one mixes in a crypto nonce.
 func (e *Engine) synthCtx(parts ...string) *synthContext {
 	base := e.seed + ":" + strings.Join(parts, ":")
 	if !e.deterministic {
@@ -99,8 +92,6 @@ func (e *Engine) synthCtx(parts ...string) *synthContext {
 	return makeContext(base, e.virtualClockMs, e.namedSchemas)
 }
 
-// endpointError synthesizes the endpoint's declared error schema, else the
-// neutral `{ message }`.
 func (e *Engine) endpointError(ctx *storeCtx, status int, message string) *RawResponse {
 	if schema := errorSchema(ctx.endpoint, status); schema != nil {
 		synth := e.synthCtx("error", strconv.Itoa(status))
@@ -124,7 +115,7 @@ func (e *Engine) execute(ctx *storeCtx) (*RawResponse, error) {
 	case opDelete:
 		return e.doRemove(ctx)
 	default:
-		// Should not reach here (passthrough handled upstream), but stay safe.
+
 		return buildErrorResponse(404, "Not Found", nil), nil
 	}
 }
@@ -136,8 +127,7 @@ func (e *Engine) doRead(ctx *storeCtx) (*RawResponse, error) {
 		return e.endpointError(ctx, 404, "Not Found"), nil
 	}
 	if err != nil {
-		// Checked BEFORE the trace below: a non-NotFound store error leaves r
-		// nil, and tracing r.Version would panic per-request.
+
 		return nil, err
 	}
 	e.tracef("store", "read %s/%s (version %d)", ctx.op.typ, *ctx.op.key, r.Version)
@@ -164,7 +154,7 @@ func (e *Engine) doList(ctx *storeCtx) (*RawResponse, error) {
 	body := shapeListBody(successSchema(ctx.endpoint, 200), items, synth)
 	headers := map[string]string{}
 	if page.NextCursorKey != nil {
-		// Standard, provider-neutral cursor surface: a Link header, rel="next".
+
 		q := "limit=" + strconv.Itoa(limit) + "&cursor=" + encodeCursor(*page.NextCursorKey)
 		headers["link"] = "<" + e.mountPrefix + ctx.innerPath + "?" + q + `>; rel="next"`
 	}
@@ -181,15 +171,13 @@ func (e *Engine) doCreate(ctx *storeCtx) (*RawResponse, error) {
 		return e.validationErrorResponse(ctx, invalid), nil
 	}
 
-	// Idempotency replay: a repeated key returns the original response.
 	key := ctx.req.header("idempotency-key")
 	reqHash, err := e.hashRequest(ctx)
 	if err != nil {
 		return nil, err
 	}
 	if key != nil {
-		// Replay check and post-create record are ONE critical section, else
-		// concurrent same-key creates both miss the cache and both create.
+
 		e.idemMu.Lock()
 		defer e.idemMu.Unlock()
 		if replay := e.idempotentReplayLocked(*key, reqHash); replay != nil {
@@ -203,8 +191,7 @@ func (e *Engine) doCreate(ctx *storeCtx) (*RawResponse, error) {
 	}
 	resourceKey := typeSlug(ctx.op.typ) + "_" + strconv.FormatInt(seq, 10)
 	status := pickSuccessStatus(ctx.endpoint, 201)
-	// Synthesized server fields fill gaps the client left; the client's values
-	// always win; canonical `id` is the synthesized key (RESOURCE mode only).
+
 	synth := e.synthCtx("create", resourceKey)
 	shape := shapeFor(successSchema(ctx.endpoint, status), resourceKeys(attrs, requestSchema(ctx.endpoint), synth), synth)
 	stored := completeResource(shape.inner, attrs, synth, !ctx.isResource)
@@ -212,7 +199,6 @@ func (e *Engine) doCreate(ctx *storeCtx) (*RawResponse, error) {
 		stored.Set("id", resourceKey)
 	}
 
-	// Enforce quotas BEFORE inserting, so a rejected create leaves no trace.
 	marshaled, err := marshalJSValue(stored)
 	if err != nil {
 		return nil, err
@@ -229,13 +215,12 @@ func (e *Engine) doCreate(ctx *storeCtx) (*RawResponse, error) {
 	if err != nil {
 		return nil, err
 	}
-	// Outbox only after the insert committed, so an error path above never
-	// emits a webhook.
+
 	e.enqueueWebhookFor(ctx.endpoint, webhookActionCreated, typeSlug(ctx.op.typ), json.RawMessage(created.Attributes))
 
 	response := jsonResponse(status, shape.wrap(json.RawMessage(created.Attributes), synth), map[string]string{"etag": etagFor(created.Version)})
 	if key != nil {
-		e.recordIdempotencyLocked(*key, reqHash, response) // idemMu held since the replay check
+		e.recordIdempotencyLocked(*key, reqHash, response)
 	}
 	return response, nil
 }
@@ -253,8 +238,6 @@ func (e *Engine) doModify(ctx *storeCtx) (*RawResponse, error) {
 	expectedVersion := parseIfMatch(ctx.req.header("if-match"))
 	reqAttrs := attrs
 
-	// CAS on the version READ even without If-Match, so concurrent merge-PATCHes
-	// compose; a CAS miss re-merges (bounded), or is the client's 412 if If-Match.
 	const maxModifyRetries = 4
 	for attempt := 0; ; attempt++ {
 		current, err := e.store.GetOne(e.id, ctx.op.typ, *ctx.op.key)
@@ -268,7 +251,7 @@ func (e *Engine) doModify(ctx *storeCtx) (*RawResponse, error) {
 			return e.endpointError(ctx, 412, "Precondition Failed"), nil
 		}
 		if ctx.op.kind == opMerge {
-			// Shallow merge over the stored attributes (JS object spread).
+
 			parsed, err := parseJSONValue(string(current.Attributes))
 			if err != nil {
 				return nil, err
@@ -284,11 +267,11 @@ func (e *Engine) doModify(ctx *storeCtx) (*RawResponse, error) {
 			}
 			attrs = merged
 		} else {
-			// Replace: re-complete absent declared fields from the response schema.
+
 			synth := e.synthCtx("replace", *ctx.op.key, strconv.FormatInt(current.Version+1, 10))
 			attrs = completeResource(successSchema(ctx.endpoint, 200), reqAttrs, synth, false)
 		}
-		// Preserve the resource's identity across the write.
+
 		attrs.Set("id", *ctx.op.key)
 
 		marshaled, err := marshalJSValue(attrs)
@@ -310,7 +293,7 @@ func (e *Engine) doModify(ctx *storeCtx) (*RawResponse, error) {
 		}
 		if errors.Is(err, ErrConflict) {
 			if expectedVersion == nil && attempt < maxModifyRetries {
-				continue // a concurrent writer advanced the version: re-read, re-merge
+				continue
 			}
 			return e.endpointError(ctx, 412, "Precondition Failed"), nil
 		}
@@ -331,7 +314,7 @@ func (e *Engine) doRemove(ctx *storeCtx) (*RawResponse, error) {
 	if !ok {
 		return e.endpointError(ctx, 404, "Not Found"), nil
 	}
-	// On remove, the deleted event carries only { id }.
+
 	deleted := NewJSONObject()
 	deleted.Set("id", *ctx.op.key)
 	e.enqueueWebhookFor(ctx.endpoint, webhookActionDeleted, typeSlug(ctx.op.typ), deleted)
@@ -359,7 +342,7 @@ func objectBody(req *ingressRequest) (*JSONObject, *RawResponse) {
 }
 
 func validationError(errs []string) *RawResponse {
-	// Neutral, non-platform shape; field messages only, no internal codes.
+
 	body := NewJSONObject()
 	body.Set("message", "Validation failed")
 	items := make([]any, len(errs))
@@ -371,12 +354,8 @@ func validationError(errs []string) *RawResponse {
 	return &RawResponse{Status: 400, Headers: map[string]string{"content-type": jsonContentType}, Body: serialized}
 }
 
-// validationErrorLadder: most specific first, so a spec declaring its own 422
-// or 400 shape gets THAT shape back and clients parse provider-shaped errors.
 var validationErrorLadder = []int{422, 400}
 
-// validationErrorResponse prefers the PROVIDER'S declared error shape, else the
-// neutral pikopod shape, which keeps transcript parity byte-identical.
 func (e *Engine) validationErrorResponse(ctx *storeCtx, errs []string) *RawResponse {
 	var resp *RawResponse
 	for _, status := range validationErrorLadder {
@@ -395,10 +374,8 @@ func (e *Engine) validationErrorResponse(ctx *storeCtx, errs []string) *RawRespo
 	return resp
 }
 
-// violationsHeader carries the violation list whatever body shape was negotiated.
 const violationsHeader = "x-pikopod-violations"
 
-// Oversized headers silently 502 behind proxies.
 const maxViolationsHeaderBytes = 8*1024 - 100
 
 func renderViolations(errs []string) string {
@@ -431,7 +408,6 @@ func (e *Engine) hashRequest(ctx *storeCtx) (string, error) {
 	return hex.EncodeToString(sum[:]), nil
 }
 
-// idempotentReplayLocked requires idemMu held (see doCreate).
 func (e *Engine) idempotentReplayLocked(key, reqHash string) *RawResponse {
 	existing, ok := e.idem[key]
 	if !ok {
@@ -447,14 +423,12 @@ func (e *Engine) idempotentReplayLocked(key, reqHash string) *RawResponse {
 	}
 }
 
-// recordIdempotencyLocked requires idemMu held (see doCreate).
 func (e *Engine) recordIdempotencyLocked(key, reqHash string, response *RawResponse) {
 	body := response.Body
 	if body == nil {
 		body = []byte("")
 	}
-	// Unbounded, a local client could exhaust memory. Eviction is arbitrary:
-	// idempotency replay is a convenience window, not a ledger.
+
 	if len(e.idem) >= maxIdemEntries {
 		for k := range e.idem {
 			delete(e.idem, k)
@@ -464,7 +438,6 @@ func (e *Engine) recordIdempotencyLocked(key, reqHash string, response *RawRespo
 	e.idem[key] = idemRecord{requestHash: reqHash, status: response.Status, body: body}
 }
 
-// quotaGuard maps a quota breach to a mirrored client error.
 func (e *Engine) quotaGuard(resourceBytes, projectedCount, projectedBytes int64) *RawResponse {
 	if resourceBytes > e.quota.MaxResourceBytes {
 		return buildErrorResponse(413, "Payload Too Large", nil)

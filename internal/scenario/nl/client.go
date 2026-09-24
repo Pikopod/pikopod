@@ -11,7 +11,6 @@ import (
 	"github.com/pikopod/pikopod/internal/errfmt"
 )
 
-// systemInstruction is the scenario.fromDescription registry entry, verbatim.
 const systemInstruction = "You map a developer API-testing request onto ONE archetype from the supplied inventory. " +
 	"Choose an archetype whose id appears in inventory.archetypes and fill bindings for each " +
 	"required role using ONLY operation ids from inventory.operations or event names from " +
@@ -19,7 +18,6 @@ const systemInstruction = "You map a developer API-testing request onto ONE arch
 	"you could not express into unmappedIntent (required). Optionally add up to five extra " +
 	"assertions on stable fields; for volatile fields (ids, timestamps) use matcher operators."
 
-// buildSystemPrompt renders the system prompt for one instruction.
 func buildSystemPrompt(instruction string) string {
 	return strings.Join([]string{
 		"You are an API-analysis assistant.",
@@ -35,7 +33,6 @@ func buildSystemPrompt(instruction string) string {
 
 var untrustedDelimRe = regexp.MustCompile(`(?i)</?untrusted>`)
 
-// wrapUntrusted neutralizes delimiter smuggling.
 func wrapUntrusted(content string) string {
 	safe := untrustedDelimRe.ReplaceAllString(content, "[removed-delimiter]")
 	return "<untrusted>\n" + safe + "\n</untrusted>"
@@ -43,8 +40,6 @@ func wrapUntrusted(content string) string {
 
 var fencedRe = regexp.MustCompile("```(?:json)?\\s*([\\s\\S]*?)```")
 
-// safeJSONParse tolerates code fences and prose around the JSON object;
-// nil when no object can be extracted.
 func safeJSONParse(text string) any {
 	candidate := text
 	if m := fencedRe.FindStringSubmatch(text); m != nil {
@@ -62,9 +57,6 @@ func safeJSONParse(text string) any {
 	return out
 }
 
-// Client owns the provider-neutral prompt/validation pipeline. The exported
-// transport fields are retained for the existing OpenRouter callers and tests;
-// configurable providers receive them immediately before each completion.
 type Client struct {
 	provider Provider
 
@@ -76,15 +68,10 @@ type Client struct {
 	HTTPClient *http.Client
 }
 
-// NewClient preserves the historical OpenRouter constructor. Callers with an
-// explicit llm.provider use NewClientForProvider instead.
 func NewClient(apiKey, model string) *Client {
 	return NewClientForProvider(DefaultProviderName, apiKey, model)
 }
 
-// NewClientForProvider builds a client over a registered provider. Invalid
-// names are retained as a provider error so callers keep the historical
-// no-error constructor shape; normal config loading rejects them earlier.
 func NewClientForProvider(name, apiKey, model string) *Client {
 	resolvedName := normalizeProviderName(name)
 	p, err := NewProvider(resolvedName, ProviderOptions{APIKey: apiKey, Model: model})
@@ -102,8 +89,6 @@ func NewClientForProvider(name, apiKey, model string) *Client {
 	return c
 }
 
-// NewClientWithProvider is the no-network seam used by tests and future
-// provider implementations.
 func NewClientWithProvider(p Provider) *Client {
 	c := &Client{provider: p}
 	if configurable, ok := p.(configurableProvider); ok {
@@ -148,8 +133,6 @@ func (c *Client) complete(ctx context.Context, systemPrompt, userPrompt string) 
 	return c.provider.Complete(ctx, systemPrompt, userPrompt)
 }
 
-// CompleteJSON runs one delimiter-hardened completion over an UNTRUSTED payload
-// and returns the JSON object the model emitted (fenced or bare), retrying once.
 func (c *Client) CompleteJSON(ctx context.Context, instruction, untrustedPayload string) (any, error) {
 	system := buildSystemPrompt(instruction)
 	user := wrapUntrusted(untrustedPayload)
@@ -165,8 +148,6 @@ func (c *Client) CompleteJSON(ctx context.Context, instruction, untrustedPayload
 	return nil, errfmt.New("the model produced no parseable JSON", "two attempts both failed", "retry, or try another llm.model", "docs/config-reference.md#llm")
 }
 
-// CompleteIntent runs the full pipeline: payload → delimited prompt → model →
-// JSON-extract → strict intent parse, with one retry on an invalid output.
 func (c *Client) CompleteIntent(ctx context.Context, description string, inv *Inventory) (*Intent, error) {
 	payload := map[string]any{"description": description, "inventory": inv}
 	payloadJSON, err := json.Marshal(payload)

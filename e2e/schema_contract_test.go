@@ -12,12 +12,6 @@ import (
 	"github.com/pikopod/pikopod/internal/alert"
 )
 
-// schema/drift-event.schema.json is the PUBLISHED wire contract for the one
-// event pikopod emits. Nothing else in the build ties it to the Go struct, so
-// a field added to alert.DriftEvent would silently ship an event the documented
-// schema rejects (it is additionalProperties:false). This test is that tie:
-// property set, required set (derived from `omitempty`), and the version const
-// must all track the struct exactly.
 func TestDriftEventSchemaMatchesStruct(t *testing.T) {
 	raw, err := os.ReadFile(filepath.Join("..", "schema", "drift-event.schema.json"))
 	if err != nil {
@@ -35,8 +29,6 @@ func TestDriftEventSchemaMatchesStruct(t *testing.T) {
 		t.Fatalf("unexpected schema title %q", doc.Title)
 	}
 
-	// Walk the struct's JSON tags: every emitted key, and which of them are
-	// unconditionally emitted (no omitempty) and therefore always present.
 	var props, required []string
 	rt := reflect.TypeOf(alert.DriftEvent{})
 	for i := 0; i < rt.NumField(); i++ {
@@ -65,8 +57,6 @@ func TestDriftEventSchemaMatchesStruct(t *testing.T) {
 	assertSameSet(t, "properties", props, schemaProps)
 	assertSameSet(t, "required", required, doc.Required)
 
-	// schema_version's const is the protocol number; it must be the one the
-	// producer actually stamps on every event.
 	var sv struct {
 		Const string `json:"const"`
 	}

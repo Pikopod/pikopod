@@ -8,8 +8,6 @@ import (
 	"unicode/utf8"
 )
 
-// boundedJSONParser is a bounded recursive-descent JSON parser: native parsers
-// give no depth/node cap and vary on duplicate keys, so determinism needs one.
 type boundedJSONParser struct {
 	s      string
 	i      int
@@ -75,7 +73,7 @@ func (p *boundedJSONParser) parseValue(depth int) (any, error) {
 }
 
 func (p *boundedJSONParser) parseObject(depth int) (any, error) {
-	p.i++ // {
+	p.i++
 	out := NewOrdMap()
 	p.skipWs()
 	if p.i < len(p.s) && p.s[p.i] == '}' {
@@ -121,7 +119,7 @@ func (p *boundedJSONParser) parseObject(depth int) (any, error) {
 }
 
 func (p *boundedJSONParser) parseArray(depth int) (any, error) {
-	p.i++ // [
+	p.i++
 	out := []any{}
 	p.skipWs()
 	if p.i < len(p.s) && p.s[p.i] == ']' {
@@ -151,14 +149,13 @@ func (p *boundedJSONParser) parseArray(depth int) (any, error) {
 }
 
 func (p *boundedJSONParser) parseString() (string, error) {
-	p.i++ // opening quote
+	p.i++
 	var b strings.Builder
-	// pendingHigh buffers a UTF-16 high surrogate from a \u escape so a
-	// following low surrogate combines into one rune, as JS strings do.
+
 	var pendingHigh rune = -1
 	flushPending := func() {
 		if pendingHigh >= 0 {
-			b.WriteRune(utf8.RuneError) // lone surrogate has no UTF-8 form
+			b.WriteRune(utf8.RuneError)
 			pendingHigh = -1
 		}
 	}

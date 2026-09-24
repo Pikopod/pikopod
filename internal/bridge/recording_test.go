@@ -68,8 +68,6 @@ func stepOfType(t *testing.T, pack map[string]any, typ string) map[string]any {
 	return nil
 }
 
-// The whole point: a recorded failure becomes a scenario that arms the same
-// failure and replays the same request.
 func TestBuildFromRecordArmsTheRecordedFailure(t *testing.T) {
 	rec := &proxy.Record{
 		TS: time.Now(), Upstream: "examplepay", Method: "POST",
@@ -107,8 +105,6 @@ func TestBuildFromRecordArmsTheRecordedFailure(t *testing.T) {
 	}
 }
 
-// Every pack must say the request was reconstructed from redacted data.
-// Silence here invites someone to treat a token as the original value.
 func TestBuildFromRecordAlwaysDeclaresRedactedProvenance(t *testing.T) {
 	rec := &proxy.Record{TS: time.Now(), Method: "POST", Path: "/charges", Status: 500}
 	_, pack, err := BuildFromRecord(incidentEvent(drift.UpstreamError, "/charges", "500"), rec, 0)
@@ -121,8 +117,6 @@ func TestBuildFromRecordAlwaysDeclaresRedactedProvenance(t *testing.T) {
 	}
 }
 
-// An unreachable upstream is a dead socket, not a status. Reproducing it as a
-// 502 would exercise the wrong branch of the caller's error handling.
 func TestUnreachableReproducesAsConnectionReset(t *testing.T) {
 	rec := &proxy.Record{TS: time.Now(), Method: "POST", Path: "/charges", Status: 502}
 	ev := incidentEvent(drift.UpstreamUnreachable, "/charges", "502")
@@ -152,8 +146,6 @@ func TestRateLimitedReproducesAsRateLimitFault(t *testing.T) {
 	}
 }
 
-// A shape change is not reproducible this way, and saying so beats producing a
-// scenario that arms a fault for something that never failed.
 func TestBuildFromRecordRefusesShapeDrift(t *testing.T) {
 	rec := &proxy.Record{TS: time.Now(), Method: "GET", Path: "/charges", Status: 200}
 	ev := incidentEvent(drift.FieldRemoved, "/charges", "")
@@ -168,8 +160,6 @@ func TestBuildFromRecordRefusesShapeDrift(t *testing.T) {
 	}
 }
 
-// The reason from-recording is simpler than from-drift: the recording has the
-// concrete path, so multiple and non-trailing parameters are not a limitation.
 func TestFindRecordingHandlesMultipleAndNonTrailingParameters(t *testing.T) {
 	dir := t.TempDir()
 	writeRecordings(t, dir, "examplepay",
@@ -187,7 +177,6 @@ func TestFindRecordingHandlesMultipleAndNonTrailingParameters(t *testing.T) {
 	}
 }
 
-// Most recent wins, and only genuinely matching recordings are candidates.
 func TestFindRecordingPicksMostRecentMatch(t *testing.T) {
 	dir := t.TempDir()
 	old := time.Now().Add(-time.Hour)
@@ -195,9 +184,9 @@ func TestFindRecordingPicksMostRecentMatch(t *testing.T) {
 	writeRecordings(t, dir, "examplepay",
 		proxy.Record{TS: old, Method: "POST", Path: "/charges", Status: 503},
 		proxy.Record{TS: recent, Method: "POST", Path: "/charges", Status: 503},
-		proxy.Record{TS: time.Now(), Method: "POST", Path: "/charges", Status: 200}, // wrong status
-		proxy.Record{TS: time.Now(), Method: "GET", Path: "/charges", Status: 503},  // wrong method
-		proxy.Record{TS: time.Now(), Method: "POST", Path: "/refunds", Status: 503}, // wrong path
+		proxy.Record{TS: time.Now(), Method: "POST", Path: "/charges", Status: 200},
+		proxy.Record{TS: time.Now(), Method: "GET", Path: "/charges", Status: 503},
+		proxy.Record{TS: time.Now(), Method: "POST", Path: "/refunds", Status: 503},
 	)
 	rec, err := FindRecording(dir, incidentEvent(drift.UpstreamError, "/charges", "503"))
 	if err != nil {
@@ -208,9 +197,6 @@ func TestFindRecordingPicksMostRecentMatch(t *testing.T) {
 	}
 }
 
-// An aged-out recording is a typed refusal naming retention, never a
-// synthesised request. Fabricating one would produce a scenario that passes and
-// means nothing.
 func TestFindRecordingRefusesWhenAgedOut(t *testing.T) {
 	dir := t.TempDir()
 	writeRecordings(t, dir, "examplepay",
@@ -245,9 +231,6 @@ func TestPathFitsTemplate(t *testing.T) {
 	}
 }
 
-// A 4xx is usually caused by the body, and the body we have is the redacted
-// one. The scenario must say so, or someone debugs a rejection against a
-// payload their code never sent.
 func TestClientErrorNoteWarnsThatTheBodyIsRedacted(t *testing.T) {
 	rec := &proxy.Record{TS: time.Now(), Method: "POST", Path: "/charges", Status: 422,
 		ReqKind: "json", ReqBody: map[string]any{"amount": float64(5000)}}
@@ -264,9 +247,6 @@ func TestClientErrorNoteWarnsThatTheBodyIsRedacted(t *testing.T) {
 	}
 }
 
-// The floor exists so a single 4xx cannot clear the rate on its own. At 10 it
-// could: 1/10 is 10%, over the 5% default. This pins the arithmetic, not the
-// constant, so lowering the floor breaks the test that explains why.
 func TestClientErrorFloorCannotBeClearedByOneError(t *testing.T) {
 	floor := config.ClientErrorFloor()
 	const defaultRate = 0.05

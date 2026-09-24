@@ -15,10 +15,6 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// These tests pin every command's refusal paths and the in-process happy
-// paths. Each runs the real RunE with cwd pinned to a scratch config.
-
-// cliDir writes a pikopod.yaml + data dir and chdirs there.
 func cliDir(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -69,7 +65,7 @@ func TestSandboxUpdateRefusesUnknownName(t *testing.T) {
 }
 
 func TestImportUpdateRefreshesPin(t *testing.T) {
-	// Resolve the fixture ABSOLUTELY before chdir moves cwd to the temp dir.
+
 	spec, err := filepath.Abs("../../testdata/parity/sandbox/widgets.spec.json")
 	if err != nil {
 		t.Fatal(err)

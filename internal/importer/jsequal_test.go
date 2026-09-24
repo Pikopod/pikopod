@@ -2,10 +2,6 @@ package importer
 
 import "testing"
 
-// Regression: jsEqual on uncomparable operands panicked the whole
-// import ("comparing uncomparable type []interface {}") — reachable from a
-// parseable Swagger 2.0 doc whose path-level AND op-level parameter give
-// "name"/"in" non-scalar values.
 func TestJsEqualNeverPanicsOnUncomparables(t *testing.T) {
 	if jsEqual([]any{"a"}, []any{"a"}) {
 		t.Fatal("non-scalars have no identity")
@@ -35,6 +31,6 @@ func TestSwagger2NonScalarParamIdentityDoesNotPanic(t *testing.T) {
     }
   }
 }`
-	// Malformed identity fields must fail (or import degraded) — NEVER panic.
+
 	_, _ = NormalizeOpenAPI([]byte(doc))
 }

@@ -5,8 +5,6 @@ import (
 	"testing"
 )
 
-// Extensions are not covered by the parity goldens (those iterate Catalogue),
-// so the claims each extension archetype makes are pinned here instead.
 func extensionByID(t *testing.T, id string) *Archetype {
 	t.Helper()
 	for i := range Extensions {
@@ -52,9 +50,6 @@ func assertsTarget(step map[string]any, target string) bool {
 	return false
 }
 
-// Both failing requests must prove the fault actually applied, the way
-// declines and timeouts do. A 503 that arrived for some other reason would
-// otherwise satisfy the archetype.
 func TestDowntimeRecoveryProvesTheFaultApplied(t *testing.T) {
 	a := extensionByID(t, "downtime_recovery")
 	for _, key := range []string{"down", "still-down"} {
@@ -64,7 +59,6 @@ func TestDowntimeRecoveryProvesTheFaultApplied(t *testing.T) {
 	}
 }
 
-// Recovery must be shown to follow the outage window, not merely to succeed.
 func TestDowntimeRecoveryProvesTheOutageWindow(t *testing.T) {
 	a := extensionByID(t, "downtime_recovery")
 	step := stepByKey(t, a, "outage-shape")

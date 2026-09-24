@@ -31,12 +31,10 @@ type Binding struct {
 	Applicable bool        `json:"applicable"`
 	Reason     string      `json:"reason,omitempty"`
 	Candidates []Candidate `json:"candidates,omitempty"`
-	// Inferred lists candidates refused only because every fact is extracted;
-	// the user can assert one with --bind.
+
 	Inferred []Candidate `json:"inferred,omitempty"`
 }
 
-// Info says what a resolved archetype rests on, so the caller can tell the user.
 type Info struct {
 	UsesInferred bool
 	Asserted     []string
@@ -174,7 +172,6 @@ func ResolveDetailed(def *ir.ApiDefinition, name string, opts Options) (*scenari
 		return nil, nil, errfmt.New("no candidate binding grounds", fmt.Sprintf("%s: %s", name, firstErr), "check --bind overrides name operations from `scenario list`", "scenarios/README.md")
 	}
 
-	// Not an archetype: a saved pack, by name or path.
 	if strings.HasSuffix(name, ".yaml") || strings.HasSuffix(name, ".yml") {
 		pack, err := scenario.LoadPack(name)
 		if err != nil {
@@ -190,8 +187,6 @@ func ResolveDetailed(def *ir.ApiDefinition, name string, opts Options) (*scenari
 	return nil, nil, errfmt.New("unknown scenario", fmt.Sprintf("%q is neither an archetype nor a saved pack", name), "see `pikopod scenario list <sandbox>` for archetypes, scenarios/ for packs", "scenarios/README.md")
 }
 
-// Note is the short clause a caller prints when a run rests on facts the user
-// asserted rather than the spec declared; empty when nothing was inferred.
 func (i *Info) Note() string {
 	if i == nil || !i.UsesInferred {
 		return ""

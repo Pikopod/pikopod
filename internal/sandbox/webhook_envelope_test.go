@@ -17,9 +17,6 @@ import (
 	"github.com/pikopod/pikopod/internal/importer"
 )
 
-// A provider-documented scheme: HMAC-SHA256 over timestamp+payload with a
-// base64-decoded key, base64 output, carried in the body beside a stringified
-// payload. Written independently of the engine, exactly as a handler would.
 const providerSigningKeyB64 = "c2VjcmV0LWtleQ=="
 
 const bodyEnvelope = `"x-pikopod-webhook-envelope": {
@@ -118,8 +115,6 @@ func decodedKey(t *testing.T) []byte {
 	return key
 }
 
-// The headline claim of the feature: a handler written against the provider's
-// own documentation accepts the delivery unmodified.
 func TestSinkDeliverySatisfiesTheProvidersValidator(t *testing.T) {
 	def, err := importer.NormalizeOpenAPI([]byte(envelopeSpec(t, bodyEnvelope)))
 	if err != nil {
@@ -222,8 +217,6 @@ func TestDecodeSigningKey(t *testing.T) {
 	}
 }
 
-// A prose-extracted spec often types the payload "unknown"; the delivery must
-// still be an object the envelope can carry, not a synthesized scalar.
 const unknownPayloadSpec = `{"openapi":"3.1.0","info":{"title":"Pay","version":"1"},
 "paths":{"/transactions":{"post":{"responses":{"201":{"description":"created"}}}}},
 "x-pikopod-webhook-envelope":{
@@ -284,8 +277,6 @@ func TestSinkRecordsTheLastFailure(t *testing.T) {
 	}
 }
 
-// Without wrap, the bytes on the wire are the outbox payload verbatim, so a
-// handler signing over what it received agrees with the sandbox.
 func TestUnwrappedBodyIsSentVerbatim(t *testing.T) {
 	spec := strings.Replace(unknownPayloadSpec, `"wrap":{"timestamp":"{{now_rfc3339}}","payload":"{{json_string body}}"},`, `"headers":{"x-examplepay-timestamp":"{{timestamp}}"},`, 1)
 	spec = strings.Replace(spec, `"content":"{{timestamp}}{{payload}}"`, `"content":"{{timestamp}}.{{body}}"`, 1)

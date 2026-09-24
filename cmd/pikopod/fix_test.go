@@ -14,7 +14,6 @@ import (
 	"github.com/pikopod/pikopod/internal/drift"
 )
 
-// writeFixEvent seeds one drift event into <dir>/data/events.ndjson.
 func writeFixEvent(t *testing.T, dir string, ev alert.DriftEvent) {
 	t.Helper()
 	os.MkdirAll(filepath.Join(dir, "data"), 0o700)
@@ -36,8 +35,6 @@ func fixEvent() alert.DriftEvent {
 	}
 }
 
-// fakeOpenRouter serves one canned chat completion whose content is the given
-// JSON proposal.
 func fakeOpenRouter(t *testing.T, proposal string) *httptest.Server {
 	t.Helper()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -68,8 +65,6 @@ func TestFixRefusesUnknownFingerprint(t *testing.T) {
 	}
 }
 
-// A literal, case-sensitive scan cannot tell "unused" from "spelled differently",
-// so zero impacts must be UNVERIFIABLE (exit 2), never a clean exit 0.
 func TestFixNoImpactsIsUnverifiableNotClean(t *testing.T) {
 	dir := cliDir(t)
 	writeFixEvent(t, dir, fixEvent())
@@ -81,14 +76,12 @@ func TestFixNoImpactsIsUnverifiableNotClean(t *testing.T) {
 	if !strings.Contains(err.Error(), "UNVERIFIABLE") {
 		t.Fatalf("the refusal must name itself UNVERIFIABLE, got: %v", err)
 	}
-	// The user must be told WHY the scan can miss, or they will read it as proof.
+
 	if !strings.Contains(err.Error(), "accountNumber") {
 		t.Fatalf("the refusal must explain the renaming blind spot, got: %v", err)
 	}
 }
 
-// The camelCase blind spot: the drift names account_number, the client spells it
-// accountNumber, a literal scan sees nothing — this MUST refuse, never pass.
 func TestFixCamelCaseClientIsNotReportedClean(t *testing.T) {
 	dir := cliDir(t)
 	writeFixEvent(t, dir, fixEvent())
@@ -116,7 +109,7 @@ func TestFixRefusesWithoutKeyAfterScan(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "LLM key") {
 		t.Fatalf("%v", err)
 	}
-	// The deterministic half still ran and named the impacted file.
+
 	if !strings.Contains(out, "client.go") {
 		t.Fatalf("impact scan output missing: %s", out)
 	}

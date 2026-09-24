@@ -15,7 +15,6 @@ import (
 	"github.com/pikopod/pikopod/internal/config"
 )
 
-// widgetsSpecPath is the same spec the transcript parity suite uses.
 const widgetsSpecPath = "../../testdata/parity/sandbox/widgets.spec.json"
 
 func testConfig(t *testing.T, upstreamTarget string) *config.Config {
@@ -33,8 +32,6 @@ func testConfig(t *testing.T, upstreamTarget string) *config.Config {
 	return cfg
 }
 
-// The per-subsystem panic boundary: a panicking sandbox handler 500s ONE caller,
-// the process survives, and the agent proxy on the other port keeps serving.
 func TestSandboxPanicRecovery_AgentUnaffected(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -44,7 +41,6 @@ func TestSandboxPanicRecovery_AgentUnaffected(t *testing.T) {
 
 	cfg := testConfig(t, upstream.URL)
 
-	// Register a real sandbox through the CLI path.
 	if err := sandboxAdd(cfg, "widgets", widgetsSpecPath, "panic-seed-1", "", "", false, io.Discard); err != nil {
 		t.Fatalf("sandbox add: %v", err)
 	}
@@ -54,8 +50,7 @@ func TestSandboxPanicRecovery_AgentUnaffected(t *testing.T) {
 		t.Fatalf("sandbox server: %v", err)
 	}
 	defer sbx.Close()
-	// Inject a panicking route beside the real sandbox — the crafted-fault
-	// stand-in for any bug inside a sandbox handler.
+
 	sbx.handlers["boom"] = http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
 		panic("injected sandbox fault")
 	})
@@ -63,7 +58,6 @@ func TestSandboxPanicRecovery_AgentUnaffected(t *testing.T) {
 	sandboxSrv := httptest.NewServer(sbx)
 	defer sandboxSrv.Close()
 
-	// The agent proxy serves on its own listener ("the other port").
 	a, err := agent.New(cfg, alert.Options{})
 	if err != nil {
 		t.Fatalf("agent: %v", err)
@@ -71,7 +65,6 @@ func TestSandboxPanicRecovery_AgentUnaffected(t *testing.T) {
 	agentSrv := httptest.NewServer(a.Proxy)
 	defer agentSrv.Close()
 
-	// 1. Commit state in the real sandbox.
 	res, err := http.Post(sandboxSrv.URL+"/widgets/widgets", "application/json", strings.NewReader(`{"name":"gear","size":3}`))
 	if err != nil {
 		t.Fatal(err)
@@ -81,7 +74,6 @@ func TestSandboxPanicRecovery_AgentUnaffected(t *testing.T) {
 		t.Fatalf("create = %d %v, want 201 widgets_1", res.StatusCode, created)
 	}
 
-	// 2. The injected fault: one mirrored 500, nothing else.
 	res, err = http.Get(sandboxSrv.URL + "/boom/anything")
 	if err != nil {
 		t.Fatalf("panic must not kill the connection: %v", err)
@@ -91,7 +83,6 @@ func TestSandboxPanicRecovery_AgentUnaffected(t *testing.T) {
 		t.Fatalf("panic answer = %d %v, want mirrored 500", res.StatusCode, body)
 	}
 
-	// 3. The agent proxy on the other port is untouched.
 	res, err = http.Get(agentSrv.URL + "/fake/ping")
 	if err != nil {
 		t.Fatal(err)
@@ -101,7 +92,6 @@ func TestSandboxPanicRecovery_AgentUnaffected(t *testing.T) {
 	}
 	res.Body.Close()
 
-	// 4. The sandbox recovered — committed state only, still readable.
 	res, err = http.Get(sandboxSrv.URL + "/widgets/widgets/widgets_1")
 	if err != nil {
 		t.Fatal(err)
@@ -111,7 +101,6 @@ func TestSandboxPanicRecovery_AgentUnaffected(t *testing.T) {
 		t.Fatalf("post-panic read = %d %v, want the committed resource", res.StatusCode, got)
 	}
 
-	// 5. Unknown sandbox name stays a mirrored 404 (no envelope, no crash).
 	res, err = http.Get(sandboxSrv.URL + "/ghost/x")
 	if err != nil {
 		t.Fatal(err)
@@ -121,8 +110,6 @@ func TestSandboxPanicRecovery_AgentUnaffected(t *testing.T) {
 	}
 }
 
-// TestSandboxRegistryCLI covers add/list/reset round-trips through the same
-// helpers the cobra commands call.
 func TestSandboxRegistryCLI(t *testing.T) {
 	cfg := testConfig(t, "https://example.invalid")
 
@@ -141,7 +128,6 @@ func TestSandboxRegistryCLI(t *testing.T) {
 		t.Fatalf("list output missing fields: %q", list.String())
 	}
 
-	// The IR must be persisted where the registry says it is.
 	entries, err := loadRegistry(cfg.DataDir)
 	if err != nil || len(entries) != 1 {
 		t.Fatalf("registry: %v %v", entries, err)
@@ -153,7 +139,6 @@ func TestSandboxRegistryCLI(t *testing.T) {
 		t.Fatalf("entry not deterministic/sbx_: %+v", entries[0])
 	}
 
-	// State written through the server is dropped by reset.
 	sbx, err := newSandboxServer(cfg)
 	if err != nil {
 		t.Fatal(err)
@@ -193,8 +178,6 @@ func TestSandboxRegistryCLI(t *testing.T) {
 		t.Fatalf("after reset list = %v (err %v), want empty", listBody, err)
 	}
 
-	// --webhook-url: refused unless http(s); persisted in the registry entry
-	// (handlerFor passes it into the engine as the delivery sink).
 	if err := sandboxAdd(cfg, "hooked", widgetsSpecPath, "cli-seed-2", "ftp://nope", "", false, io.Discard); err == nil {
 		t.Fatal("non-http(s) webhook url must be refused")
 	}

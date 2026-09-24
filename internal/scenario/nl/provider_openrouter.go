@@ -15,10 +15,8 @@ import (
 	"github.com/pikopod/pikopod/internal/errfmt"
 )
 
-// DefaultBaseURL is the OpenRouter API base.
 const DefaultBaseURL = "https://openrouter.ai/api/v1"
 
-// DefaultModel is used when pikopod.yaml sets no llm.model.
 const DefaultModel = "openai/gpt-4o-mini"
 
 const requestTimeout = 60 * time.Second
@@ -75,7 +73,6 @@ func (p *openRouterProvider) providerOptions() ProviderOptions {
 	}
 }
 
-// ErrNoKey is the contract error for a missing OpenRouter BYOK key.
 func ErrNoKey() error {
 	return errfmt.New(
 		"plain-English scenario drafting is disabled",
@@ -166,8 +163,6 @@ func (p *openRouterProvider) Complete(ctx context.Context, systemPrompt, userPro
 	return parsed.Choices[0].Message.Content, nil
 }
 
-// readStream accumulates SSE deltas into the completion text. A server that
-// ignored stream:true and answered plain JSON is parsed as a normal completion.
 func (p *openRouterProvider) readStream(body io.Reader) (string, error) {
 	return readChatStream(body, "OpenRouter")
 }

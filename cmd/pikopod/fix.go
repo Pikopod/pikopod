@@ -1,5 +1,3 @@
-// `pikopod fix <fingerprint>` — drift becomes a code change: scan → LLM patch →
-// check → PR. Without --pr edits stay in the working tree, inspectable first.
 package main
 
 import (
@@ -57,8 +55,7 @@ func newFixCmd() *cobra.Command {
 				return errfmt.Newf("impact scan failed", "check --dir points at your repository", "docs/config-reference.md#fix", "%v", err)
 			}
 			if len(impacts) == 0 {
-				// UNVERIFIABLE, never clean: the scan matches source text literally, so
-				// exiting 0 here would hand CI a green gate on a silent miss.
+
 				return errfmt.New(
 					"impact for "+ev.Fingerprint+" is UNVERIFIABLE",
 					"the scan matches source text literally and case-sensitively and found no occurrence of "+strings.Join(terms, ", ")+" under "+dir+" — a client that renames the field (accountNumber for account_number), indexes it dynamically, or forwards the payload untouched is invisible to it",
@@ -183,8 +180,6 @@ func newFixCmd() *cobra.Command {
 	return c
 }
 
-// runCheck executes the user's verification command through their shell,
-// streaming its output — a failing check is the user's signal, show it whole.
 func runCheck(dir, check string, stderr io.Writer) error {
 	cmd := exec.Command("sh", "-c", check)
 	cmd.Dir = dir
@@ -193,7 +188,6 @@ func runCheck(dir, check string, stderr io.Writer) error {
 	return cmd.Run()
 }
 
-// runCmdIn is runCmd with a working directory (the fix's --dir repo).
 func runCmdIn(dir string, argv []string) error {
 	cmd := exec.Command(argv[0], argv[1:]...)
 	cmd.Dir = dir

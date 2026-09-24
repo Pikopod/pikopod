@@ -1,5 +1,3 @@
-// Chaos CLI: arms failure conditions on a RUNNING sandbox. It speaks only to the
-// local sandbox admin surface, so no flag could ever name production.
 package main
 
 import (
@@ -110,7 +108,7 @@ func newChaosCmd() *cobra.Command {
 					rule.DelayMs = 30000
 				}
 			}
-			// Webhook rules match on the event, never method/path.
+
 			if !sandbox.IsWebhookFaultKind(kind) && (rule.Method == "" || rule.Path == "") {
 				return errfmt.New("chaos needs a target operation", "pass --method and --path (the endpoint's path template)", "e.g. pikopod chaos "+sandboxName+" --kind error --status 503 --method POST --path /transaction", "")
 			}

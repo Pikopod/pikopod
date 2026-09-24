@@ -1,5 +1,3 @@
-// Auth enforcement: only EXPLICIT/DERIVED schemes, only issued `pikopod_sbx_test_`
-// tokens. Issuance is seed-derived because this engine has no control plane.
 package sandbox
 
 import (
@@ -13,11 +11,8 @@ import (
 	"github.com/pikopod/pikopod/internal/ir"
 )
 
-// SandboxCredentialPrefix marks issued test tokens — never a real secret.
 const SandboxCredentialPrefix = "pikopod_sbx_test_"
 
-// SandboxWebhookSecretPrefix marks issued signing secrets. Deliberately not a
-// provider's prefix: it must authenticate like one, never look like one.
 const SandboxWebhookSecretPrefix = "pikopod_sbx_whsec_"
 
 func hashToken(token string) string {
@@ -25,12 +20,10 @@ func hashToken(token string) string {
 	return hex.EncodeToString(sum[:])
 }
 
-// deriveCredential mints the sandbox's deterministic issued token.
 func deriveCredential(seed string) string {
 	return SandboxCredentialPrefix + NewPrng(seed+":credential").Hex(48)
 }
 
-// entropyPerChar is Shannon entropy in bits per character (over code points).
 func entropyPerChar(value string) float64 {
 	freq := map[rune]int{}
 	total := 0
@@ -80,21 +73,17 @@ func looksLikeOpaqueSecret(value string) bool {
 	return (classes >= 2 && entropyPerChar(value) >= 3.2) || (longRun && entropyPerChar(value) >= 3.8)
 }
 
-// looksLikeRealSecret distinguishes a real, sensitive credential from a benign
-// test token.
 func looksLikeRealSecret(value string) bool {
 	v := strings.TrimSpace(value)
 	if len(v) == 0 {
 		return false
 	}
 	if strings.HasPrefix(v, SandboxCredentialPrefix) {
-		return false // our own token
+		return false
 	}
 	return looksLikeJwt(v) || looksLikeOpaqueSecret(v)
 }
 
-// isEnforceableScheme: only apiKey (with a known parameter name) and HTTP
-// bearer/basic are simulated; provenance must be trusted (not INFERRED/LLM).
 func isEnforceableScheme(scheme *ir.AuthScheme) bool {
 	switch scheme.Kind.Value {
 	case "apiKey":
@@ -111,7 +100,6 @@ func isEnforceableScheme(scheme *ir.AuthScheme) bool {
 
 var wsSplit = regexp.MustCompile(`\s+`)
 
-// extractCredential pulls the presented credential for a scheme (nil = absent).
 func extractCredential(scheme *ir.AuthScheme, req *ingressRequest) *string {
 	if scheme.Kind.Value == "apiKey" {
 		if scheme.ParameterName == nil {
@@ -135,7 +123,7 @@ func extractCredential(scheme *ir.AuthScheme, req *ingressRequest) *string {
 		}
 		return nil
 	}
-	// http bearer / basic
+
 	auth := req.header("authorization")
 	if auth == nil {
 		return nil
@@ -165,14 +153,13 @@ func extractCredential(scheme *ir.AuthScheme, req *ingressRequest) *string {
 		colon := strings.Index(decoded, ":")
 		out := decoded
 		if colon != -1 {
-			out = decoded[colon+1:] // the password half
+			out = decoded[colon+1:]
 		}
 		return &out
 	}
 	return nil
 }
 
-// lenientBase64 tolerates missing padding; an undecodable input yields "".
 func lenientBase64(s string) string {
 	for _, enc := range []*base64.Encoding{
 		base64.StdEncoding, base64.RawStdEncoding, base64.URLEncoding, base64.RawURLEncoding,
@@ -208,10 +195,9 @@ func wwwAuthenticate(schemes []*ir.AuthScheme) map[string]string {
 	return map[string]string{}
 }
 
-// enforceAuth returns nil when the request may proceed, else a mirrored 401/403.
 func (e *Engine) enforceAuth(endpoint *ir.Endpoint, req *ingressRequest) *RawResponse {
 	if len(endpoint.Security) == 0 {
-		return nil // open endpoint
+		return nil
 	}
 
 	type requirement struct {
@@ -227,10 +213,9 @@ func (e *Engine) enforceAuth(endpoint *ir.Endpoint, req *ingressRequest) *RawRes
 		requirements = append(requirements, requirement{scheme: scheme, value: extractCredential(scheme, req)})
 	}
 	if len(requirements) == 0 {
-		return nil // nothing enforceable (e.g. inferred / oauth)
+		return nil
 	}
 
-	// Leak guard first: any real-looking secret is rejected loudly.
 	for _, r := range requirements {
 		if r.value != nil && looksLikeRealSecret(*r.value) {
 			return buildErrorResponse(403,
@@ -246,7 +231,7 @@ func (e *Engine) enforceAuth(endpoint *ir.Endpoint, req *ingressRequest) *RawRes
 		}
 		anyPresented = true
 		if e.credentialHashes[hashToken(*r.value)] {
-			return nil // any single valid presented credential satisfies auth
+			return nil
 		}
 	}
 
@@ -261,6 +246,4 @@ func (e *Engine) enforceAuth(endpoint *ir.Endpoint, req *ingressRequest) *RawRes
 	return buildErrorResponse(401, message, wwwAuthenticate(schemes))
 }
 
-// IssuedCredential exposes the sandbox's deterministic token so the CLI can print
-// it. Safe to display: a TEST credential by construction.
 func IssuedCredential(seed string) string { return deriveCredential(seed) }

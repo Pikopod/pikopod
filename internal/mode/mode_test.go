@@ -33,8 +33,6 @@ func compileArchetype(t *testing.T, def *ir.ApiDefinition, name string) (*Spec, 
 	return Compile(name, "archetype "+name, parsed)
 }
 
-// The failure-injection archetypes become modes; the ones that assert correct
-// behaviour do not, because their first step is driving.
 func TestCompileSplitsFailureArchetypesFromAssertions(t *testing.T) {
 	def := loadIR(t, "stripe.trimmed.json")
 	modeable := []string{"declines", "retry_storm", "timeouts", "rate_limit_backoff", "downtime_recovery"}
@@ -59,8 +57,6 @@ func TestCompileSplitsFailureArchetypesFromAssertions(t *testing.T) {
 	}
 }
 
-// declines ends with CLEAR_FAULT. Folding every conditioning step would arm a
-// fault and then cancel it, leaving a mode that does nothing.
 func TestCompileFoldsThePrefixNotTheWholeDefinition(t *testing.T) {
 	def := loadIR(t, "stripe.trimmed.json")
 	spec, err := compileArchetype(t, def, "declines")
@@ -75,8 +71,6 @@ func TestCompileFoldsThePrefixNotTheWholeDefinition(t *testing.T) {
 	}
 }
 
-// retry_storm carries its sequence in the rule (times/per), not in the steps,
-// so it projects onto a mode faithfully.
 func TestCompileKeepsTimesWindowFromTheRule(t *testing.T) {
 	def := loadIR(t, "stripe.trimmed.json")
 	spec, err := compileArchetype(t, def, "retry_storm")

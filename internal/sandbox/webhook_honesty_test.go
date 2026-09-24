@@ -8,8 +8,6 @@ import (
 	"github.com/pikopod/pikopod/internal/importer"
 )
 
-// One declared, triggered webhook and a second resource nothing declares an
-// event for. The outbox is on, so an invented <slug>.created would show.
 const undeclaredHookSpec = `{
   "openapi": "3.1.0",
   "info": {"title": "Bank", "version": "1"},
@@ -38,8 +36,6 @@ const undeclaredHookSpec = `{
   }
 }`
 
-// The provider documents no event for payouts, so pikopod must send none.
-// An invented one is indistinguishable at the handler from a real delivery.
 func TestNoDeliveryForUndeclaredEvent(t *testing.T) {
 	def, err := importer.NormalizeOpenAPI([]byte(undeclaredHookSpec))
 	if err != nil {
@@ -57,8 +53,6 @@ func TestNoDeliveryForUndeclaredEvent(t *testing.T) {
 	}
 }
 
-// The resource sits under "transaction", not "data" or "object": the shape
-// many payment providers document.
 const nestedHookSpec = `{
   "openapi": "3.1.0",
   "info": {"title": "Pay", "version": "1"},
@@ -91,7 +85,6 @@ const nestedHookSpec = `{
   }
 }`
 
-// The caller's values must reach a nested payload, not be replaced by synthesis.
 func TestOverlayGraftsIntoNestedPayload(t *testing.T) {
 	def, err := importer.NormalizeOpenAPI([]byte(nestedHookSpec))
 	if err != nil {
@@ -117,7 +110,6 @@ func TestOverlayGraftsIntoNestedPayload(t *testing.T) {
 	}
 }
 
-// Emitting is a trigger for DECLARED events, not a way to post arbitrary JSON.
 func TestEmitWebhookRefusesUndeclaredEvent(t *testing.T) {
 	def, err := importer.NormalizeOpenAPI([]byte(undeclaredHookSpec))
 	if err != nil {
@@ -136,8 +128,6 @@ func TestEmitWebhookRefusesUndeclaredEvent(t *testing.T) {
 	}
 }
 
-// A declared event fires on demand, and the caller's data reaches the nested
-// payload through the same overlay that serves triggered deliveries.
 func TestEmitWebhookFiresDeclaredEventWithData(t *testing.T) {
 	def, err := importer.NormalizeOpenAPI([]byte(nestedHookSpec))
 	if err != nil {
@@ -161,9 +151,6 @@ func TestEmitWebhookFiresDeclaredEventWithData(t *testing.T) {
 	}
 }
 
-// A miss is reported, never papered over: with no overlapping key the overlay
-// says so and leaves the payload untouched; with one it grafts into the object
-// that shares the most keys, however deep.
 func TestOverlayReportsAMissAndGraftsByShape(t *testing.T) {
 	inner := NewJSONObject()
 	inner.Set("id", "synth")

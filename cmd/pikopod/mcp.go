@@ -33,8 +33,6 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// Verdicts form a closed set. CLEAN and UNVERIFIABLE never collapse: an
-// agent proceeds on CLEAN and must be able to see that nothing was proven.
 const (
 	VerdictClean        = "CLEAN"
 	VerdictFindings     = "FINDINGS"
@@ -51,7 +49,6 @@ type toolError struct {
 	Docs string `json:"docs,omitempty"`
 }
 
-// toolResult is what every tool returns. Reason is mandatory on UNVERIFIABLE.
 type toolResult struct {
 	Verdict string         `json:"verdict"`
 	Reason  string         `json:"reason,omitempty"`
@@ -68,7 +65,6 @@ type warmupFamily struct {
 	WarmedUp    bool   `json:"warmed_up"`
 }
 
-// warmupReport says what the observe leg can and cannot see for an upstream.
 type warmupReport struct {
 	Upstream        string         `json:"upstream"`
 	GateMinSamples  int            `json:"gate_min_samples"`
@@ -147,9 +143,6 @@ func controlsFake() map[string]any {
 	return map[string]any{"readOnlyHint": false, "destructiveHint": false, "idempotentHint": true, "openWorldHint": false}
 }
 
-// mcpServer builds the tool set over one loaded config. Nothing here starts
-// the proxy, advances a pin, or writes a baseline; the control tools talk to
-// a RUNNING sandbox over its loopback control plane and never to a provider.
 func mcpServer(cfg *config.Config) *mcp.Server {
 	s := mcp.NewServer("pikopod", version)
 	s.OnError = errorResult
@@ -646,8 +639,6 @@ func mcpServer(cfg *config.Config) *mcp.Server {
 	return s
 }
 
-// controlCall talks to the running sandbox's loopback control plane; a
-// non-2xx answer becomes an errfmt error carrying the server's message.
 func controlCall(cfg *config.Config, method, sandboxName, subpath string, body any) (map[string]any, error) {
 	resp, err := adminReq(cfg, method, sandboxName, subpath, body)
 	if err != nil {

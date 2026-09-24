@@ -28,8 +28,7 @@ type Config struct {
 	MaxRequestBytes int64
 	Credential      string
 	WebhookURL      string
-	// WebhookSigningKey is the provider-issued key named by the declared
-	// envelope's keyEnv; required only when deliveries leave for a sink.
+
 	WebhookSigningKey []byte
 	Quota             QuotaLimits
 	WallclockFaults   bool
@@ -75,13 +74,12 @@ type Engine struct {
 	sinkCh        chan WebhookDelivery
 	sinkClosed    bool
 	sinkDone      chan struct{}
-	sinkDelivered int64 // atomics
+	sinkDelivered int64
 	sinkFailed    int64
 	sinkDropped   int64
 	sinkLastErr   atomic.Value
 }
 
-// NewEngine builds an engine over a pinned ApiDefinition and a resource store.
 func NewEngine(def *ir.ApiDefinition, cfg Config, store *Store) (*Engine, error) {
 	if def == nil {
 		return nil, errfmt.New("sandbox engine", "no API definition was provided", "import a spec first and pass its IR", "")
@@ -136,15 +134,13 @@ func NewEngine(def *ir.ApiDefinition, cfg Config, store *Store) (*Engine, error)
 	for i := range def.AuthSchemes {
 		e.authSchemes[def.AuthSchemes[i].ID] = &def.AuthSchemes[i]
 	}
-	// Deterministic issued credential (derivation note in auth.go), unless the
-	// caller injects one (e.g. a transcript's captured token).
+
 	e.credential = cfg.Credential
 	if e.credential == "" {
 		e.credential = deriveCredential(cfg.Seed)
 	}
 	e.credentialHashes = map[string]bool{hashToken(e.credential): true}
-	// The secret is always derived so the accessor stays truthful; the sink
-	// goroutine starts only with a URL and lives for the engine's lifetime.
+
 	e.webhookSecret = webhookSecretFor(cfg.Seed)
 	if env := def.WebhookEnvelope; env != nil {
 		if err := env.Validate(); err != nil {
@@ -165,21 +161,18 @@ func NewEngine(def *ir.ApiDefinition, cfg Config, store *Store) (*Engine, error)
 	return e, nil
 }
 
-// Credential returns the sandbox's issued test token (`pikopod_sbx_test_…`).
 func (e *Engine) Credential() string { return e.credential }
 
 func (e *Engine) VirtualClockMs() int64 { return e.virtualClockMs }
 
-// ingressRequest is the parsed customer request handed to the pipeline.
 type ingressRequest struct {
 	method      string
-	headers     map[string]string // lower-cased names
+	headers     map[string]string
 	query       map[string][]string
 	bodyPresent bool
 	bodyInvalid bool
 	bodyValue   any
-	// route caches matchRoute for this request so serve and the journal do not
-	// re-walk the route table (it was walked three times per request).
+
 	route *matchResult
 }
 
@@ -197,8 +190,6 @@ func (r *ingressRequest) queryGet(name string) *string {
 	return nil
 }
 
-// normalizeInnerPath strips the query, ensures a leading slash, and drops a
-// single trailing slash.
 func normalizeInnerPath(path string) string {
 	noQuery := path
 	if i := strings.Index(noQuery, "?"); i != -1 {
@@ -216,11 +207,10 @@ func normalizeInnerPath(path string) string {
 	return noQuery
 }
 
-// ServeHTTP handles one customer request against the sandbox.
 func (e *Engine) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	defer func() {
 		if recover() != nil {
-			// Never leak internals to the customer app.
+
 			writeRaw(w, buildErrorResponse(500, "Internal Server Error", nil))
 		}
 	}()
@@ -235,7 +225,6 @@ func (e *Engine) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	req := &ingressRequest{method: method, headers: headers, query: r.URL.Query()}
 
-	// The sandbox reads its OWN request body (bounded).
 	wantsBody := method == "POST" || method == "PUT" || method == "PATCH"
 	rawBodyLen := 0
 	if wantsBody {
@@ -258,16 +247,13 @@ func (e *Engine) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		resp = buildErrorResponse(500, "Internal Server Error", nil)
 		wf = nil
 	}
-	// Correlation echo: real providers reflect these request headers back and
-	// client tracing depends on it. Only when the response has not set them.
+
 	for _, h := range []string{"x-request-id", "x-correlation-id", "idempotency-key"} {
 		if v, sent := headers[h]; sent && resp.Headers[h] == "" {
 			setHeader(resp, h, v)
 		}
 	}
 
-	// Journal BEFORE wallclock faults act, so a request the sandbox hung up on
-	// is still on record with its would-be status.
 	entry := JournalEntry{Method: method, Path: innerPath, Status: resp.Status}
 	if req.route != nil && req.route.kind == matchFound {
 		entry.Template = req.route.endpoint.PathTemplate.Value
@@ -291,11 +277,11 @@ func (e *Engine) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if wf.sleepMs > 0 {
 		remaining := wf.sleepMs - time.Since(started).Milliseconds()
 		if remaining > 0 && !sleepCtx(ctx, remaining) {
-			return // client gone mid-delay
+			return
 		}
 	}
 	if wf.resetConn {
-		// RST, not FIN: SO_LINGER 0 then close — "connection reset by peer".
+
 		if hj, ok := w.(http.Hijacker); ok {
 			if conn, _, err := hj.Hijack(); err == nil {
 				if tcp, ok := conn.(*net.TCPConn); ok {
@@ -305,11 +291,10 @@ func (e *Engine) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
-		return // non-hijackable writer (test recorder): drop with no response
+		return
 	}
 	if wf.malformed {
-		// A valid status line, then garbage — the response that breaks HTTP
-		// parsers, not error handlers.
+
 		if hj, ok := w.(http.Hijacker); ok {
 			if conn, _, err := hj.Hijack(); err == nil {
 				conn.Write([]byte("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\nlskdu018973t09sylgasjkfg1][]'./.sdlv"))
@@ -320,8 +305,7 @@ func (e *Engine) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if wf.hangMs > 0 {
-		// Hold, then drop the connection with NO response — the shape that
-		// exercises client timeouts hardest. Needs a hijackable writer.
+
 		sleepCtx(ctx, wf.hangMs)
 		if hj, ok := w.(http.Hijacker); ok {
 			if conn, _, err := hj.Hijack(); err == nil {
@@ -336,8 +320,7 @@ func (e *Engine) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if wf.wrongLength {
-		// Declare more bytes than are sent so the client hits an unexpected
-		// EOF; net/http honors explicit Content-Length over chunked framing.
+
 		for k, v := range resp.Headers {
 			w.Header().Set(k, v)
 		}
@@ -349,8 +332,6 @@ func (e *Engine) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	writeRaw(w, resp)
 }
 
-// sleepCtx sleeps for ms unless the request context ends first; reports
-// whether the full sleep completed.
 func sleepCtx(ctx context.Context, ms int64) bool {
 	timer := time.NewTimer(time.Duration(ms) * time.Millisecond)
 	defer timer.Stop()
@@ -362,8 +343,6 @@ func sleepCtx(ctx context.Context, ms int64) bool {
 	}
 }
 
-// writeRawSlow sends headers immediately, then dribbles the body across
-// totalMs — the half-alive provider that defeats header-based health checks.
 func writeRawSlow(w http.ResponseWriter, resp *RawResponse, totalMs int64) {
 	for k, v := range resp.Headers {
 		w.Header().Set(k, v)
@@ -387,7 +366,7 @@ func writeRawSlow(w http.ResponseWriter, resp *RawResponse, totalMs int64) {
 			end = len(body)
 		}
 		if _, err := w.Write(body[start:end]); err != nil {
-			return // client gave up — exactly the scenario under test
+			return
 		}
 		if flusher != nil {
 			flusher.Flush()
@@ -396,11 +375,9 @@ func writeRawSlow(w http.ResponseWriter, resp *RawResponse, totalMs int64) {
 	}
 }
 
-// parseRequestBody: empty ⇒ absent; a JSON (or unlabelled) body parses or is
-// flagged invalid; other bodies are carried opaquely as text.
 func parseRequestBody(req *ingressRequest, contentType string, raw []byte) {
 	if len(raw) == 0 {
-		return // present:false
+		return
 	}
 	req.bodyPresent = true
 	ct := strings.ToLower(contentType)
@@ -437,15 +414,12 @@ func (e *Engine) serve(req *ingressRequest, innerPath string) (*RawResponse, err
 	}
 	e.tracef("route", "matched %s", operationLabel(result.endpoint))
 
-	// Enforce the API's declared auth before doing anything.
 	if authFail := e.enforceAuth(result.endpoint, req); authFail != nil {
 		e.tracef("auth", "declared auth REFUSED the request (%d) — the issued credential is in `pikopod sandbox list`", authFail.Status)
 		return authFail, nil
 	}
 	e.tracef("auth", "declared auth satisfied")
 
-	// Forced responses (forced.go): after auth, before any state touch —
-	// peek semantics by construction, since execute() is never reached.
 	if forced := e.forcedResponse(result.endpoint, req); forced != nil {
 		e.tracef("forced", "%s forced status %d (peek: no state touch, no webhook)", ForcedStatusHeader, forced.Status)
 		return forced, nil
@@ -453,13 +427,11 @@ func (e *Engine) serve(req *ingressRequest, innerPath string) (*RawResponse, err
 
 	op := deriveOperation(result.endpoint, result.pathParams)
 	e.tracef("operation", "kind=%v resource=%s", op.kind, op.typ)
-	// Unrecognized shapes never touch state — the generic success shell stands.
+
 	if op.kind == opPassthrough {
 		return e.buildSuccessResponse(result.endpoint), nil
 	}
 
-	// An endpoint is an ACTION when its success response is a DIFFERENT named
-	// schema than its request body; otherwise RESOURCE (read-your-write echo).
 	isResource := deriveIsResource(result.endpoint)
 
 	return e.execute(&storeCtx{
@@ -471,9 +443,8 @@ func (e *Engine) serve(req *ingressRequest, innerPath string) (*RawResponse, err
 	})
 }
 
-var successCode = threeDigits // reuse ^\d{3}$
+var successCode = threeDigits
 
-// deriveIsResource decides resource-ness from the request/response schema refs.
 func deriveIsResource(endpoint *ir.Endpoint) bool {
 	var reqRef *string
 	if endpoint.RequestBody != nil && len(endpoint.RequestBody.Content) > 0 {

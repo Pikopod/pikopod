@@ -9,8 +9,6 @@ import (
 	"github.com/pikopod/pikopod/internal/ir"
 )
 
-// A spec that DECLARES its 422 shape — the sandbox must answer invalid
-// requests with the provider's own error body, not pikopod's.
 const declaredErrorSpec = `{
   "openapi": "3.0.0", "info": {"title": "E", "version": "1"},
   "paths": {"/charges": {"post": {
@@ -37,9 +35,6 @@ func loadSpecDef(t *testing.T, raw string) *ir.ApiDefinition {
 	return def
 }
 
-// Provider-shaped validation errors: a declared 422 schema wins over the
-// neutral shape, the exact violations ride the header, and the body is
-// seed-deterministic.
 func TestValidationErrorUsesDeclaredSchema(t *testing.T) {
 	e := newEngine(t, loadSpecDef(t, declaredErrorSpec), Config{ID: "sbx_ve", Seed: "ve-1"})
 	got := do(t, e, "POST", "/charges", `{"currency":"NGN"}`, nil)
@@ -59,7 +54,7 @@ func TestValidationErrorUsesDeclaredSchema(t *testing.T) {
 	if !strings.Contains(viol, "amount is required") {
 		t.Fatalf("violations header must carry the exact failures: %q", viol)
 	}
-	// Deterministic: same seed, same synthesized error body.
+
 	e2 := newEngine(t, loadSpecDef(t, declaredErrorSpec), Config{ID: "sbx_ve2", Seed: "ve-1"})
 	got2 := do(t, e2, "POST", "/charges", `{"currency":"NGN"}`, nil)
 	if got.body != got2.body {
@@ -67,8 +62,6 @@ func TestValidationErrorUsesDeclaredSchema(t *testing.T) {
 	}
 }
 
-// Specs that declare NO error schema keep the neutral shape byte-identical
-// (transcript parity depends on this) — the header still explains.
 func TestValidationErrorFallsBackToNeutralShape(t *testing.T) {
 	spec := strings.Replace(declaredErrorSpec, `"422": {"description": "invalid", "content": {"application/json": {"schema": {
         "type": "object", "required": ["error"], "properties": {"error": {
@@ -90,8 +83,6 @@ func TestValidationErrorFallsBackToNeutralShape(t *testing.T) {
 	}
 }
 
-// The violations header is capped: a pathological schema with thousands of
-// failures must never blow the header limit.
 func TestViolationsHeaderCap(t *testing.T) {
 	errs := make([]string, 4000)
 	for i := range errs {

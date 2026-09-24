@@ -23,7 +23,7 @@ func TestSamplingDoesNotDistortPresenceRates(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		body := map[string]any{"id": "th_0000000001", "status": "success"}
 		if n.Add(1)%2 == 0 {
-			body["opt"] = "present" // exactly half the traffic
+			body["opt"] = "present"
 		}
 		if drifted.Load() {
 			body["fee_bearer"] = "merchant"
@@ -38,7 +38,7 @@ func TestSamplingDoesNotDistortPresenceRates(t *testing.T) {
 		Listen: "127.0.0.1", DataDir: dir,
 		Upstreams: map[string]config.Upstream{"prov": {Listen: "/prov", Target: provider.URL}},
 		Warmup:    config.Warmup{MinSamples: 8, MinHours: new(int)},
-		Sampling:  config.Sampling{Rate: &zero}, // keep guaranteed classes ONLY
+		Sampling:  config.Sampling{Rate: &zero},
 	}
 	a, err := New(cfg, alert.Options{MinOccurrences: 1, Window: time.Minute})
 	if err != nil {
@@ -58,10 +58,10 @@ func TestSamplingDoesNotDistortPresenceRates(t *testing.T) {
 			resp.Body.Close()
 		}
 	}
-	hit(8) // warmup: all notable, all persisted
-	hit(8) // post-freeze routine: observed, learned from, sampled OUT
+	hit(8)
+	hit(8)
 	drifted.Store(true)
-	hit(2) // drift evidence: always persisted
+	hit(2)
 
 	waitProcessed := func(want int64) {
 		deadline := time.Now().Add(5 * time.Second)
@@ -76,8 +76,6 @@ func TestSamplingDoesNotDistortPresenceRates(t *testing.T) {
 	}
 	waitProcessed(18)
 
-	// Presence math is computed over ALL 18 records, not the 10 persisted:
-	// the frozen reference saw opt in 4 of 8 warmup samples.
 	fams := a.Learners()["prov"].Families()
 	if len(fams) != 1 || !fams[0].Frozen {
 		t.Fatalf("expected one frozen family: %+v", fams)
@@ -85,12 +83,11 @@ func TestSamplingDoesNotDistortPresenceRates(t *testing.T) {
 	if r := fams[0].PresenceRatio("opt"); r != 0.5 {
 		t.Fatalf("presence must reflect the FULL stream (want 0.5), got %v — sampling distorted the math", r)
 	}
-	// Live stats kept counting through the sampled-out records too.
+
 	if fams[0].Samples != 18 {
 		t.Fatalf("the learner must see every record: %d of 18", fams[0].Samples)
 	}
 
-	// Disk holds exactly the guaranteed classes: 8 warmup + 2 drift.
 	raw, err := os.ReadFile(filepath.Join(dir, "recordings", "prov.ndjson"))
 	if err != nil {
 		t.Fatal(err)

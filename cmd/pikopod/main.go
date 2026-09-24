@@ -1,5 +1,3 @@
-// pikopod — sandbox, scenario-test and drift-watch API integrations. Everything
-// runs locally: no accounts, no egress except Slack and your own LLM key.
 package main
 
 import (
@@ -18,8 +16,6 @@ func main() {
 		SilenceErrors: true,
 	}
 
-	// Persistent so every subcommand inherits it: a user who keeps
-	// pikopod.yaml outside the working directory should say so once.
 	root.PersistentFlags().String("config", "", "path to pikopod.yaml (default: ./pikopod.yaml)")
 
 	root.AddCommand(
@@ -54,6 +50,6 @@ func main() {
 
 	if err := root.Execute(); err != nil {
 		fmt.Fprintln(os.Stderr, "error:", err)
-		os.Exit(2) // 2 = pikopod/config error; drift gates use 1 (see docs/exit-codes.md)
+		os.Exit(2)
 	}
 }

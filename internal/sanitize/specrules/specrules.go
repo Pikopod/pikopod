@@ -1,5 +1,3 @@
-// Package specrules turns a contract's declared enums into sanitizer rules,
-// so the sanitizer itself never learns about the IR.
 package specrules
 
 import (
@@ -12,10 +10,6 @@ import (
 
 const maxDepth = 12
 
-// FromContract emits one ALLOW rule per response field name whose schema
-// declares an enum, admitting exactly the declared string values. Only
-// EXPLICIT and DERIVED enums count: enforcing a guess produces a wrong test,
-// but relaxing redaction on a guess writes someone's data to disk.
 func FromContract(def *ir.ApiDefinition) []sanitize.Rule {
 	if def == nil {
 		return nil
@@ -55,8 +49,6 @@ func FromContract(def *ir.ApiDefinition) []sanitize.Rule {
 	return rules
 }
 
-// ForContracts maps each upstream to its rules; an upstream without a
-// contract gets none, which is today's behaviour.
 func ForContracts(contracts map[string]*ir.ApiDefinition) map[string][]sanitize.Rule {
 	out := map[string][]sanitize.Rule{}
 	for upstream, def := range contracts {

@@ -18,35 +18,28 @@ import (
 	"github.com/pikopod/pikopod/internal/config"
 )
 
-// Production gate: seed sentinel values into EVERY position of live
-// traffic — request headers, query, path, request body, response headers,
-// response body (flat, nested, and enum-position) — run the full pipeline
-// (proxy → recorder → learner → differ → alerter), then sweep EVERY byte the
-// agent persisted plus everything the alert transport received. One sentinel
-// byte anywhere is a release blocker.
 func TestCanarySentinelGate(t *testing.T) {
 	sentinels := []string{
-		"xpay_secret_M6CANARY00000000000000000000", // secret key (request + response)
-		"m6.canary.person@leakmail.test",           // email
-		"4242424242424242",                         // card PAN
-		"+2348012345678",                           // phone
-		"0f8fad5b-d9cb-469f-a165-70867728950e",     // uuid identifier
-		"tok_M6CANARY_response_secret_11112222",    // response-header secret
-		"drifted_M6CANARY_enum_value",              // appears as a NEW enum value post-warmup
-		// Regression sentinels for previously-missed leak positions:
-		"acct_M6canary99z",          // identifier as a map KEY
-		"m6.canary%40leakmail.test", // URL-encoded email in a path segment
-		"4556737586899855",          // PAN sent as a JSON NUMBER
-		"m6canaryfirstname",         // lowercase name (enum-ish by shape)
-		"934187",                    // 11: pin (number + string)
-		"91736408",                  // 12: otp (number + string)
-		"19470213",                  // 13: dob as a number
-		"1947-02-13",                // 14: date_of_birth as a string
-		"9012345671",                // 15: account_number as a JSON number
-		"91234567805",               // 16: bvn as a JSON number
-		// Key-position sentinel: redaction POINTERS are persisted now, and a
-		// raw PII key inside a pointer would leak what the sanitizer removed.
-		"m6canarykey@leakmail.test", // 17: PII as a map KEY (pointer-leak guard)
+		"xpay_secret_M6CANARY00000000000000000000",
+		"m6.canary.person@leakmail.test",
+		"4242424242424242",
+		"+2348012345678",
+		"0f8fad5b-d9cb-469f-a165-70867728950e",
+		"tok_M6CANARY_response_secret_11112222",
+		"drifted_M6CANARY_enum_value",
+
+		"acct_M6canary99z",
+		"m6.canary%40leakmail.test",
+		"4556737586899855",
+		"m6canaryfirstname",
+		"934187",
+		"91736408",
+		"19470213",
+		"1947-02-13",
+		"9012345671",
+		"91234567805",
+
+		"m6canarykey@leakmail.test",
 	}
 
 	var mutated atomic.Bool
@@ -55,7 +48,7 @@ func TestCanarySentinelGate(t *testing.T) {
 		w.Header().Set("X-Provider-Secret", sentinels[5])
 		status := "success"
 		if mutated.Load() {
-			status = sentinels[6] // enum drift carrying a sentinel VALUE
+			status = sentinels[6]
 		}
 		fmt.Fprintf(w, `{
 			"id": %q, "status": %q, "amount": 5000,
@@ -89,7 +82,7 @@ func TestCanarySentinelGate(t *testing.T) {
 	hit := func(n int) {
 		t.Helper()
 		for i := 0; i < n; i++ {
-			// Sentinels in the path (raw AND url-encoded), query, headers, body.
+
 			url := front.URL + "/prov/users/" + sentinels[8] + "/charges?api_key=" + sentinels[0] + "&card=" + sentinels[2]
 			req, _ := http.NewRequest("POST", url, strings.NewReader(
 				fmt.Sprintf(`{"email":%q,"card_number":%q,"secret":%q,"cvv":9471,"pin":%q,"otp":%s}`,
@@ -106,14 +99,13 @@ func TestCanarySentinelGate(t *testing.T) {
 		}
 	}
 
-	hit(14) // through warmup; baselines freeze and persist
+	hit(14)
 	waitFor(t, func() bool { return a.Metrics.RecordingsWritten.Load() >= 14 })
 	mutated.Store(true)
-	hit(4) // enum drift (sentinel value) crosses the alert threshold
+	hit(4)
 	waitFor(t, func() bool { return a.Metrics.RecordingsWritten.Load() >= 18 && sink.n.Load() >= 1 })
 	a.persistAll()
 
-	// Sweep 1: every file the agent wrote, byte for byte.
 	swept := 0
 	err = filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
 		if err != nil || info.IsDir() {
@@ -135,16 +127,11 @@ func TestCanarySentinelGate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// The gate must actually have swept the write paths it claims to cover.
-	if swept < 3 { // recordings ndjson, baselines json, events/alerts state
+
+	if swept < 3 {
 		t.Fatalf("sweep only saw %d files — the pipeline did not persist what this gate audits", swept)
 	}
 
-	// Sweep 1b (JSON-aware): the SHORT-valued secret classes — cvv/cvc and
-	// expiry — cannot be raw-byte sentinels (3-4 digit runs collide with
-	// timestamp nanoseconds), so every recording is parsed and any key in
-	// those classes must carry a redacted value, never a raw number/short
-	// digit string.
 	shortSecretKey := regexp.MustCompile(`(?i)(^|_|-)(cvv2?|cvc2?|pin|otp|exp[_-]?month|exp[_-]?year)($|_|-)`)
 	recRaw, err := os.ReadFile(filepath.Join(dir, "recordings", "prov.ndjson"))
 	if err != nil {
@@ -163,8 +150,7 @@ func TestCanarySentinelGate(t *testing.T) {
 					if shortSecretKey.MatchString(k) {
 						s, isStr := v.(string)
 						if !isStr || !(strings.HasPrefix(s, "<<SUBSTITUTE") || len(s) == 0) {
-							// Tokenized expiry values are digit tokens, which is
-							// fine — but the ORIGINAL literals must be gone.
+
 							if s == "9471" || s == "12" || s == "2027" || !isStr {
 								t.Errorf("CANARY LEAK: short secret %q survived with raw-typed value %v", k, v)
 							}
@@ -181,7 +167,6 @@ func TestCanarySentinelGate(t *testing.T) {
 		walk(rec)
 	}
 
-	// Sweep 2: everything that left through the alert transport.
 	delivered := strings.ToLower(strings.Join(sink.texts, "\n"))
 	if delivered == "" {
 		t.Fatal("expected at least one alert to have been delivered")

@@ -1,5 +1,3 @@
-// Package mode folds a scenario's CONDITIONING steps into a standing state a
-// running sandbox can be put into, so a developer's own code meets the failure.
 package mode
 
 import (
@@ -20,7 +18,6 @@ func marshalAttributes(attrs map[string]any) (json.RawMessage, error) {
 	return raw, nil
 }
 
-// Spec is the compiled standing state: what to arm and what to seed.
 type Spec struct {
 	Name     string                  `json:"name"`
 	Source   string                  `json:"source"`
@@ -29,14 +26,8 @@ type Spec struct {
 	Revision int64                   `json:"revision"`
 }
 
-// blockingKinds hold a real connection when wallclock is on, so an armed one
-// with no expiry wedges the sandbox with no visible cause.
 var blockingKinds = map[string]bool{"hang": true, "slow_body": true, "latency": true}
 
-// Compile folds the conditioning PREFIX of def, up to the first driving step.
-//
-// The prefix, not the whole definition: `declines` ends with CLEAR_FAULT, so
-// folding every conditioning step would arm a fault and immediately clear it.
 func Compile(name, source string, def *scenario.ScenarioDefinition) (*Spec, error) {
 	spec := &Spec{Name: name, Source: source}
 	for i := range def.Steps {
@@ -61,7 +52,7 @@ func Compile(name, source string, def *scenario.ScenarioDefinition) (*Spec, erro
 		case *scenario.SeedStateConfig:
 			spec.Seeds = append(spec.Seeds, cfg.Resources...)
 		case *scenario.ClearFaultConfig:
-			// A clear before any traffic cancels what this mode just armed.
+
 			spec.Faults = nil
 		}
 	}
@@ -79,8 +70,6 @@ func Compile(name, source string, def *scenario.ScenarioDefinition) (*Spec, erro
 	return spec, nil
 }
 
-// Apply arms the compiled state on a live engine, replacing whatever the
-// previous mode armed.
 func Apply(eng *sandbox.Engine, spec *Spec) error {
 	eng.ClearFaults("", "")
 	for _, seed := range spec.Seeds {
@@ -102,7 +91,6 @@ func Apply(eng *sandbox.Engine, spec *Spec) error {
 	return nil
 }
 
-// Describe renders the armed state for a human.
 func (s *Spec) Describe() string {
 	out := fmt.Sprintf("mode: %s (from %s)\n", s.Name, s.Source)
 	for _, seed := range s.Seeds {

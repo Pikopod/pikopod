@@ -22,8 +22,6 @@ import (
 
 const envelopeDocs = "scenarios/README.md#webhook-envelope"
 
-// webhookSigningKey reads the key the declared envelope names; an unset
-// variable yields no key, and the engine decides whether that matters.
 func webhookSigningKey(def *ir.ApiDefinition) ([]byte, error) {
 	if def.WebhookEnvelope == nil || def.WebhookEnvelope.Signature == nil {
 		return nil, nil
@@ -70,8 +68,6 @@ type sidecarEvent struct {
 	EmitOnly bool            `json:"emitOnly,omitempty"`
 }
 
-// applyWebhookSidecar attaches an envelope and event bindings from a YAML or
-// JSON file to an already imported sandbox, rewriting only the persisted IR.
 func applyWebhookSidecar(cfg *config.Config, name, path string, out io.Writer) error {
 	raw, err := os.ReadFile(path)
 	if err != nil {
@@ -152,8 +148,6 @@ func decodeSidecarEvents(value any) (map[string]sidecarEvent, error) {
 	return events, nil
 }
 
-// bindEvents applies sidecar bindings to declared events only; an unknown
-// event or operation is refused, never invented.
 func bindEvents(def *ir.ApiDefinition, events map[string]sidecarEvent) error {
 	for _, name := range sortedEventNames(events) {
 		ev := events[name]
@@ -201,8 +195,6 @@ func sortedEventNames(events map[string]sidecarEvent) []string {
 	return names
 }
 
-// carryEventBindings keeps triggers and emit-only marks a person attached to
-// events a re-import declares again without them.
 func carryEventBindings(def, old *ir.ApiDefinition) {
 	for i := range def.Webhooks {
 		w := &def.Webhooks[i]

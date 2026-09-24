@@ -1,5 +1,3 @@
-// `pikopod scenario from-recordings <upstream>` — the from-drift bridge's
-// from-traffic sibling: a scenario pack built from a recorded traffic window.
 package main
 
 import (
@@ -34,8 +32,7 @@ func newFromRecordingsCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			// Validate before saving — a generated pack that does not parse
-			// is a bug, never the user's problem.
+
 			if _, errs := scenario.ParseDefinition(pack["definition"]); len(errs) > 0 {
 				return errfmt.Newf("generated pack failed validation (pikopod bug)", "please report this with the output", "https://github.com/pikopod/pikopod/issues", "%v", errs[0].Message)
 			}

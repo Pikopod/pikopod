@@ -42,9 +42,9 @@ func writeTree(t *testing.T, files map[string]string) string {
 func TestScanFindsReferencesAndSkipsNoise(t *testing.T) {
 	root := writeTree(t, map[string]string{
 		"pay/client.go":           "package pay\n\nfunc Verify() {\n\tamount := resp.AccountNumber // account_number\n\t_ = amount\n}\n",
-		"docs/readme.txt":         "account_number mentioned in prose", // not a source ext
-		"node_modules/x/index.js": "account_number",                    // skipped dir
-		".hidden/secret.go":       "account_number",                    // hidden dir
+		"docs/readme.txt":         "account_number mentioned in prose",
+		"node_modules/x/index.js": "account_number",
+		".hidden/secret.go":       "account_number",
 		"unrelated/other.go":      "package other\n",
 	})
 	impacts, err := Scan(root, []string{"account_number"})
@@ -163,10 +163,10 @@ func TestApplyTwoEditsSameFileSequential(t *testing.T) {
 	}
 }
 
-var _ = drift.FieldRemoved // keep the import honest for the event literal below
+var _ = drift.FieldRemoved
 
 func TestTermsShortLeafIgnored(t *testing.T) {
-	// A 2-char leaf ("id") is noise — fall through to endpoint segments.
+
 	ev := &alert.DriftEvent{Field: "id", Endpoint: "/charges/{id}", Kind: drift.FieldRemoved}
 	got := Terms(ev)
 	if len(got) != 1 || got[0] != "charges" {

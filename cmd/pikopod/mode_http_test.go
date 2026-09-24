@@ -43,8 +43,6 @@ func createWidget(t *testing.T, srv *httptest.Server) int {
 	return res.StatusCode
 }
 
-// The whole point: a mode changes what the RUNNING sandbox answers, so a
-// developer's own client meets the failure without running a pack.
 func TestModeChangesWhatTheRunningSandboxServes(t *testing.T) {
 	srv := modeServer(t, "mode-seed-1")
 
@@ -70,8 +68,6 @@ func TestModeChangesWhatTheRunningSandboxServes(t *testing.T) {
 	}
 }
 
-// GET reports the standing state so cross-talk between clients is diagnosable
-// rather than mysterious.
 func TestModeShowReportsWhatIsArmed(t *testing.T) {
 	srv := modeServer(t, "mode-seed-2")
 
@@ -96,8 +92,6 @@ func TestModeShowReportsWhatIsArmed(t *testing.T) {
 	}
 }
 
-// An archetype that asserts correct behaviour has no standing state, and
-// saying so beats arming nothing and reporting success.
 func TestModeRefusesAnArchetypeWithNoStandingState(t *testing.T) {
 	srv := modeServer(t, "mode-seed-3")
 	res := setMode(t, srv, `{"name":"happy_path"}`)

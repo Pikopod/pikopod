@@ -1,5 +1,3 @@
-// GitHub forge over the REST API. Auth: token in the Authorization header,
-// sourced from env or `gh auth token` — never argv.
 package pr
 
 import (
@@ -13,9 +11,9 @@ import (
 )
 
 type GitHub struct {
-	BaseURL string // default https://api.github.com; overridable for tests/GHE
-	Repo    string // owner/name
-	Number  int    // PR number
+	BaseURL string
+	Repo    string
+	Number  int
 	Token   string
 	Client  *http.Client
 }
@@ -81,8 +79,6 @@ func (g *GitHub) CurrentUserID() (int64, error) {
 	return u.ID, nil
 }
 
-// maxPages bounds pagination so a server that always returns a full page
-// cannot hang the CI job (20k comments, far past any real PR).
 const (
 	perPage  = 100
 	maxPages = 200
@@ -131,8 +127,6 @@ func (g *GitHub) OpenPR(head, base, title, body string) (string, error) {
 	return out.HTMLURL, err
 }
 
-// ForgeError carries the HTTP status so the caller can pick the degradation
-// rung (403/404 → read-only token → job summary → stderr).
 type ForgeError struct {
 	Status int
 	Detail string
@@ -140,8 +134,6 @@ type ForgeError struct {
 
 func (e *ForgeError) Error() string { return e.Detail }
 
-// ReadOnly reports whether the failure smells like a token without write
-// access (the degradation-ladder trigger).
 func (e *ForgeError) ReadOnly() bool { return e.Status == 401 || e.Status == 403 || e.Status == 404 }
 
 func truncate(s string, n int) string {

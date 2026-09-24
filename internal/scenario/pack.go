@@ -1,5 +1,3 @@
-// Scenario pack loading: a pack file is YAML `{name, provider, description,
-// definition}` — the open, deterministic contract for shipped and user packs.
 package scenario
 
 import (
@@ -14,24 +12,19 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// Pack is one scenario pack.
 type Pack struct {
 	Name        string `json:"name"`
 	Provider    string `json:"provider"`
 	Description string `json:"description"`
-	// RawDefinition is the JSON-shaped definition as authored (for schema
-	// checks and re-serialization); Definition is the parsed, typed form.
+
 	RawDefinition any                 `json:"definition"`
 	Definition    *ScenarioDefinition `json:"-"`
-	// Path is where the pack was loaded from.
+
 	Path string `json:"-"`
-	// ContractVersion pins from-drift packs to the effective contract at pin
-	// time (0 = unpinned): the runner resolves the overlay at this version.
+
 	ContractVersion int `json:"contractVersion,omitempty"`
 }
 
-// jsonify round-trips YAML-decoded values through JSON so the definition parser
-// and assertion evaluator see one number type (float64).
 func jsonify(v any) (any, error) {
 	raw, err := json.Marshal(v)
 	if err != nil {
@@ -44,8 +37,6 @@ func jsonify(v any) (any, error) {
 	return out, nil
 }
 
-// maxPackBytes caps pack files: an unbounded read of an internet-downloaded
-// YAML is a decompression-adjacent DoS surface.
 const maxPackBytes = 1 << 20
 
 func LoadPack(path string) (*Pack, error) {
@@ -59,7 +50,6 @@ func LoadPack(path string) (*Pack, error) {
 	return ParsePack(raw, path)
 }
 
-// ParsePack parses pack YAML bytes.
 func ParsePack(raw []byte, path string) (*Pack, error) {
 	var doc any
 	if err := yaml.Unmarshal(raw, &doc); err != nil {
@@ -103,15 +93,13 @@ func ParsePack(raw []byte, path string) (*Pack, error) {
 	return pack, nil
 }
 
-// ListPacks loads every *.yaml / *.yml pack under the given directories, sorted
-// by name. Invalid packs are returned as errors keyed by path, never skipped.
 func ListPacks(dirs ...string) ([]*Pack, map[string]error) {
 	var packs []*Pack
 	fails := map[string]error{}
 	for _, dir := range dirs {
 		entries, err := os.ReadDir(dir)
 		if err != nil {
-			continue // a missing packs dir is fine
+			continue
 		}
 		for _, e := range entries {
 			if e.IsDir() {

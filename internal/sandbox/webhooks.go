@@ -1,5 +1,3 @@
-// Webhook outbox: every state change enqueues a delivery whose envelope, id
-// and signature are seeded and virtual-clocked, never wall-clocked.
 package sandbox
 
 import (
@@ -19,38 +17,30 @@ import (
 	"github.com/pikopod/pikopod/internal/ir"
 )
 
-// Webhook actions. The emitted event name is `<typeSlug>.<action>`.
 const (
 	webhookActionCreated = "created"
 	webhookActionUpdated = "updated"
 	webhookActionDeleted = "deleted"
 )
 
-// Outbox bounds: the log is drop-oldest and the sink queue drops (and counts)
-// rather than ever blocking a request.
 const (
 	maxWebhookLog      = 1000
 	webhookSinkQueue   = 256
 	webhookSinkTimeout = 5 * time.Second
 )
 
-// WebhookDelivery is one enqueued delivery. Payload IS the signed body — the
-// exact bytes a sink receives, with `created` in virtual-clock seconds.
 type WebhookDelivery struct {
 	ID            string `json:"id"`
 	Event         string `json:"event"`
 	Seq           int64  `json:"seq"`
 	VirtualTimeMs int64  `json:"virtualTimeMs"`
-	// DueMs is when the delivery becomes visible (a delay_webhook fault
-	// pushes it past VirtualTimeMs — virtualized, never a real sleep).
+
 	DueMs   int64           `json:"dueMs,omitempty"`
 	Payload json.RawMessage `json:"payload"`
-	// Signature is hex(HMAC-SHA256(secret, "<created>.<payload>")) — the value
-	// carried (sha256=-prefixed) in x-pikopod-webhook-signature.
+
 	Signature string `json:"signature"`
 }
 
-// SinkStats counts sink outcomes (best-effort delivery; never fatal).
 type SinkStats struct {
 	Delivered int64  `json:"delivered"`
 	Failed    int64  `json:"failed"`
@@ -58,20 +48,14 @@ type SinkStats struct {
 	LastError string `json:"lastError,omitempty"`
 }
 
-// webhookSecretFor derives the sandbox's webhook signing secret from the run
-// seed.
 func webhookSecretFor(seed string) string {
 	return SandboxWebhookSecretPrefix + NewPrng(seed+":webhook:secret").Hex(48)
 }
 
-// WebhookSecret returns the secret a receiver verifies signatures against.
 func (e *Engine) WebhookSecret() string { return e.webhookSecret }
 
-// IssuedWebhookSecret exposes the derivation for the CLI (printed once at
-// sandbox add, like the issued credential).
 func IssuedWebhookSecret(seed string) string { return webhookSecretFor(seed) }
 
-// signWebhookPayload computes HMAC-SHA256 over "<timestampSec>.<body>", hex.
 func signWebhookPayload(secret string, timestampSec int64, body []byte) string {
 	mac := hmac.New(sha256.New, []byte(secret))
 	mac.Write([]byte(strconv.FormatInt(timestampSec, 10)))
@@ -80,11 +64,8 @@ func signWebhookPayload(secret string, timestampSec int64, body []byte) string {
 	return hex.EncodeToString(mac.Sum(nil))
 }
 
-// webhooksEnabled: an IR that declares webhooks is the implicit subscription.
 func (e *Engine) webhooksEnabled() bool { return len(e.def.Webhooks) > 0 }
 
-// enqueueWebhookFor fires every delivery one state change produces, resolving
-// trigger-matched webhooks first, then by event name, then a generic envelope.
 func (e *Engine) enqueueWebhookFor(endpoint *ir.Endpoint, action, slug string, data any) {
 	if !e.webhooksEnabled() {
 		return
@@ -110,13 +91,11 @@ func (e *Engine) enqueueWebhookFor(endpoint *ir.Endpoint, action, slug string, d
 			ds = append(ds, d)
 		}
 		if byName {
-			// One delivery per event NAME: the IR holds one entry per method
-			// under a path item, and matching all would duplicate deliveries.
+
 			break
 		}
 	}
-	// No declared event for this change means nothing is sent. The sandbox
-	// never invents one: at the handler it would look exactly like a real one.
+
 	if len(ds) == 0 {
 		e.tracef("webhook", "no declared event for %s %s; nothing sent", slug, action)
 	}
@@ -125,8 +104,6 @@ func (e *Engine) enqueueWebhookFor(endpoint *ir.Endpoint, action, slug string, d
 	}
 }
 
-// triggerActionMatches: an event suffixed with a known action fires only on
-// that action; any other event name fires on any state change.
 func triggerActionMatches(event, action string) bool {
 	for _, a := range []string{webhookActionCreated, webhookActionUpdated, webhookActionDeleted} {
 		if strings.HasSuffix(event, "."+a) {
@@ -136,8 +113,6 @@ func triggerActionMatches(event, action string) bool {
 	return true
 }
 
-// buildProviderDelivery synthesizes the provider's documented payload shape,
-// overlays the real resource data, and signs it. Caller holds webhookMu.
 func (e *Engine) buildProviderDelivery(w *ir.Webhook, data any) *WebhookDelivery {
 	if w.PayloadSchema == nil {
 		return e.buildDelivery(w.Event.Value, data)
@@ -168,8 +143,6 @@ func (e *Engine) buildProviderDelivery(w *ir.Webhook, data any) *WebhookDelivery
 	}
 }
 
-// overlayResourceData grafts real resource attributes into whichever object in
-// the synthesized payload shares the most keys with them; false when none do.
 func overlayResourceData(payload, data any) bool {
 	attrs := toPlainMap(data)
 	if len(attrs) == 0 {
@@ -213,8 +186,6 @@ func overlayResourceData(payload, data any) bool {
 	return true
 }
 
-// EmitWebhook fires a DECLARED event on demand, for events no API call causes
-// (money landing, a chargeback). Undeclared names are refused, never invented.
 func (e *Engine) EmitWebhook(event string, data json.RawMessage) error {
 	var w *ir.Webhook
 	for i := range e.def.Webhooks {
@@ -257,12 +228,8 @@ func toPlainMap(data any) map[string]any {
 	return m
 }
 
-// emitThroughFaults runs one delivery through the armed webhook faults and
-// records the survivors. Caller holds webhookMu.
 func (e *Engine) emitThroughFaults(d *WebhookDelivery) {
 
-	// First matching rule wins; duplicate/drop are one-shot, reorder consumes
-	// after its second delivery.
 	emit := []*WebhookDelivery{d}
 	e.faultMu.Lock()
 	for i := range e.faults {
@@ -272,8 +239,7 @@ func (e *Engine) emitThroughFaults(d *WebhookDelivery) {
 		}
 		switch f.Kind {
 		case FaultDuplicateWebhook:
-			// At-least-once replay: identical envelope id, payload and
-			// signature — only the log seq advances.
+
 			dup := *d
 			e.webhookSeq++
 			dup.Seq = e.webhookSeq
@@ -283,8 +249,7 @@ func (e *Engine) emitThroughFaults(d *WebhookDelivery) {
 			emit = nil
 			e.removeFaultAt(i)
 		case FaultDelayWebhook:
-			// Virtualized: the delivery exists but is visible only once the
-			// virtual clock reaches DueMs — never a real sleep.
+
 			delay := f.DelayMs
 			if delay <= 0 {
 				delay = 30000
@@ -293,10 +258,10 @@ func (e *Engine) emitThroughFaults(d *WebhookDelivery) {
 			e.removeFaultAt(i)
 		case FaultReorderWebhook:
 			if f.held == nil {
-				f.held = d // hold the first matching delivery…
+				f.held = d
 				emit = nil
 			} else {
-				emit = []*WebhookDelivery{d, f.held} // …emit the second first
+				emit = []*WebhookDelivery{d, f.held}
 				e.removeFaultAt(i)
 			}
 		}
@@ -309,13 +274,11 @@ func (e *Engine) emitThroughFaults(d *WebhookDelivery) {
 	}
 }
 
-// buildDelivery assembles the deterministic envelope + signature. Caller
-// holds webhookMu (the seq counter and id derivation are one stream).
 func (e *Engine) buildDelivery(event string, data any) *WebhookDelivery {
 	e.webhookSeq++
 	seq := e.webhookSeq
 	id := "sbxd_" + NewPrng(e.seed+":webhook:"+strconv.FormatInt(seq, 10)).Hex(24)
-	createdSec := e.virtualClockMs / 1000 // virtual-clock seconds
+	createdSec := e.virtualClockMs / 1000
 
 	env := NewJSONObject()
 	env.Set("id", id)
@@ -324,7 +287,7 @@ func (e *Engine) buildDelivery(event string, data any) *WebhookDelivery {
 	env.Set("data", data)
 	payload, err := marshalJSValue(env)
 	if err != nil {
-		e.webhookSeq-- // roll the stream back; nothing was emitted
+		e.webhookSeq--
 		return nil
 	}
 	return &WebhookDelivery{
@@ -337,12 +300,10 @@ func (e *Engine) buildDelivery(event string, data any) *WebhookDelivery {
 	}
 }
 
-// appendDelivery records into the bounded log and hands off to the sink.
-// Caller holds webhookMu.
 func (e *Engine) appendDelivery(d *WebhookDelivery) {
 	e.webhookLog = append(e.webhookLog, *d)
 	if len(e.webhookLog) > maxWebhookLog {
-		// Drop-oldest: copy down so the backing array does not pin dropped rows.
+
 		n := copy(e.webhookLog, e.webhookLog[len(e.webhookLog)-maxWebhookLog:])
 		e.webhookLog = e.webhookLog[:n]
 	}
@@ -354,14 +315,12 @@ func (e *Engine) appendDelivery(d *WebhookDelivery) {
 		select {
 		case e.sinkCh <- *d:
 		default:
-			// A wedged sink NEVER back-pressures the data plane: drop + count.
+
 			atomic.AddInt64(&e.sinkDropped, 1)
 		}
 	}
 }
 
-// Deliveries returns recorded deliveries in delivery order (a reorder fault
-// deliberately makes that differ from seq order), optionally filtered by event.
 func (e *Engine) Deliveries(eventFilter string) []WebhookDelivery {
 	e.webhookMu.Lock()
 	defer e.webhookMu.Unlock()
@@ -374,8 +333,6 @@ func (e *Engine) Deliveries(eventFilter string) []WebhookDelivery {
 	return out
 }
 
-// DeliveriesDueBy returns deliveries due by a virtual horizon plus the last
-// arrival's clock, so EXPECT_WEBHOOK jumps there instead of burning a timeout.
 func (e *Engine) DeliveriesDueBy(eventFilter string, horizonMs int64) (out []WebhookDelivery, lastArrivalMs int64) {
 	e.webhookMu.Lock()
 	defer e.webhookMu.Unlock()
@@ -399,7 +356,6 @@ func (e *Engine) DeliveriesDueBy(eventFilter string, horizonMs int64) (out []Web
 	return out, lastArrivalMs
 }
 
-// WebhookSinkStats snapshots sink outcome counters (tests poll Delivered).
 func (e *Engine) WebhookSinkStats() SinkStats {
 	last, _ := e.sinkLastErr.Load().(string)
 	return SinkStats{
@@ -415,8 +371,6 @@ func (e *Engine) sinkFailure(d *WebhookDelivery, reason string) {
 	e.sinkLastErr.Store(d.Event + " (" + d.ID + "): " + reason)
 }
 
-// sinkLoop drains the queue with one bounded-timeout attempt per delivery and
-// no retries, on its own goroutine for the engine's lifetime.
 func (e *Engine) sinkLoop() {
 	defer close(e.sinkDone)
 	client := &http.Client{Timeout: webhookSinkTimeout}
@@ -425,8 +379,6 @@ func (e *Engine) sinkLoop() {
 	}
 }
 
-// Close stops the sink after a bounded drain so a delivery already queued is
-// attempted before the caller exits; it never blocks a request.
 func (e *Engine) Close() {
 	e.webhookMu.Lock()
 	if e.sinkCh == nil || e.sinkClosed {
@@ -442,8 +394,6 @@ func (e *Engine) Close() {
 	}
 }
 
-// deliverToSink is panic-isolated: a webhook sink failure is counted, never
-// propagated anywhere near a request.
 func (e *Engine) deliverToSink(client *http.Client, d *WebhookDelivery) {
 	defer func() {
 		if r := recover(); r != nil {

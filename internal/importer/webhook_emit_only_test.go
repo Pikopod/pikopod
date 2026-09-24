@@ -9,7 +9,6 @@ const emitOnlySpec = `{"openapi":"3.1.0","info":{"title":"T","version":"1"},
   "payment.updated":{"post":{"responses":{"200":{"description":"ack"}}}}
 }}`
 
-// The extension marks an event no API call causes; its absence is the default.
 func TestEmitOnlyExtensionCarriedIntoIR(t *testing.T) {
 	def, err := NormalizeOpenAPI([]byte(emitOnlySpec))
 	if err != nil {

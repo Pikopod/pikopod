@@ -38,17 +38,14 @@ func rec(status int, body any, redacted ...proxy.SectionRedaction) *proxy.Record
 		RespKind: "json", RespBody: body, Redacted: redacted}
 }
 
-// The provider disagreeing with its own docs: enum outside the documented
-// set, required field absent, wrong type, undeclared status — each a
-// structurally certain violation, deduped with occurrence counts.
 func TestConformanceViolations(t *testing.T) {
 	def := specDef(t)
 	report := Check(def, []*proxy.Record{
-		rec(200, map[string]any{"id": "ch_1", "status": "succeeded", "amount": float64(5)}), // enum
-		rec(200, map[string]any{"id": "ch_1", "status": "succeeded", "amount": float64(5)}), // same → dedupe
-		rec(200, map[string]any{"id": "ch_1"}),                                              // required: status absent
-		rec(200, map[string]any{"id": "ch_1", "status": "success", "amount": "500"}),        // type
-		rec(201, map[string]any{"id": "ch_1"}),                                              // undeclared 2xx status
+		rec(200, map[string]any{"id": "ch_1", "status": "succeeded", "amount": float64(5)}),
+		rec(200, map[string]any{"id": "ch_1", "status": "succeeded", "amount": float64(5)}),
+		rec(200, map[string]any{"id": "ch_1"}),
+		rec(200, map[string]any{"id": "ch_1", "status": "success", "amount": "500"}),
+		rec(201, map[string]any{"id": "ch_1"}),
 	})
 	if report.Records != 5 {
 		t.Fatalf("records counted wrong: %d", report.Records)
@@ -69,16 +66,13 @@ func TestConformanceViolations(t *testing.T) {
 	if v := byCode["status_undeclared"]; v.Severity != "error" {
 		t.Fatalf("undeclared SUCCESS must be error severity: %+v", report.Violations)
 	}
-	// A clean record adds nothing.
+
 	clean := Check(def, []*proxy.Record{rec(200, map[string]any{"id": "x", "status": "success"})})
 	if len(clean.Violations) != 0 {
 		t.Fatalf("clean traffic must not violate: %+v", clean.Violations)
 	}
 }
 
-// Sanitizer awareness: redacted evidence proves nothing — a DROPped field
-// is not a required-violation, a TOKENIZEd value is not an enum-violation.
-// Both count as unverifiable instead.
 func TestConformanceSuppressesRedactedEvidence(t *testing.T) {
 	def := specDef(t)
 	report := Check(def, []*proxy.Record{

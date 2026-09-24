@@ -12,10 +12,6 @@ import (
 	"github.com/pikopod/pikopod/internal/scenario/archetype"
 )
 
-// A realistic schema exercising: custom root names via a schema block, enum,
-// interface, union, custom scalar, input types, lists, non-null wrappers,
-// descriptions, defaults, a forward reference (UserFilter used before
-// defined), a subscription, and the User→posts→Post→author→User cycle.
 const testSDL = `"""
 Acme social graph.
 """
@@ -141,8 +137,6 @@ func TestGraphQLSDLConversion(t *testing.T) {
 		t.Errorf("GraphQL must not invent auth schemes, got %d", len(def.AuthSchemes))
 	}
 
-	// Query field → GET on a synthetic collection path, scalar arg as a
-	// required query parameter.
 	user := endpointByOp(t, def, "query.user")
 	if user.Method.Value != "GET" || user.PathTemplate.Value != "/graphql/query/user" {
 		t.Errorf("query.user = %s %s", user.Method.Value, user.PathTemplate.Value)
@@ -157,7 +151,7 @@ func TestGraphQLSDLConversion(t *testing.T) {
 	if user.Summary == nil || user.Summary.Value != "Fetch a single user by id." {
 		t.Errorf("query.user summary lost: %+v", user.Summary)
 	}
-	// 200 response is a $ref to the User component.
+
 	if len(user.Responses) != 1 || user.Responses[0].StatusCode != "200" {
 		t.Fatalf("query.user responses = %+v", user.Responses)
 	}
@@ -166,7 +160,6 @@ func TestGraphQLSDLConversion(t *testing.T) {
 		t.Errorf("query.user 200 schema ref = %v", respSchema.Ref)
 	}
 
-	// Non-scalar args are skipped as parameters and noted in the description.
 	users := endpointByOp(t, def, "query.users")
 	names := map[string]bool{}
 	for _, p := range users.Parameters {
@@ -178,14 +171,12 @@ func TestGraphQLSDLConversion(t *testing.T) {
 	if users.Description == nil || !strings.Contains(users.Description.Value, "filter: UserFilter") {
 		t.Errorf("query.users description must note the skipped arg: %+v", users.Description)
 	}
-	// The list return type survives: array of $ref User.
+
 	usersResp := users.Responses[0].Content[0].Schema
 	if usersResp.Type.Value != "array" || usersResp.Items == nil || usersResp.Items.Ref == nil || *usersResp.Items.Ref != ir.NamedSchemaID("User") {
 		t.Errorf("query.users 200 schema = %+v", usersResp)
 	}
 
-	// Mutation with a single input-object arg → POST whose body IS the input
-	// type; requiredness comes from the input's non-null fields.
 	create := endpointByOp(t, def, "mutation.createUser")
 	if create.Method.Value != "POST" || create.PathTemplate.Value != "/graphql/mutation/createUser" {
 		t.Errorf("mutation.createUser = %s %s", create.Method.Value, create.PathTemplate.Value)
@@ -208,7 +199,6 @@ func TestGraphQLSDLConversion(t *testing.T) {
 		t.Error("CreateUserInput.role must not be required (nullable with default)")
 	}
 
-	// Multi-arg mutation → args-object body, non-null args required.
 	del := endpointByOp(t, def, "mutation.deleteUser")
 	delSchema := del.RequestBody.Content[0].Schema
 	if delSchema.Type.Value != "object" {
@@ -221,7 +211,6 @@ func TestGraphQLSDLConversion(t *testing.T) {
 		t.Error("deleteUser.hard must not be required")
 	}
 
-	// Enum values survive, in declaration order.
 	role := namedSchema(t, def, "Role")
 	if role.Schema.EnumValues == nil {
 		t.Fatal("Role enum values lost")
@@ -237,7 +226,6 @@ func TestGraphQLSDLConversion(t *testing.T) {
 		}
 	}
 
-	// The User→posts→Post→author→User cycle terminates via $refs.
 	userSchema := namedSchema(t, def, "User")
 	posts := propOf(t, &userSchema.Schema, "posts")
 	if posts.Schema.Type.Value != "array" || posts.Schema.Items == nil || posts.Schema.Items.Ref == nil || *posts.Schema.Items.Ref != ir.NamedSchemaID("Post") {
@@ -249,7 +237,6 @@ func TestGraphQLSDLConversion(t *testing.T) {
 		t.Errorf("Post.author = %+v", author.Schema)
 	}
 
-	// Union → oneOf composition; custom scalar → string with format.
 	search := namedSchema(t, def, "SearchResult")
 	if search.Schema.Composition == nil || search.Schema.Composition.Kind != "oneOf" || len(search.Schema.Composition.Members) != 2 {
 		t.Errorf("SearchResult = %+v", search.Schema.Composition)
@@ -259,7 +246,6 @@ func TestGraphQLSDLConversion(t *testing.T) {
 		t.Errorf("DateTime scalar = %+v", dt.Schema)
 	}
 
-	// Catch-all POST /graphql with a {query, variables} body, query required.
 	execute := endpointByOp(t, def, "graphql.execute")
 	if execute.Method.Value != "POST" || execute.PathTemplate.Value != "/graphql" {
 		t.Errorf("graphql.execute = %s %s", execute.Method.Value, execute.PathTemplate.Value)
@@ -269,7 +255,6 @@ func TestGraphQLSDLConversion(t *testing.T) {
 		t.Error("catch-all body query field must be required")
 	}
 
-	// Subscription → webhook carrying the return type.
 	if len(def.Webhooks) != 1 || def.Webhooks[0].Event.Value != "userCreated" {
 		t.Fatalf("webhooks = %+v", def.Webhooks)
 	}
@@ -341,7 +326,7 @@ func TestGraphQLIntrospectionConversion(t *testing.T) {
 	if role.Schema.EnumValues == nil || len(role.Schema.EnumValues.Value) != 2 {
 		t.Errorf("Role enum = %+v", role.Schema.EnumValues)
 	}
-	// Builtin scalars and __-prefixed introspection types never become components.
+
 	for i := range def.Schemas {
 		if def.Schemas[i].Name == "String" || def.Schemas[i].Name == "ID" || strings.HasPrefix(def.Schemas[i].Name, "__") {
 			t.Errorf("unexpected component %q", def.Schemas[i].Name)
@@ -384,8 +369,6 @@ func TestGraphQLSDLTooManyTypes(t *testing.T) {
 	}
 }
 
-// End-to-end: SDL bytes → Detect → IR → the UNCHANGED sandbox engine serves
-// the per-field operations deterministically.
 func TestGraphQLEndToEndSandbox(t *testing.T) {
 	kind, err := Detect([]byte(testSDL))
 	if err != nil || kind != KindGraphQLSDL {
@@ -417,7 +400,6 @@ func TestGraphQLEndToEndSandbox(t *testing.T) {
 
 	a, b := newEngine("seed-1"), newEngine("seed-1")
 
-	// GET on a query op: deterministic 200 shaped by the User schema.
 	ra := get(a, "/graphql/query/user?id=u_1")
 	rb := get(b, "/graphql/query/user?id=u_1")
 	if ra.Code != 200 || rb.Code != 200 {
@@ -442,12 +424,10 @@ func TestGraphQLEndToEndSandbox(t *testing.T) {
 		t.Errorf("role must synthesize from the enum, got %v", body["role"])
 	}
 
-	// The list-returning query op serves too.
 	if rc := get(a, "/graphql/query/users"); rc.Code != 200 {
 		t.Errorf("query.users status = %d", rc.Code)
 	}
 
-	// Mutation op: POST with the input-type body.
 	post := func(eng *sandbox.Engine, path, payload string) *httptest.ResponseRecorder {
 		rec := httptest.NewRecorder()
 		req := httptest.NewRequest("POST", path, strings.NewReader(payload))
@@ -461,8 +441,6 @@ func TestGraphQLEndToEndSandbox(t *testing.T) {
 		t.Errorf("mutation.createUser = %d, deterministic=%v, body=%s", ma.Code, ma.Body.String() == mb.Body.String(), ma.Body.String())
 	}
 
-	// Catch-all POST /graphql: shaped answer for real GraphQL clients, and
-	// the required `query` field is enforced.
 	ca := post(a, "/graphql", `{"query":"{ user(id: \"u_1\") { id } }"}`)
 	if ca.Code != 200 {
 		t.Fatalf("catch-all status = %d, body=%s", ca.Code, ca.Body.String())
@@ -479,9 +457,6 @@ func TestGraphQLEndToEndSandbox(t *testing.T) {
 	}
 }
 
-// The scenario layer works unchanged: happy_path binds against the GraphQL
-// IR (query ops are LIST-shaped), and no auth-dependent archetype binds
-// because GraphQL SDL carries no auth to enforce.
 func TestGraphQLArchetypesBind(t *testing.T) {
 	def := graphqlIR(t)
 	var happy, unauthorized *archetype.Archetype
