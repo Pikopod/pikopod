@@ -1,5 +1,3 @@
-// Schema-node diffing. Every level comes out of DeriveLevel — the walker
-// only classifies the effect and states the guards.
 package specdiff
 
 import (
@@ -10,11 +8,8 @@ import (
 	"github.com/pikopod/pikopod/internal/ir"
 )
 
-// maxSchemaDepth bounds the walk: refs can cycle and provider specs nest
-// deep; past the cap the subtree is simply not compared (never a crash).
 const maxSchemaDepth = 32
 
-// deref follows Ref chains into the named-schema table (bounded).
 func deref(n *ir.IrSchemaNode, table map[string]*ir.IrSchemaNode) *ir.IrSchemaNode {
 	for hops := 0; n != nil && n.Ref != nil && hops < maxSchemaDepth; hops++ {
 		next, ok := table[*n.Ref]
@@ -26,8 +21,6 @@ func deref(n *ir.IrSchemaNode, table map[string]*ir.IrSchemaNode) *ir.IrSchemaNo
 	return n
 }
 
-// diffSchemaNodes compares one old/new schema pair in a direction, emitting
-// findings prefixed with `where` (human) and keyed on argKey (identity).
 func (d *differ) diffSchemaNodes(oldN, newN *ir.IrSchemaNode, dir Direction, where, argKey string, mk mkFn) {
 	d.walkSchema(oldN, newN, dir, where, argKey, "", 0, mk)
 }
@@ -42,11 +35,10 @@ func (d *differ) walkSchema(oldN, newN *ir.IrSchemaNode, dir Direction, where, a
 		return
 	}
 	mk = mk.at(newN.SourcePointer, oldN.SourcePointer)
-	// allOf is an intersection — a merge — so flatten and diff member-wise.
+
 	oldN = ir.FlattenAllOf(oldN, d.oldSchemas)
 	newN = ir.FlattenAllOf(newN, d.newSchemas)
-	// oneOf/anyOf members are NOT diffed pairwise: identity is positional and
-	// a reorder would flood false findings. Only presence/kind/count are certain.
+
 	if (oldN.Composition == nil) != (newN.Composition == nil) {
 		d.emit(mk("schema-restructured", DeriveLevel(Incomparable, dir, Guaranteed, Guards{Uncertain: oldN.Type.IsUncertain() || newN.Type.IsUncertain()}),
 			where+at(path)+" was restructured (composition added/removed)", argKey, path))
@@ -79,8 +71,6 @@ func (d *differ) walkSchema(oldN, newN *ir.IrSchemaNode, dir Direction, where, a
 			argKey, path, oldN.Type.Value, newN.Type.Value))
 	}
 
-	// Nullability. Request: forbidding null narrows what's accepted.
-	// Response: allowing null means consumers that never handled null break.
 	if !oldN.Nullable.Value && newN.Nullable.Value {
 		if dir == Request {
 			d.emit(mk("request-nullable-added", DeriveLevel(Widens, Request, Guaranteed, Guards{}),
@@ -144,7 +134,7 @@ func (d *differ) diffEnums(oldN, newN *ir.IrSchemaNode, dir Direction, label, ar
 	switch {
 	case oldVals == nil && newVals == nil:
 		return
-	case oldVals == nil: // enum introduced where the value space was open
+	case oldVals == nil:
 		if dir == Request {
 			d.emit(mk("request-enum-closed", DeriveLevel(Narrows, Request, Guaranteed, Guards{Uncertain: uncertain}),
 				label+" is now restricted to an enum ["+joinSorted(newVals)+"]", argKey, path))
@@ -153,7 +143,7 @@ func (d *differ) diffEnums(oldN, newN *ir.IrSchemaNode, dir Direction, label, ar
 				label+" is now documented as an enum ["+joinSorted(newVals)+"]", argKey, path))
 		}
 		return
-	case newVals == nil: // enum removed — value space opened
+	case newVals == nil:
 		if dir == Request {
 			d.emit(mk("request-enum-opened", DeriveLevel(Widens, Request, Guaranteed, Guards{}),
 				label+" is no longer restricted to an enum", argKey, path))
@@ -190,7 +180,7 @@ func (d *differ) diffEnums(oldN, newN *ir.IrSchemaNode, dir Direction, label, ar
 			d.emit(mk("request-enum-value-added", DeriveLevel(Widens, Request, Guaranteed, Guards{}),
 				label+": accepts new value "+quote(v), argKey, path, v))
 		} else {
-			// The exhaustive-switch hazard: NOT Tolerated by convention.
+
 			d.emit(mk("response-enum-value-added", DeriveLevel(Widens, Response, Guaranteed, Guards{Uncertain: uncertain}),
 				label+": may now return "+quote(v)+" — exhaustive switches break", argKey, path, v))
 		}
@@ -223,7 +213,7 @@ func (d *differ) diffProperties(oldN, newN *ir.IrSchemaNode, dir Direction, wher
 		if !ok {
 			mk := mk.at("", op.Schema.SourcePointer)
 			if dir == Request {
-				// Clients still sending it are usually ignored by servers.
+
 				d.emit(mk("request-property-removed",
 					DeriveLevel(Narrows, Request, Optional, Guards{Uncertain: op.Required.IsUncertain()}),
 					label+" removed from the request schema", argKey, ppath))
@@ -284,8 +274,7 @@ func (d *differ) diffProperties(oldN, newN *ir.IrSchemaNode, dir Direction, wher
 					"new optional "+label, argKey, ppath))
 			}
 		} else {
-			// Additive response field: consumers ignore unknown fields by
-			// dominant convention (the Tolerated guard) — INFO, not WARN.
+
 			d.emit(mk("response-property-added", DeriveLevel(Widens, Response, Guaranteed, Guards{Tolerated: true}),
 				"new "+label+" in responses", argKey, ppath))
 		}

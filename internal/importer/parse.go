@@ -10,8 +10,6 @@ const (
 	formatYAML
 )
 
-// parseStructured parses under the hardening limits; auto mode routes a leading
-// `{`/`[` to the JSON parser for duplicate-key rejection and safe depth caps.
 func parseStructured(text string, format documentFormat, limits ParseLimits) (any, error) {
 	effective := format
 	if format == formatAuto {

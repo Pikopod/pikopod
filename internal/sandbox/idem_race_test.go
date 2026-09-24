@@ -8,10 +8,6 @@ import (
 	"testing"
 )
 
-// Two concurrent creates with the SAME Idempotency-Key must yield
-// exactly ONE resource — the replay-check and the post-create record are one
-// critical section. A sandbox that exists to teach clients idempotency
-// semantics must not double-create under the client's own retry storm.
 func TestConcurrentIdempotentCreatesYieldOneResource(t *testing.T) {
 	e := newEngine(t, loadWidgets(t), Config{ID: "sbx_idem", Seed: "idem-1"})
 

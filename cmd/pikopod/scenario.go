@@ -1,5 +1,3 @@
-// Scenario CLI: names resolve to archetypes first, then saved packs. Runs are
-// EPHEMERAL by default so a test never pollutes the served sandbox's state.
 package main
 
 import (
@@ -25,7 +23,6 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// loadSandboxDef resolves a registered sandbox and its persisted IR.
 func loadSandboxDef(cfg *config.Config, name string) (*sandboxEntry, *ir.ApiDefinition, error) {
 	entries, err := loadRegistry(cfg.DataDir)
 	if err != nil {
@@ -46,8 +43,6 @@ func loadSandboxDef(cfg *config.Config, name string) (*sandboxEntry, *ir.ApiDefi
 	return entry, &def, nil
 }
 
-// scenarioEngine builds the engine a run executes against (--persist uses the
-// on-disk store). contractVersion 0 = latest; a pin can never be moved later.
 func scenarioEngine(cfg *config.Config, entry *sandboxEntry, def *ir.ApiDefinition, persist bool, contractVersion int) (*sandbox.Engine, func(), error) {
 	var st *sandbox.Store
 	var err error
@@ -71,8 +66,7 @@ func scenarioEngine(cfg *config.Config, entry *sandboxEntry, def *ir.ApiDefiniti
 	eng, err := sandbox.NewEngine(def, sandbox.Config{
 		ID: id, Seed: entry.Seed, Mode: entry.Mode, VirtualClockMs: entry.CreatedClockMs,
 		Effective: effectiveFor(cfg, entry, contractVersion),
-		// Without these a scenario that arms a webhook fault delivers nothing,
-		// and one that needs the recordings tier answers 404.
+
 		WebhookURL:        entry.WebhookURL,
 		WebhookSigningKey: signingKey,
 		Recordings:        recordingsFor(cfg, entry),
@@ -125,7 +119,6 @@ func scenarioList(cfg *config.Config, sandboxName string, verbose bool, out io.W
 	return nil
 }
 
-// resolveRunnable turns a name into a parsed, grounded definition.
 func resolveRunnable(cfg *config.Config, name string, def *ir.ApiDefinition, bindOverrides map[string]string) (*scenario.ScenarioDefinition, *resolve.Info, error) {
 	return resolve.ResolveDetailed(def, name, resolve.Options{PackDirs: packDirs(cfg), BindOverrides: bindOverrides})
 }
@@ -138,12 +131,10 @@ func bindFlags(c resolve.Candidate) string {
 	return b.String()
 }
 
-// packFor finds a saved pack by name (nil for archetypes/paths).
 func packFor(cfg *config.Config, name string) *scenario.Pack {
 	return resolve.PackByName(name, packDirs(cfg))
 }
 
-// coerceInputs converts --input k=v strings per the declared input types.
 func coerceInputs(def *scenario.ScenarioDefinition, kvs []string) (map[string]any, error) {
 	out := map[string]any{}
 	for _, kv := range kvs {
@@ -206,8 +197,6 @@ func scenarioRun(cmd *cobra.Command, args []string) error {
 	}
 	out := cmd.OutOrStdout()
 
-	// Remote target: URL and header values are operator-supplied — the same trust
-	// model as curl; header values are never printed.
 	targetURL, _ := cmd.Flags().GetString("target")
 	targetHeaderKVs, _ := cmd.Flags().GetStringArray("target-header")
 	var remote *scenario.RemoteTarget
@@ -231,7 +220,7 @@ func scenarioRun(cmd *cobra.Command, args []string) error {
 	for _, name := range names {
 		parsed, info, err := resolveRunnable(cfg, name, def, bindOverrides)
 		if err != nil {
-			return err // config-class problem: exit 2, never conflated with a failing scenario
+			return err
 		}
 		if note := info.Note(); note != "" {
 			fmt.Fprintf(out, "note: %s %s\n", name, note)
@@ -297,7 +286,7 @@ func scenarioRun(cmd *cobra.Command, args []string) error {
 	}
 	if failed > 0 {
 		fmt.Fprintf(out, "\n%d scenario(s) failed — exit 1\n", failed)
-		os.Exit(1) // 1 = assertions failed, distinct from 2 = tool error
+		os.Exit(1)
 	}
 	return nil
 }
@@ -396,8 +385,6 @@ func scenarioCreate(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-// weaveAssertions attaches validated extra assertions to the first driving
-// step that carries an assertions array.
 func weaveAssertions(definition map[string]any, intent *nl.Intent) map[string]any {
 	if len(intent.AdditionalAssertions) == 0 {
 		return definition

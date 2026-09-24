@@ -21,7 +21,6 @@ func fetcherFor(pages map[string][]byte) Fetcher {
 	}
 }
 
-// Rung 1: a Postman Documenter page links its collection.
 func TestLadderDocumenterLink(t *testing.T) {
 	page := []byte(`<html><body><a href="https://docs.x.test/api/collections/1/AbC?versionTag=latest">collection</a></body></html>`)
 	collection := []byte(`{"info":{"name":"X","schema":"https://schema.getpostman.com/json/collection/v2.0.0/collection.json"},"item":[]}`)
@@ -35,9 +34,6 @@ func TestLadderDocumenterLink(t *testing.T) {
 	}
 }
 
-// Rung 3: ReadMe-style embedded schema — including hopping from a prose page
-// to /reference, malformed path keys ("/wallets?businessID={id}"), and
-// query-template promotion to parameters.
 func TestLadderReadmeEmbedded(t *testing.T) {
 	embedded := `{"openapi":"3.1.0","info":{"title":"t","version":"1"},"paths":{"/wallets?businessID={businessId}":{"get":{"responses":{"200":{"description":"ok"}}}},"/charges/":{"post":{"responses":{"201":{"description":"c"}}}}}}`
 	refPage := []byte(`<html><body>x "schema":` + embedded + ` y</body></html>`)
@@ -64,14 +60,12 @@ func TestLadderReadmeEmbedded(t *testing.T) {
 	if len(params) != 1 || params[0].(map[string]any)["name"] != "businessID" {
 		t.Fatalf("query template not promoted to parameter: %v", params)
 	}
-	// And the result must survive the real normalize pipeline.
+
 	if _, err := importer.NormalizeOpenAPI(res.Spec); err != nil {
 		t.Fatalf("extracted spec does not normalize: %v", err)
 	}
 }
 
-// Rung 4: no structure at all → the model writes the spec (stubbed here);
-// request-body $refs are inlined so validation actually enforces.
 func TestLadderLLMExtraction(t *testing.T) {
 	prose := []byte(`<html><body><h1>API</h1><p>POST /v1/things requires name.</p></body></html>`)
 
@@ -105,7 +99,6 @@ func TestLadderLLMExtraction(t *testing.T) {
 	}
 }
 
-// Without a key, Tier-C refuses with guidance instead of guessing.
 func TestLadderNoLLMKeyFailsLoudly(t *testing.T) {
 	prose := []byte(`<html><body><p>just words</p></body></html>`)
 	_, err := FromDocsURL("https://docs.x.test/guide", prose, fetcherFor(nil), nil)

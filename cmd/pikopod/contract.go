@@ -1,5 +1,3 @@
-// `pikopod contract <sandbox>` — traffic-admitted additions, spec-vs-traffic
-// disagreements (both sides kept), and pin staleness (reported, never "fixed").
 package main
 
 import (
@@ -107,8 +105,7 @@ func contractReport(cfg *config.Config, sandboxName string, out io.Writer) error
 		case contract.AdmitField:
 			typ := a.Type
 			if typ == "" {
-				// Presence came from redaction pointers; the sanitizer removed
-				// the value before the refiner saw it, so the type is unknown.
+
 				typ = "type unknown (value sanitized)"
 			}
 			fmt.Fprintf(out, "  v%-3d field     %-40s %s (%s, presence %.2f)\n", a.Version, loc, a.Field, typ, a.Presence)
@@ -134,8 +131,6 @@ func contractReport(cfg *config.Config, sandboxName string, out io.Writer) error
 		}
 	}
 
-	// From-drift pins resolve at their pin-time version forever; report how
-	// far the live contract has moved past each so staleness is actionable.
 	packs, packFails := scenario.ListPacks(packDirs(cfg)...)
 	for path, ferr := range packFails {
 		fmt.Fprintf(out, "\nwarning: could not read pack %s (%v) — its pin, if any, is not shown\n", path, ferr)

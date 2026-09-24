@@ -9,8 +9,6 @@ import (
 	"testing"
 )
 
-// Both legs: an armed fault changes the traffic the app sees and clears cleanly,
-// and the surface refuses anything that is not a well-formed sandbox fault.
 func TestChaosAdminSurface(t *testing.T) {
 	cfg := testConfig(t, "https://example.invalid")
 	if err := sandboxAdd(cfg, "widgets", widgetsSpecPath, "chaos-seed-1", "", "", false, io.Discard); err != nil {
@@ -35,7 +33,6 @@ func TestChaosAdminSurface(t *testing.T) {
 		return resp
 	}
 
-	// Leg 1: arm → the app's traffic trips it → clear → traffic recovers.
 	if resp := post(admin, `{"method":"POST","path":"/widgets","kind":"error","status":503}`); resp.StatusCode != 201 {
 		t.Fatalf("arming should 201, got %d", resp.StatusCode)
 	}
@@ -65,13 +62,10 @@ func TestChaosAdminSurface(t *testing.T) {
 		t.Fatalf("recovered create should echo: %v", created)
 	}
 
-	// Webhook kinds are armable here now: a kind reachable only from a scenario
-	// step runs on a throwaway engine and can never reach a user's application.
 	if resp := post(admin, `{"kind":"duplicate_webhook","probability":1}`); resp.StatusCode != 201 {
 		t.Fatalf("webhook fault kind must arm, got %d", resp.StatusCode)
 	}
 
-	// Leg 2: refusals — malformed rules and unknown targets die loudly.
 	if resp := post(admin, `{"method":"POST","path":"/widgets","kind":"not_a_kind"}`); resp.StatusCode != 400 {
 		t.Fatalf("unknown fault kind must be refused, got %d", resp.StatusCode)
 	}

@@ -1,5 +1,3 @@
-// Deterministic value synthesis from a normalized IR schema: never reads the
-// wall clock, and all randomness flows through the seeded Prng.
 package sandbox
 
 import (
@@ -51,7 +49,6 @@ func numericConstraint(schema *ir.IrSchemaNode, key string) *float64 {
 	return nil
 }
 
-// isoFrom formats the virtual clock like JS Date.toISOString().
 func isoFrom(virtualClockMs int64, dateOnly bool) string {
 	iso := time.UnixMilli(virtualClockMs).UTC().Format("2006-01-02T15:04:05.000Z")
 	if dateOnly {
@@ -60,7 +57,6 @@ func isoFrom(virtualClockMs int64, dateOnly bool) string {
 	return iso
 }
 
-// pickAny mirrors prng.pick over heterogeneous enum values.
 func pickAny(p *Prng, items []any) any {
 	return items[p.Int(0, len(items)-1)]
 }
@@ -93,7 +89,7 @@ func synthString(schema *ir.IrSchemaNode, ctx *synthContext, fieldName string) s
 	case "ipv4":
 		return strconv.Itoa(p.Int(1, 254)) + "." + strconv.Itoa(p.Int(0, 255)) + "." + strconv.Itoa(p.Int(0, 255)) + "." + strconv.Itoa(p.Int(1, 254))
 	}
-	// Light, provider-neutral name hints when no explicit format is declared.
+
 	lname := strings.ToLower(fieldName)
 	if lnameEmail.MatchString(lname) {
 		return p.Word() + "@" + p.Word() + ".test"
@@ -134,7 +130,7 @@ func synthNumber(schema *ir.IrSchemaNode, ctx *synthContext, integer bool) any {
 	if integer {
 		return ctx.prng.Int(int(math.Ceil(lo)), int(math.Floor(hi)))
 	}
-	// Math.round(x*100)/100 — JS rounds half toward +Infinity.
+
 	return math.Floor((lo+ctx.prng.Next()*(hi-lo))*100+0.5) / 100
 }
 
@@ -199,12 +195,11 @@ func synthesize(schema *ir.IrSchemaNode, ctx *synthContext, depth int, fieldName
 	case "null":
 		return nil
 	default:
-		// 'unknown' — a small, harmless token.
+
 		return ctx.prng.Word()
 	}
 }
 
-// derefSchema follows a $ref chain (≤10) to the concrete schema.
 func derefSchema(schema *ir.IrSchemaNode, ctx *synthContext, depth int) *ir.IrSchemaNode {
 	if schema == nil || depth > 10 {
 		return schema
@@ -215,8 +210,6 @@ func derefSchema(schema *ir.IrSchemaNode, ctx *synthContext, depth int) *ir.IrSc
 	return schema
 }
 
-// completeResource synthesizes a base for every declared field, then overlays the
-// client's attributes (the client wins). declaredOnly is ACTION mode.
 func completeResource(responseSchema *ir.IrSchemaNode, provided *JSONObject, ctx *synthContext, declaredOnly bool) *JSONObject {
 	resolved := derefSchema(responseSchema, ctx, 0)
 	if resolved == nil || resolved.Type.Value != "object" {
@@ -253,8 +246,6 @@ func completeResource(responseSchema *ir.IrSchemaNode, provided *JSONObject, ctx
 
 var countLike = regexp.MustCompile(`(?i)count|total|size`)
 
-// shapeListBody shapes items to the declared response schema: a bare array, or an
-// envelope whose array property holds them (count-like integers get the count).
 func shapeListBody(responseSchema *ir.IrSchemaNode, items []any, ctx *synthContext) any {
 	resolved := derefSchema(responseSchema, ctx, 0)
 	if resolved == nil || resolved.Type.Value != "object" {
@@ -269,7 +260,7 @@ func shapeListBody(responseSchema *ir.IrSchemaNode, items []any, ctx *synthConte
 		}
 	}
 	if arrayProp == nil {
-		return items // no obvious envelope — return the bare array
+		return items
 	}
 
 	out := NewJSONObject()

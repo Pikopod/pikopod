@@ -10,9 +10,6 @@ import (
 	"testing"
 )
 
-// TestParity_Sanitize enforces byte/structure parity against goldens over a
-// realistic corpus — never hand-written, never from unit toys.
-
 type goldens struct {
 	MasterKey  string `json:"masterKey"`
 	Scope      string `json:"scope"`
@@ -69,7 +66,7 @@ func TestParity_Classify(t *testing.T) {
 	g := loadGoldens(t)
 	for _, c := range g.Classify {
 		if knownStricterKeyRE.MatchString(c.Key) {
-			continue // deliberate strictness divergence; see strictness_test.go
+			continue
 		}
 		if mode := Classify(c.Key, c.Value, c.IsHeader); mode != c.Mode {
 			t.Errorf("classify(%q,%v,header=%v) = %s, golden = %s", c.Key, c.Value, c.IsHeader, mode, c.Mode)
@@ -77,12 +74,6 @@ func TestParity_Classify(t *testing.T) {
 	}
 }
 
-// knownStricterKeyRE: keys held to a stricter rule than the goldens encode —
-// card-security/one-time secrets and expiry components are redacted
-// REGARDLESS of JSON type, where the goldens let the numeric forms through.
-// Fields under these keys are pruned from BOTH sides of the parity comparison
-// here and asserted directly in strictness_test.go — the divergence is
-// explicit, never silent.
 var knownStricterKeyRE = regexp.MustCompile(`(?i)(^|_|-)(cvv2?|cvc2?|cid|csc|pin|otp|passcode|security[_-]?code|one[_-]?time[_-]?(code|password|pin)|expiry|expiration|exp[_-]?month|exp[_-]?year|valid[_-]?(thru|until)|birth|birthday)($|_|-)`)
 
 func pruneStricterKeys(node any) any {
@@ -128,7 +119,7 @@ func TestParity_Sanitize(t *testing.T) {
 		if !reflect.DeepEqual(got, want) {
 			t.Errorf("%s: sanitized tree diverges from golden\n got: %v\nwant: %v", c.Name, got, want)
 		}
-		// Walk order differs across languages; redactions compare as a set.
+
 		if gotR, wantR := redactionSet(pruneStricterRedactions(res.Redactions)), redactionSet(pruneStricterRedactions(c.Redactions)); !reflect.DeepEqual(gotR, wantR) {
 			t.Errorf("%s: redactions diverge\n got: %v\nwant: %v", c.Name, gotR, wantR)
 		}

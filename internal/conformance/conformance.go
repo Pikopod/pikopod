@@ -1,5 +1,3 @@
-// Package conformance validates recorded traffic against the SPEC-derived IR.
-// Inferred claims and sanitizer-redacted evidence are UNVERIFIABLE, not violations.
 package conformance
 
 import (
@@ -15,26 +13,23 @@ import (
 	"github.com/pikopod/pikopod/internal/volatile"
 )
 
-// Violation is one spec-relative disagreement, deduped across records.
 type Violation struct {
 	Method      string `json:"method"`
 	Template    string `json:"template"`
 	Status      int    `json:"status"`
 	Pointer     string `json:"pointer,omitempty"`
-	Code        string `json:"code"`     // required | type | enum | status_undeclared | composition
-	Severity    string `json:"severity"` // error | warning
+	Code        string `json:"code"`
+	Severity    string `json:"severity"`
 	Message     string `json:"message"`
 	Occurrences int    `json:"occurrences"`
-	// Observed is the offending wire value, structurally — machine-readable so
-	// spec-update can derive a patch without parsing Message.
+
 	Observed string `json:"observed,omitempty"`
 }
 
-// Report is the batch outcome.
 type Report struct {
-	Records      int // JSON responses examined
-	Skipped      int // no matching spec endpoint / non-JSON
-	Unverifiable int // checks suppressed because the sanitizer redacted the evidence
+	Records      int
+	Skipped      int
+	Unverifiable int
 	Violations   []Violation
 }
 
@@ -45,10 +40,9 @@ type checker struct {
 	seen     map[string]*Violation
 	order    []string
 	report   *Report
-	redacted map[string]string // resp_body pointer → mode
+	redacted map[string]string
 }
 
-// Check validates each record's response against the IR.
 func Check(def *ir.ApiDefinition, records []*proxy.Record) *Report {
 	c := &checker{named: map[string]*ir.IrSchemaNode{}, seen: map[string]*Violation{}, report: &Report{}}
 	for i := range def.Schemas {
@@ -86,8 +80,7 @@ func (c *checker) checkRecord(def *ir.ApiDefinition, rec *proxy.Record) {
 	if resp == nil {
 		severity, code := "warning", "status_undeclared"
 		if rec.Status >= 200 && rec.Status < 300 {
-			// An undocumented SUCCESS has no contract behind it; an
-			// undocumented error code is tolerable reality.
+
 			severity = "error"
 		}
 		c.add(endpoint, rec.Status, "", code, severity,
@@ -96,7 +89,7 @@ func (c *checker) checkRecord(def *ir.ApiDefinition, rec *proxy.Record) {
 	}
 	schema := jsonSchemaOf(resp)
 	if schema == nil {
-		return // declared but schemaless: nothing checkable
+		return
 	}
 	c.walk(endpoint, rec.Status, schema, rec.RespBody, "", 0)
 }
@@ -112,12 +105,11 @@ func (c *checker) walk(endpoint *ir.Endpoint, status int, node *ir.IrSchemaNode,
 		return
 	}
 	if node.Composition != nil {
-		// allOf is an intersection — flatten and check it like any object
-		// (FlattenAllOf leaves unmergeable/choice compositions untouched).
+
 		node = ir.FlattenAllOf(node, c.named)
 	}
 	if node.Composition != nil {
-		// oneOf/anyOf are choices: only "no variant fits" is certain.
+
 		c.checkVariants(endpoint, status, node, value, pointer, depth)
 		return
 	}
@@ -141,12 +133,10 @@ func (c *checker) walk(endpoint *ir.Endpoint, status int, node *ir.IrSchemaNode,
 			}
 			c.addObserved(endpoint, status, pointer, "type", "error",
 				fmt.Sprintf("documented %s, got %s", want, got), got)
-			return // a wrong-typed subtree yields no deeper certain claims
+			return
 		}
 	}
 
-	// Value-volatile fields (request ids, timestamps) are exempt: an enum claim
-	// over a churning value is a spec-authoring artifact, not a violation.
 	if s, isStr := value.(string); isStr && node.EnumValues != nil &&
 		!volatile.IsResponseField(lastPointerSegment(pointer)) {
 		allowed := stringEnum(node.EnumValues.Value)
@@ -168,7 +158,7 @@ func (c *checker) walk(endpoint *ir.Endpoint, status int, node *ir.IrSchemaNode,
 			if !present {
 				if p.Required.Value {
 					if mode, redacted := c.redacted[childPtr]; redacted && mode == "DROP" {
-						// The sanitizer removed it — absence proves nothing.
+
 						c.report.Unverifiable++
 						continue
 					}
@@ -182,30 +172,26 @@ func (c *checker) walk(endpoint *ir.Endpoint, status int, node *ir.IrSchemaNode,
 	case []any:
 		if node.Items != nil {
 			for i := range v {
-				// One shared pointer per element position class keeps dedupe sane.
+
 				c.walk(endpoint, status, node.Items, v[i], pointer+"/*", depth+1)
 			}
 		}
 	}
 }
 
-// checkVariants probes each member with a SCRATCH checker; only "no variant
-// fits" is reported. A variant passing on redacted evidence counts as a fit.
 func (c *checker) checkVariants(endpoint *ir.Endpoint, status int, node *ir.IrSchemaNode, value any, pointer string, depth int) {
 	members := node.Composition.Members
 	for i := range members {
 		scratch := &checker{named: c.named, seen: map[string]*Violation{}, report: &Report{}, redacted: c.redacted}
 		scratch.walk(endpoint, status, &members[i], value, pointer, depth+1)
 		if len(scratch.seen) == 0 {
-			return // this variant fits
+			return
 		}
 	}
 	c.add(endpoint, status, pointer, "composition", "error",
 		fmt.Sprintf("matches none of the %d documented %s variants", len(members), node.Composition.Kind))
 }
 
-// suppressed reports whether the sanitizer replaced the value at pointer —
-// SUBSTITUTE/TOKENIZE evidence can prove nothing about types or enums.
 func (c *checker) suppressed(pointer string) bool {
 	if _, hit := c.redacted[pointer]; hit {
 		c.report.Unverifiable++
@@ -233,8 +219,6 @@ func (c *checker) addObserved(endpoint *ir.Endpoint, status int, pointer, code, 
 	c.order = append(c.order, key)
 }
 
-// matchEndpoint compares paths segment-wise: spec statics must match
-// literally, spec params accept anything (templatized segments included).
 func matchEndpoint(def *ir.ApiDefinition, method, template string) *ir.Endpoint {
 	segs := strings.Split(strings.Trim(template, "/"), "/")
 	for i := range def.Endpoints {
@@ -263,7 +247,6 @@ func matchEndpoint(def *ir.ApiDefinition, method, template string) *ir.Endpoint 
 	return nil
 }
 
-// declaredResponse: exact code → NXX range → default.
 func declaredResponse(endpoint *ir.Endpoint, status int) *ir.ResponseDef {
 	code := fmt.Sprint(status)
 	rangeCode := code[:1] + "XX"
@@ -294,7 +277,6 @@ func jsonSchemaOf(resp *ir.ResponseDef) *ir.IrSchemaNode {
 	return nil
 }
 
-// scalarClass folds IR scalar types into JSON value classes.
 func scalarClass(t string) string {
 	switch t {
 	case "integer", "number":
@@ -302,7 +284,7 @@ func scalarClass(t string) string {
 	case "string", "boolean", "object", "array":
 		return t
 	default:
-		return "" // unknown/absent: no claim
+		return ""
 	}
 }
 
@@ -328,7 +310,7 @@ func stringEnum(vals []any) []string {
 	for _, v := range vals {
 		s, ok := v.(string)
 		if !ok {
-			return nil // mixed-typed enums: no certain string claim
+			return nil
 		}
 		out = append(out, s)
 	}
@@ -336,7 +318,6 @@ func stringEnum(vals []any) []string {
 	return out
 }
 
-// lastPointerSegment: "/data/entries/*/request_id" → "request_id".
 func lastPointerSegment(pointer string) string {
 	if i := strings.LastIndexByte(pointer, '/'); i >= 0 {
 		return pointer[i+1:]

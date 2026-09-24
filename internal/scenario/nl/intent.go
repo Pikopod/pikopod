@@ -1,5 +1,3 @@
-// The schema-constrained intent the model emits, and the second firewall:
-// deterministic validation of that intent against the grounded inventory.
 package nl
 
 import (
@@ -8,28 +6,22 @@ import (
 	"github.com/pikopod/pikopod/internal/scenario"
 )
 
-// Intent is the model's proposed scenario: an archetype plus its bindings.
 type Intent struct {
 	ArchetypeID          string               `json:"archetypeId"`
 	Bindings             map[string]string    `json:"bindings"`
 	AdditionalAssertions []scenario.Assertion `json:"additionalAssertions"`
-	// UnmappedIntent is REQUIRED: what the description asked for that this
-	// intent did not capture.
+
 	UnmappedIntent string  `json:"unmappedIntent"`
 	Confidence     float64 `json:"confidence"`
 }
 
-// MaxGeneratedAssertions caps generated assertions per step.
 const MaxGeneratedAssertions = 5
 
-// IntentError is one reason an intent was refused.
 type IntentError struct {
 	Code    string `json:"code"`
 	Message string `json:"message"`
 }
 
-// ParseIntent decodes the model's JSON-shaped intent value strictly,
-// defaulting additionalAssertions to [].
 func ParseIntent(raw any) (*Intent, error) {
 	obj, ok := raw.(map[string]any)
 	if !ok {
@@ -67,7 +59,7 @@ func ParseIntent(raw any) (*Intent, error) {
 		if len(arr) > 20 {
 			return nil, fmt.Errorf("intent additionalAssertions exceeds 20")
 		}
-		// Reuse the definition parser's assertion decoding via a synthetic step.
+
 		synthetic := map[string]any{
 			"steps": []any{map[string]any{"key": "a", "type": "NOTE", "config": map[string]any{"text": "x"}, "assertions": v}},
 		}
@@ -90,8 +82,6 @@ func ParseIntent(raw any) (*Intent, error) {
 	return out, nil
 }
 
-// ValidateIntent rejects any identifier not in the inventory, so it never
-// reaches a step. Deterministic; no model.
 func ValidateIntent(intent *Intent, inv *Inventory) []IntentError {
 	var errors []IntentError
 
@@ -121,7 +111,7 @@ func ValidateIntent(intent *Intent, inv *Inventory) []IntentError {
 	if len(intent.AdditionalAssertions) > MaxGeneratedAssertions {
 		errors = append(errors, IntentError{Code: "TOO_MANY_ASSERTIONS", Message: fmt.Sprintf("generated assertions exceed the cap of %d", MaxGeneratedAssertions)})
 	}
-	// Volatile paths must be matchers, never literals.
+
 	for i := range intent.AdditionalAssertions {
 		a := &intent.AdditionalAssertions[i]
 		isBodyPath := a.Path != nil && (a.Target == "response.body" || a.Target == "state.resource")

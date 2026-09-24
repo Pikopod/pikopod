@@ -1,5 +1,3 @@
-// from-recordings generates a scenario pack from a recorded traffic window.
-// Value chaining is deliberately conservative: identifier shapes only.
 package bridge
 
 import (
@@ -11,18 +9,14 @@ import (
 	"github.com/pikopod/pikopod/internal/proxy"
 )
 
-// FromRecordingsOptions tunes pack generation.
 type FromRecordingsOptions struct {
-	// Last caps the number of REQUEST steps (default 20, newest window).
 	Last int
-	// Name overrides the pack slug (default traffic-<upstream>).
+
 	Name string
 }
 
 const defaultFromRecordingsSteps = 20
 
-// BuildFromRecordings renders a pack from a recorded window. Records must be
-// in time order (readRecordings' order).
 func BuildFromRecordings(upstream string, records []*proxy.Record, opts FromRecordingsOptions) (string, map[string]any, error) {
 	limit := opts.Last
 	if limit <= 0 {
@@ -40,12 +34,10 @@ func BuildFromRecordings(upstream string, records []*proxy.Record, opts FromReco
 		name = "traffic-" + upstream
 	}
 
-	// producers: identifier-shaped value → variable binding on the step that
-	// FIRST produced it, captured by concrete JSONPath, not value coincidence.
 	type producer struct {
 		varName string
 		stepIdx int
-		path    string // JSONPath into the producer's response body
+		path    string
 		used    bool
 	}
 	producers := map[string]*producer{}
@@ -56,11 +48,9 @@ func BuildFromRecordings(upstream string, records []*proxy.Record, opts FromReco
 	for i, rec := range records {
 		stepKey := fmt.Sprintf("t%02d-%s-%s", i+1, strings.ToLower(rec.Method), slugPath(rec.Path))
 
-		// Consume: rewrite identifier-shaped values this window already
-		// produced. Path segments and request-body strings only.
 		pathOut := rec.Path
 		if q := strings.IndexByte(pathOut, '?'); q >= 0 {
-			pathOut = pathOut[:q] // recorded query strings are per-call noise
+			pathOut = pathOut[:q]
 		}
 		segs := strings.Split(pathOut, "/")
 		for j, seg := range segs {
@@ -96,15 +86,13 @@ func BuildFromRecordings(upstream string, records []*proxy.Record, opts FromReco
 		}
 		steps = append(steps, step)
 
-		// Produce: register identifier-shaped response values for LATER
-		// requests (never this one — a chain needs temporal order).
 		if rec.RespKind == "json" && rec.RespBody != nil {
 			walkProducerValues(rec.RespBody, "$", func(jsonPath, value string) {
 				if !chainable(value) {
 					return
 				}
 				if _, exists := producers[value]; exists {
-					return // first producer wins — deterministic
+					return
 				}
 				varSeq++
 				producers[value] = &producer{varName: fmt.Sprintf("chain_%d", varSeq), stepIdx: i, path: jsonPath}
@@ -112,7 +100,6 @@ func BuildFromRecordings(upstream string, records []*proxy.Record, opts FromReco
 		}
 	}
 
-	// Attach captures to producer steps (only for values actually consumed).
 	for _, p := range producers {
 		if !p.used {
 			continue
@@ -137,8 +124,6 @@ func BuildFromRecordings(upstream string, records []*proxy.Record, opts FromReco
 	return name, pack, nil
 }
 
-// chainable gates value chaining to identifier shapes; short literals, enum
-// words, amounts and booleans never chain.
 func chainable(v string) bool {
 	if len(v) < 8 || len(v) > 200 || strings.ContainsAny(v, " \t\n{}") {
 		return false
@@ -179,8 +164,6 @@ func hasLetterAndDigit(v string) bool {
 	return letter && digit
 }
 
-// walkProducerValues visits string scalars under OBJECT keys only (an
-// index-addressed capture is order-fragile), sorted so first-producer-wins.
 func walkProducerValues(node any, jsonPath string, visit func(path, value string)) {
 	obj, ok := node.(map[string]any)
 	if !ok {
@@ -202,7 +185,6 @@ func walkProducerValues(node any, jsonPath string, visit func(path, value string
 	}
 }
 
-// rewriteBody deep-copies a request body, replacing chained string values.
 func rewriteBody(node any, replace func(string) (string, bool)) any {
 	switch n := node.(type) {
 	case map[string]any:

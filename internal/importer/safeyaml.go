@@ -11,8 +11,6 @@ import (
 	"github.com/pikopod/pikopod/internal/ir"
 )
 
-// parseYAMLSafely loads core-schema YAML only: no custom tags, bounded alias
-// expansion, duplicate keys a hard error, no YAML 1.1 leftovers from yaml.v3.
 func parseYAMLSafely(text string, limits ParseLimits) (any, error) {
 	doc, _, err := parseYAMLWithPositions(text, limits, false)
 	return doc, err
@@ -99,13 +97,11 @@ func (c *yamlConverter) convertAt(node *yaml.Node, pointer string) (any, error) 
 				}
 				key = scalarKeyString(kv)
 			} else {
-				// Complex keys have no JS-object analogue; reject like the
-				// reference's strict mapping handling would.
+
 				return nil, specErr(SpecParseError, "YAML parse failed: non-scalar mapping key")
 			}
 			if key == "<<" {
-				// Merge keys are YAML 1.1; the core schema treats them as
-				// ordinary keys, so do the same (yaml.v3 would merge).
+
 				key = "<<"
 			}
 			if out.Has(key) {
@@ -146,7 +142,6 @@ func (c *yamlConverter) convertAt(node *yaml.Node, pointer string) (any, error) 
 	}
 }
 
-// scalar resolves a scalar node against the YAML 1.2 core schema.
 func (c *yamlConverter) scalar(node *yaml.Node) (any, error) {
 	v := node.Value
 	if node.Style&(yaml.SingleQuotedStyle|yaml.DoubleQuotedStyle|yaml.LiteralStyle|yaml.FoldedStyle) != 0 {
@@ -169,8 +164,6 @@ func (c *yamlConverter) scalar(node *yaml.Node) (any, error) {
 	return v, nil
 }
 
-// coreNumber parses YAML 1.2 core-schema numbers: decimal ints, 0o octal,
-// 0x hex, floats, and .inf/.nan forms.
 func coreNumber(v string) (float64, bool) {
 	s := v
 	neg := false
@@ -219,8 +212,6 @@ func coreNumber(v string) (float64, bool) {
 	return f, true
 }
 
-// isCoreNumericShape rejects strings ParseFloat would accept but the core
-// schema would not (e.g. "1_000", "0x" handled above, "Inf").
 func isCoreNumericShape(s string) bool {
 	seenDigit := false
 	i := 0
@@ -250,7 +241,6 @@ func isCoreNumericShape(s string) bool {
 	return i == len(s)
 }
 
-// scalarKeyString renders a scalar as a JS object key.
 func scalarKeyString(v any) string {
 	switch k := v.(type) {
 	case nil:

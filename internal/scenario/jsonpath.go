@@ -1,5 +1,3 @@
-// A deliberately small, bounded JSONPath getter — `$.a.b`, `$.a[0]`,
-// `$['a']` and nothing that could hang a worker.
 package scenario
 
 import (
@@ -12,7 +10,7 @@ import (
 const maxJSONPathDepth = 32
 
 type pathSegment struct {
-	kind  string // "key" | "index"
+	kind  string
 	key   string
 	index int
 }
@@ -25,7 +23,7 @@ func parseJSONPath(path string) ([]pathSegment, error) {
 		return nil, fmt.Errorf("path must start with '$': %s", path)
 	}
 	var segments []pathSegment
-	i := 1 // skip '$'
+	i := 1
 	for i < len(trimmed) {
 		if len(segments) > maxJSONPathDepth {
 			return nil, fmt.Errorf("path exceeds maximum depth")
@@ -67,8 +65,6 @@ func parseJSONPath(path string) ([]pathSegment, error) {
 	return segments, nil
 }
 
-// getByPath resolves a path against a root document. found=false means the
-// path is absent; a malformed path is an error.
 func getByPath(root any, path string) (found bool, value any, err error) {
 	segments, err := parseJSONPath(path)
 	if err != nil {

@@ -15,9 +15,6 @@ import (
 	"github.com/pikopod/pikopod/internal/ir"
 )
 
-// widgetsSpec plus a top-level OpenAPI `webhooks` section — the declaration
-// that switches the outbox on. Event names follow the provider convention the
-// engine emits: `<typeSlug>.<action>`.
 const webhookWidgetsSpec = `{
   "openapi": "3.1.0",
   "info": {"title": "Widgets", "version": "1.0.0"},
@@ -78,9 +75,6 @@ func driveCrud(t *testing.T, e *Engine) {
 	}
 }
 
-// Same seed ⇒ identical delivery ids, payload bytes, and signatures across
-// fresh engines; a different seed changes the ids. Envelope shape and HMAC
-// are verified against the reference construction.
 func TestWebhookOutboxDeterministic(t *testing.T) {
 	def := loadWebhookWidgets(t)
 	run := func(seed string) []WebhookDelivery {
@@ -101,8 +95,6 @@ func TestWebhookOutboxDeterministic(t *testing.T) {
 		t.Fatalf("unexpected events: %v", events)
 	}
 
-	// Envelope: {id, event, created (virtual seconds), data}; the deleted
-	// event carries only { id: key }.
 	var env map[string]any
 	if err := json.Unmarshal(a[2].Payload, &env); err != nil {
 		t.Fatalf("payload is not JSON: %v", err)
@@ -121,8 +113,6 @@ func TestWebhookOutboxDeterministic(t *testing.T) {
 		t.Fatalf("delivery id prefix: %s", a[0].ID)
 	}
 
-	// The signature is HMAC-SHA256(secret, "<createdSec>.<payload>") — the
-	// ANZA_V1_SCHEME a reference receiver verifies.
 	e := newEngine(t, def, Config{ID: "sbx_wh_sig", Seed: "seed-wh"})
 	want := signWebhookPayload(e.WebhookSecret(), a[0].VirtualTimeMs/1000, a[0].Payload)
 	if !hmac.Equal([]byte(want), []byte(a[0].Signature)) {
@@ -135,8 +125,6 @@ func TestWebhookOutboxDeterministic(t *testing.T) {
 	}
 }
 
-// An IR without declared webhooks emits nothing — declaring webhooks IS the
-// (implicit, match-all) subscription.
 func TestWebhookOutboxOffWithoutDeclaration(t *testing.T) {
 	e := newEngine(t, loadWidgets(t), Config{ID: "sbx_nowh", Seed: "s"})
 	if r := do(t, e, "POST", "/widgets", `{"name":"a"}`, nil); r.status != 201 {
@@ -155,15 +143,14 @@ func TestWebhookFaultDuplicate(t *testing.T) {
 	if len(got) != 2 {
 		t.Fatalf("duplicate fault must emit twice, got %d", len(got))
 	}
-	// At-least-once replay: identical envelope (same id, payload, signature),
-	// distinguishable log seq.
+
 	if got[0].ID != got[1].ID || string(got[0].Payload) != string(got[1].Payload) || got[0].Signature != got[1].Signature {
 		t.Fatal("duplicate must be the SAME delivery replayed")
 	}
 	if got[0].Seq == got[1].Seq {
 		t.Fatal("replay must advance the log seq")
 	}
-	// One-shot: the next create delivers once.
+
 	do(t, e, "POST", "/widgets", `{"name":"b"}`, nil)
 	if got := e.Deliveries("widgets.created"); len(got) != 3 {
 		t.Fatalf("duplicate fault must be one-shot, got %d", len(got))
@@ -184,7 +171,7 @@ func TestWebhookFaultDrop(t *testing.T) {
 	if got := e.Deliveries("widgets.created"); len(got) != 1 {
 		t.Fatalf("drop fault must be one-shot, got %d", len(got))
 	}
-	// The event filter is exact: an unrelated event is untouched.
+
 	e.ArmFault(FaultRule{Kind: FaultDropWebhook, Event: "widgets.updated", Probability: 1})
 	do(t, e, "POST", "/widgets", `{"name":"c"}`, nil)
 	if got := e.Deliveries("widgets.created"); len(got) != 2 {
@@ -196,7 +183,7 @@ func TestWebhookFaultReorder(t *testing.T) {
 	e := newEngine(t, loadWebhookWidgets(t), Config{ID: "sbx_re", Seed: "s"})
 	e.ArmFault(FaultRule{Kind: FaultReorderWebhook, Event: "widgets.created", Probability: 1})
 	do(t, e, "POST", "/widgets", `{"name":"a"}`, nil)
-	// The first matching delivery is held, invisible until its partner lands.
+
 	if got := e.Deliveries("widgets.created"); len(got) != 0 {
 		t.Fatalf("reorder must hold the first delivery, got %d", len(got))
 	}
@@ -205,7 +192,7 @@ func TestWebhookFaultReorder(t *testing.T) {
 	if len(got) != 2 {
 		t.Fatalf("reorder must release both, got %d", len(got))
 	}
-	// Delivery order is swapped: the later-built delivery (higher seq) first.
+
 	if !(got[0].Seq > got[1].Seq) {
 		t.Fatalf("reorder must swap delivery order, got seqs %d then %d", got[0].Seq, got[1].Seq)
 	}
@@ -215,14 +202,13 @@ func TestWebhookFaultReorder(t *testing.T) {
 	if first["id"] != "widgets_2" || second["id"] != "widgets_1" {
 		t.Fatalf("swapped payloads wrong: %v then %v", first, second)
 	}
-	// Consumed after the pair.
+
 	do(t, e, "POST", "/widgets", `{"name":"c"}`, nil)
 	if got := e.Deliveries("widgets.created"); len(got) != 3 {
 		t.Fatalf("reorder must be consumed after two, got %d", len(got))
 	}
 }
 
-// The log is bounded: cap 1000, drop-oldest.
 func TestWebhookLogBounded(t *testing.T) {
 	e := newEngine(t, loadWebhookWidgets(t), Config{ID: "sbx_cap", Seed: "s"})
 	for i := 0; i < 1005; i++ {
@@ -239,7 +225,6 @@ func TestWebhookLogBounded(t *testing.T) {
 	}
 }
 
-// A configured sink receives every delivery as a signed POST.
 func TestWebhookSinkDelivers(t *testing.T) {
 	type hit struct {
 		headers http.Header
@@ -285,19 +270,17 @@ func TestWebhookSinkDelivers(t *testing.T) {
 	}
 }
 
-// A wedged sink NEVER back-pressures the data plane: requests keep answering
-// instantly, overflow is dropped-and-counted, and the outbox log stays whole.
 func TestWebhookSinkWedgedNeverBlocks(t *testing.T) {
 	release := make(chan struct{})
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		<-release // wedge every request until the test ends
+		<-release
 	}))
 	defer srv.Close()
 	defer close(release)
 
 	e := newEngine(t, loadWebhookWidgets(t), Config{ID: "sbx_wedge", Seed: "s", WebhookURL: srv.URL})
 	start := time.Now()
-	const n = 400 // > sink queue (256) + in-flight
+	const n = 400
 	for i := 0; i < n; i++ {
 		if r := do(t, e, "POST", "/widgets", `{"name":"x"}`, nil); r.status != 201 {
 			t.Fatalf("create %d blocked or failed: %d", i, r.status)

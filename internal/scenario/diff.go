@@ -1,5 +1,3 @@
-// Structural, JSON-pointer-based diff, stably ordered (keys sorted) so the
-// same inputs produce the same diff.
 package scenario
 
 import (
@@ -10,7 +8,7 @@ import (
 
 type DiffEntry struct {
 	Pointer  string `json:"pointer"`
-	Kind     string `json:"kind"` // added | removed | changed
+	Kind     string `json:"kind"`
 	Expected any    `json:"expected,omitempty"`
 	Actual   any    `json:"actual,omitempty"`
 }

@@ -1,5 +1,3 @@
-// Static scenario validation, run on save and again before execution.
-// Returns typed errors keyed to a step.
 package scenario
 
 import (
@@ -14,8 +12,6 @@ import (
 
 var varBaseNameRe = regexp.MustCompile(`[.\[]`)
 
-// collectVars collects every {{...}} expression appearing in a value (deep).
-// Map keys are visited in sorted order so error ordering is deterministic.
 func collectVars(value any, acc *[]string) {
 	switch v := value.(type) {
 	case string:
@@ -36,7 +32,6 @@ func collectVars(value any, acc *[]string) {
 	}
 }
 
-// configVars extracts template refs from a typed step config.
 func configVars(step *Step, acc *[]string) {
 	switch cfg := step.Config.(type) {
 	case *RequestConfig:
@@ -88,8 +83,6 @@ func configVars(step *Step, acc *[]string) {
 	}
 }
 
-// ValidateScenario runs a schema parse plus semantic checks against the
-// pinned IR (nil IR skips endpoint/webhook grounding).
 func ValidateScenario(raw any, apiDef *ir.ApiDefinition) (ValidationResult, *ScenarioDefinition) {
 	def, schemaErrs := ParseDefinition(raw)
 	if len(schemaErrs) > 0 {
@@ -118,8 +111,6 @@ func ValidateScenario(raw any, apiDef *ir.ApiDefinition) (ValidationResult, *Sce
 		seenKeys[step.Key] = true
 		totalAssertions += len(step.Assertions)
 
-		// Variable resolvability: every referenced var must be an input/default,
-		// an already-captured value, or a generator/matcher.
 		var refs []string
 		configVars(step, &refs)
 		for ai := range step.Assertions {
@@ -137,7 +128,7 @@ func ValidateScenario(raw any, apiDef *ir.ApiDefinition) (ValidationResult, *Sce
 			if IsGeneratorExpr(expr) {
 				continue
 			}
-			name := varBaseNameRe.Split(expr, 2)[0] // base name before any path
+			name := varBaseNameRe.Split(expr, 2)[0]
 			if declared[name] || capturedSoFar[name] {
 				continue
 			}
@@ -155,7 +146,6 @@ func ValidateScenario(raw any, apiDef *ir.ApiDefinition) (ValidationResult, *Sce
 			}
 		}
 
-		// Step-type-specific checks.
 		if step.Type == "REQUEST" {
 			cfg := step.Config.(*RequestConfig)
 			if IsAbsoluteURL(cfg.Path) {
@@ -175,7 +165,6 @@ func ValidateScenario(raw any, apiDef *ir.ApiDefinition) (ValidationResult, *Sce
 			estimatedVirtualMs += step.Config.(*WaitConfig).DurationMs
 		}
 
-		// Regex + schemaRef assertion checks.
 		for ai := range step.Assertions {
 			a := &step.Assertions[ai]
 			if a.Op == "matches" {
@@ -188,7 +177,6 @@ func ValidateScenario(raw any, apiDef *ir.ApiDefinition) (ValidationResult, *Sce
 			}
 		}
 
-		// Captures become available to subsequent steps.
 		for name := range step.Capture {
 			capturedSoFar[name] = true
 		}

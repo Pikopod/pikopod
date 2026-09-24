@@ -8,7 +8,6 @@ import (
 	"github.com/pikopod/pikopod/internal/ir"
 )
 
-// The shape a docs import produces: every fact LLM_EXTRACTED.
 const draftSpec = `{"openapi":"3.1.0","info":{"title":"Pay","version":"1"},
 "paths":{
   "/payment-intents":{"post":{"operationId":"createIntent","responses":{"201":{"description":"created"}}}},
@@ -34,7 +33,6 @@ func TestDraftDefinitionBindsNothingByItself(t *testing.T) {
 	}
 }
 
-// --bind is the user asserting the fact; that must be enough to ground.
 func TestBindOverrideGroundsADraftDefinition(t *testing.T) {
 	parsed, info, err := ResolveDetailed(draftDef(t), "declines", Options{BindOverrides: map[string]string{"op": "createIntent"}})
 	if err != nil {

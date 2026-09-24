@@ -1,4 +1,3 @@
-// `pikopod replay --ci` diffs recordings against frozen baselines (exit 0/1/2).
 package main
 
 import (
@@ -40,7 +39,7 @@ func runReplay(cmd *cobra.Command, args []string) error {
 	for _, name := range upstreams {
 		res, err := replay.Gate(cfg.DataDir, name, cfg.Upstreams[name].VolatileFields)
 		if err != nil {
-			return err // exit 2: tool/config problem, never conflated with drift
+			return err
 		}
 		fmt.Fprintf(out, "%s: %d recordings gated (%d pre-warmup skipped) — %d finding(s)\n", name, res.Records, res.Skipped, len(res.Findings))
 		for _, f := range res.Findings {
@@ -63,7 +62,7 @@ func runReplay(cmd *cobra.Command, args []string) error {
 	}
 	if totalFindings > 0 {
 		fmt.Fprintf(out, "\ndrift found — failing the gate (exit 1)\n")
-		os.Exit(1) // 1 = drift, distinct from 2 = tool error (docs/exit-codes.md)
+		os.Exit(1)
 	}
 	fmt.Fprintln(out, "clean — no drift against frozen baselines")
 	return nil

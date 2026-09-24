@@ -1,5 +1,3 @@
-// Package proxy is pikopod's fail-open data plane: no internal error may alter,
-// delay or drop proxied traffic, and it never retries (double-charge window).
 package proxy
 
 import (
@@ -19,18 +17,14 @@ import (
 	"github.com/pikopod/pikopod/internal/errfmt"
 )
 
-// tokenMatches compares in constant time — a non-loopback listener must not
-// leak the token byte-by-byte through response timing.
 func tokenMatches(got, want string) bool {
 	return subtle.ConstantTimeCompare([]byte(got), []byte(want)) == 1
 }
 
-// Exchange is one observed request/response pair, captured raw; the recorder
-// sanitizes before anything touches disk (redact-at-write).
 type Exchange struct {
 	Upstream   string
 	Method     string
-	Path       string // raw path incl. query, upstream-relative
+	Path       string
 	Status     int
 	ReqHeader  http.Header
 	RespHeader http.Header
@@ -39,12 +33,10 @@ type Exchange struct {
 	Truncated  bool
 	Start      time.Time
 	Duration   time.Duration
-	// release returns this exchange's bytes to the capture budget; the
-	// recorder calls it once processing ends (nil-safe).
+
 	release func()
 }
 
-// Release returns the exchange's bytes to the capture budget (recorder-side).
 func (ex *Exchange) Release() {
 	if ex.release != nil {
 		ex.release()
@@ -52,8 +44,6 @@ func (ex *Exchange) Release() {
 	}
 }
 
-// Metrics are exposed on /healthz (JSON) — the agent proves liveness and
-// value in one curl.
 type Metrics struct {
 	RequestsProxied    atomic.Int64
 	UpstreamErrors     atomic.Int64
@@ -63,12 +53,11 @@ type Metrics struct {
 	CapturesQueued     atomic.Int64
 	RecordingsWritten  atomic.Int64
 	RecordingErrors    atomic.Int64
-	// RecordingsSampledOut counts routine records learned from but not
-	// persisted, per the sampling rate.
+
 	RecordingsSampledOut atomic.Int64
 }
 
-const maxCapturedBody = 1 << 20 // 1 MiB per body captured for observation; pass-through is unlimited
+const maxCapturedBody = 1 << 20
 
 type upstreamProxy struct {
 	name   string
@@ -77,11 +66,8 @@ type upstreamProxy struct {
 	target *url.URL
 }
 
-// maxCaptureBytes bounds TOTAL queued body bytes: the count-bounded channel
-// alone let a stalled recorder OOM-kill pass-through. Past it, captures drop.
 const maxCaptureBytes = 256 << 20
 
-// Server routes /<upstream>/... to its target, capturing exchanges.
 type Server struct {
 	Metrics     *Metrics
 	captures    chan *Exchange
@@ -96,8 +82,6 @@ type Server struct {
 	closeOnce   sync.Once
 }
 
-// Close stops accepting captures and closes the channel once no forward is
-// mid-enqueue, so a recorder ranging over Captures() returns.
 func (s *Server) Close() {
 	s.closeOnce.Do(func() {
 		s.closeMu.Lock()
@@ -107,8 +91,6 @@ func (s *Server) Close() {
 	})
 }
 
-// New builds the agent handler. If nobody consumes captures, the channel
-// fills and drops — the proxy is indifferent by design.
 func New(cfg *config.Config, m *Metrics, captureDepth int) (*Server, error) {
 	if captureDepth <= 0 {
 		captureDepth = 1024
@@ -122,7 +104,7 @@ func New(cfg *config.Config, m *Metrics, captureDepth int) (*Server, error) {
 		}
 		up := &upstreamProxy{name: name, prefix: strings.TrimSuffix(u.Listen, "/"), target: target}
 		rp := &httputil.ReverseProxy{
-			// Flush immediately so streaming/SSE passes through unbuffered.
+
 			FlushInterval: -1,
 			Rewrite: func(pr *httputil.ProxyRequest) {
 				pr.SetURL(target)
@@ -130,14 +112,13 @@ func New(cfg *config.Config, m *Metrics, captureDepth int) (*Server, error) {
 				pr.Out.URL.RawQuery = pr.In.URL.RawQuery
 				pr.Out.Host = target.Host
 			},
-			// ErrorHandler only fires BEFORE the response starts. Wrap the
-			// body so a failure mid-copy is counted rather than silent.
+
 			ModifyResponse: func(res *http.Response) error {
 				res.Body = &upstreamBody{rc: res.Body, m: m}
 				return nil
 			},
 			ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
-				// Honest 502 with a marker; NEVER an automatic retry.
+
 				m.UpstreamErrors.Add(1)
 				w.Header().Set("X-Pikopod-Error", "upstream-unreachable")
 				http.Error(w, "pikopod: upstream unreachable: "+err.Error(), http.StatusBadGateway)
@@ -149,32 +130,25 @@ func New(cfg *config.Config, m *Metrics, captureDepth int) (*Server, error) {
 	return s, nil
 }
 
-// Captures exposes the observation stream to the recorder.
 func (s *Server) Captures() <-chan *Exchange { return s.captures }
 
-// SetHealthz mounts the /healthz handler (wired by the agent runner).
 func (s *Server) SetHealthz(h http.Handler) { s.healthz = h }
 
-// SetAck mounts /ack. Mutating, so it sits BEHIND the token gate.
 func (s *Server) SetAck(h http.Handler) { s.ack = h }
 
-// SetAccept mounts /accept (refreeze + ack). Token-gated like /ack.
 func (s *Server) SetAccept(h http.Handler) { s.accept = h }
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	authed := s.token == "" || tokenMatches(r.Header.Get("X-Pikopod-Token"), s.token)
-	// Stripped unconditionally: the token must never travel past this hop,
-	// in EVERY configuration (including default tokenless loopback).
+
 	r.Header.Del("X-Pikopod-Token")
-	// DNS-rebinding/CSRF gate for tokenless setups: rebinding defeats
-	// same-origin, but a foreign Host header still gives it away.
+
 	if s.token == "" && !loopbackHost(r.Host) {
 		http.Error(w, "pikopod: refusing non-local Host header on a tokenless listener (DNS-rebinding guard) — set PIKOPOD_TOKEN to serve other hostnames", http.StatusForbidden)
 		return
 	}
 	if r.URL.Path == "/healthz" {
-		// Liveness is public, but the inventory it carries is what the token
-		// rule protects — so the full payload needs the token when one is set.
+
 		if s.healthz != nil && authed {
 			s.healthz.ServeHTTP(w, r)
 			return
@@ -208,8 +182,6 @@ func (s *Server) forward(up *upstreamProxy, w http.ResponseWriter, r *http.Reque
 	s.Metrics.RequestsProxied.Add(1)
 	start := time.Now()
 
-	// Tee the request body up to the capture cap; pass-through is unaffected
-	// (the proxy reads from the TeeReader, tail beyond the cap flows through).
 	var reqBuf cappedBuffer
 	if r.Body != nil {
 		r.Body = &teeReadCloser{rc: r.Body, w: &reqBuf}
@@ -218,8 +190,6 @@ func (s *Server) forward(up *upstreamProxy, w http.ResponseWriter, r *http.Reque
 	rec := &captureWriter{ResponseWriter: w}
 	up.rp.ServeHTTP(rec, r)
 
-	// Runs after the response is fully written and is panic-isolated: a
-	// capture bug must never surface (CRITICAL fail-open contract).
 	func() {
 		defer func() {
 			if p := recover(); p != nil {
@@ -239,8 +209,7 @@ func (s *Server) forward(up *upstreamProxy, w http.ResponseWriter, r *http.Reque
 			Start:      start,
 			Duration:   time.Since(start),
 		}
-		// Byte budget check BEFORE enqueue: with a stalled recorder the
-		// count-bounded channel could hold gigabytes of bodies.
+
 		size := int64(len(ex.ReqBody) + len(ex.RespBody))
 		if s.queuedBytes.Load()+size > maxCaptureBytes {
 			s.Metrics.CapturesDropped.Add(1)
@@ -259,8 +228,7 @@ func (s *Server) forward(up *upstreamProxy, w http.ResponseWriter, r *http.Reque
 		case s.captures <- ex:
 			s.Metrics.CapturesQueued.Add(1)
 		default:
-			// Channel full: drop-oldest. Only records actually lost are
-			// counted, and every drop RELEASES its bytes back to the budget.
+
 			select {
 			case evicted := <-s.captures:
 				evicted.Release()
@@ -278,7 +246,6 @@ func (s *Server) forward(up *upstreamProxy, w http.ResponseWriter, r *http.Reque
 	}()
 }
 
-// cappedBuffer keeps at most maxCapturedBody bytes and flags truncation.
 type cappedBuffer struct {
 	bytes.Buffer
 	truncated bool
@@ -323,14 +290,12 @@ type teeReadCloser struct {
 func (t *teeReadCloser) Read(p []byte) (int, error) {
 	n, err := t.rc.Read(p)
 	if n > 0 {
-		t.w.Write(p[:n]) // cappedBuffer never errors
+		t.w.Write(p[:n])
 	}
 	return n, err
 }
 func (t *teeReadCloser) Close() error { return t.rc.Close() }
 
-// captureWriter records status + a capped copy of the body while writing
-// through to the client unmodified.
 type captureWriter struct {
 	http.ResponseWriter
 	status int
@@ -350,22 +315,17 @@ func (c *captureWriter) Write(p []byte) (int, error) {
 	return c.ResponseWriter.Write(p)
 }
 
-// Flush keeps streaming pass-through working (FlushInterval: -1).
 func (c *captureWriter) Flush() {
 	if f, ok := c.ResponseWriter.(http.Flusher); ok {
 		f.Flush()
 	}
 }
 
-// Unwrap keeps ReverseProxy's protocol-upgrade path (Hijack) working through
-// the wrapper; without it upgrades 502, violating the fail-open contract.
 func (c *captureWriter) Unwrap() http.ResponseWriter { return c.ResponseWriter }
 
-// loopbackHost reports whether a Host header addresses this machine's loopback
-// surface — the only legitimate way to reach a tokenless listener.
 func loopbackHost(host string) bool {
 	if host == "" {
-		return true // HTTP/1.0 clients may omit it; nothing to rebind with
+		return true
 	}
 	if h, _, err := net.SplitHostPort(host); err == nil {
 		host = h

@@ -1,5 +1,3 @@
-// Package replay matches recorded provider traffic through three tiers (exact,
-// shape, sequence) and gates CI by diffing recordings against frozen baselines.
 package replay
 
 import (
@@ -25,7 +23,7 @@ import (
 
 type Recording struct {
 	Record proxy.Record
-	// served marks tier-3 sequence consumption.
+
 	served bool
 }
 
@@ -44,12 +42,10 @@ type ReportLine struct {
 	Tier   MatchTier `json:"tier"`
 }
 
-// Set is an indexed, replayable set of recordings for one upstream.
 type Set struct {
 	mu       sync.Mutex
 	upstream string
-	// volatile: the user's entries plus the curated request-field list,
-	// stripped before tier-1 hashing; one matcher, drops attributed apart.
+
 	volatile  *volatile.Matcher
 	exact     map[string][]*Recording
 	shape     map[string][]*Recording
@@ -58,7 +54,6 @@ type Set struct {
 	Unmatched int
 }
 
-// Load reads the current recording generation for an upstream.
 func Load(dataDir, upstream string, extraVolatile []string) (*Set, error) {
 	path := filepath.Join(dataDir, "recordings", upstream+".ndjson")
 	f, err := os.Open(path)
@@ -84,9 +79,9 @@ func Load(dataDir, upstream string, extraVolatile []string) (*Set, error) {
 		}
 		var rec proxy.Record
 		dec := json.NewDecoder(bytes.NewReader(line))
-		dec.UseNumber() // amounts keep the recorder's lossless precision
+		dec.UseNumber()
 		if err := dec.Decode(&rec); err != nil {
-			continue // recordings are drop-oldest logs; a torn tail line is fine
+			continue
 		}
 		r := &Recording{Record: rec}
 		s.exact[s.exactKey(rec.Method, rec.Path, rec.ReqBody)] = append(s.exact[s.exactKey(rec.Method, rec.Path, rec.ReqBody)], r)
@@ -99,51 +94,39 @@ func Load(dataDir, upstream string, extraVolatile []string) (*Set, error) {
 	return s, nil
 }
 
-// Match finds the recording for a request and records the tier used.
 func (s *Set) Match(method, path string, body []byte) (*proxy.Record, MatchTier) {
 	return s.MatchValue(method, path, parseBody(body))
 }
 
-// MatchValue is Match over an already-parsed body — the sandbox engine's
-// recordings tier hands its parsed request body straight through.
 func (s *Set) MatchValue(method, path string, parsed any) (*proxy.Record, MatchTier) {
 	rec, diag := s.MatchValueDiag(method, path, parsed)
 	return rec, diag.Tier
 }
 
-// MatchDiag explains HOW a request resolved: a degraded serve or a miss always
-// names what eliminated the higher tier, never just "no match".
 type MatchDiag struct {
 	Tier MatchTier
-	// MissedOn: on a shape serve, fields whose VALUES differed; on a sequence
-	// serve, field NAMES (+sent-not-recorded / -recorded-not-sent).
+
 	MissedOn []string
-	// Closest/ClosestN: on a full miss, the nearest RECORDED endpoint and
-	// how many recordings it holds.
+
 	Closest  string
 	ClosestN int
-	// SeqPos/SeqLen: exact-tier sequence progression, 1-based; Held marks the
-	// exhausted state where the LAST response keeps serving.
+
 	SeqPos int
 	SeqLen int
 	Held   bool
 }
 
-// maxReportLines bounds the report: a sandbox holds its Set for the process
-// lifetime, where unbounded per-request appends were a slow leak.
 const maxReportLines = 10000
 
 func (s *Set) reportLocked(line ReportLine) {
 	if len(s.Report) >= maxReportLines {
-		return // counters (Unmatched) stay exact; the report is a sample
+		return
 	}
 	s.Report = append(s.Report, line)
 }
 
-// MatchValueDiag is MatchValue plus the fidelity diagnostics.
 func (s *Set) MatchValueDiag(method, path string, parsed any) (*proxy.Record, MatchDiag) {
-	// Keys depend only on the request, so hash BEFORE taking the lock:
-	// concurrent sandbox requests must not serialize on hashing.
+
 	exactK := s.exactKey(method, path, parsed)
 	shapeK := s.shapeKey(method, path, parsed)
 	seqK := s.seqKey(method, path)
@@ -152,8 +135,7 @@ func (s *Set) MatchValueDiag(method, path string, parsed any) (*proxy.Record, Ma
 	defer s.mu.Unlock()
 
 	if recs := s.exact[exactK]; len(recs) > 0 {
-		// One request recorded N times is an ordered N-step behavior: serve in
-		// order, then HOLD the last — never degrade to the shape tier.
+
 		diag := MatchDiag{Tier: TierExact, SeqLen: len(recs)}
 		r := takeUnserved(recs)
 		if r == nil {
@@ -180,7 +162,7 @@ func (s *Set) MatchValueDiag(method, path string, parsed any) (*proxy.Record, Ma
 	if recs := s.sequence[seqK]; len(recs) > 0 {
 		r := takeUnserved(recs)
 		if r == nil {
-			// Everything served: wrap around rather than starve long suites.
+
 			recs[0].served = false
 			r = recs[0]
 		}
@@ -194,8 +176,6 @@ func (s *Set) MatchValueDiag(method, path string, parsed any) (*proxy.Record, Ma
 	return nil, diag
 }
 
-// valueGap: fields in both bodies whose values differ. Uses its own flatten
-// because baseline.Flatten keeps values for strings only, missing amounts.
 func (s *Set) valueGap(reqBody, recBody any) []string {
 	reqF := map[string]string{}
 	flattenScalars(s.stripVolatile(reqBody, ""), "", reqF)
@@ -232,8 +212,6 @@ func flattenScalars(node any, path string, out map[string]string) {
 	}
 }
 
-// shapeGap: symmetric field-name diff — why the shape tier missed while the
-// endpoint matched. "+" = sent but never recorded, "-" = recorded but absent.
 func shapeGap(reqBody, recBody any) []string {
 	reqF := baseline.Flatten(reqBody)
 	recF := baseline.Flatten(recBody)
@@ -259,16 +237,12 @@ func capList(list []string, n int) []string {
 	return list
 }
 
-// ExplainMiss is the read-only closest-recorded lookup for miss rendering
-// (no report lines or counters move — safe to call after a match attempt).
 func (s *Set) ExplainMiss(method, path string) (closest string, n int) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.closestRecordedLocked(method, path)
 }
 
-// closestRecordedLocked scores every RECORDED endpoint against the request and
-// returns the best plus its recording count, for closest-miss rendering.
 func (s *Set) closestRecordedLocked(method, path string) (string, int) {
 	segs := strings.Split(strings.Trim(stripQuery(path), "/"), "/")
 	best, bestScore, bestN := "", 0.0, 0
@@ -334,8 +308,6 @@ func (s *Set) seqKey(method, path string) string {
 	return method + "|" + pathtmpl.Templatize(stripQuery(path))
 }
 
-// stripVolatile removes volatile fields recursively before hashing, walking
-// with the learner's path convention so scoped entries apply.
 func (s *Set) stripVolatile(node any, path string) any {
 	switch n := node.(type) {
 	case map[string]any:
@@ -362,8 +334,6 @@ func (s *Set) stripVolatile(node any, path string) any {
 	return node
 }
 
-// GateResult is the offline CI gate's outcome; its findings mirror drift
-// findings for reporting.
 type GateResult struct {
 	Findings []GateFinding `json:"findings"`
 	Records  int           `json:"records"`
@@ -378,8 +348,6 @@ type GateFinding struct {
 	Detail   string `json:"detail,omitempty"`
 }
 
-// Gate diffs an upstream's recordings offline against its FROZEN baselines.
-// Exit-code mapping (0 clean / 1 drift / 2 error) belongs to the CLI.
 func Gate(dataDir, upstream string, volatileFields []string) (*GateResult, error) {
 	m, _, err := volatile.Compile(volatileFields)
 	if err != nil {
@@ -420,7 +388,7 @@ func Gate(dataDir, upstream string, volatileFields []string) (*GateResult, error
 			res.Findings = append(res.Findings, GateFinding{Method: rec.Method, Template: template, Kind: f.Kind, Field: f.Field, Detail: f.Detail})
 		}
 	}
-	// Dedup identical findings (a drifted field appears in many records).
+
 	seen := map[string]bool{}
 	uniq := res.Findings[:0]
 	for _, f := range res.Findings {
@@ -446,15 +414,13 @@ func parseBody(body []byte) any {
 }
 
 func canonicalJSON(v any) string {
-	raw, err := json.Marshal(canonicalizeNumbers(v)) // json sorts map keys — canonical by construction
+	raw, err := json.Marshal(canonicalizeNumbers(v))
 	if err != nil {
 		return ""
 	}
 	return string(raw)
 }
 
-// canonicalizeNumbers normalizes numeric spellings before hashing so a recorded
-// "500.00" and a live 500 share a key; large literals keep their digits.
 func canonicalizeNumbers(v any) any {
 	switch n := v.(type) {
 	case map[string]any:
@@ -470,8 +436,7 @@ func canonicalizeNumbers(v any) any {
 		}
 		return out
 	case json.Number:
-		// ≤15 significant digits always round-trip; float64's own round-trip
-		// check is useless here, confirming the lossy value it just produced.
+
 		if significantDigits(string(n)) <= 15 {
 			if f, err := n.Float64(); err == nil {
 				return f
@@ -483,8 +448,6 @@ func canonicalizeNumbers(v any) any {
 	}
 }
 
-// significantDigits counts a JSON number literal's significant decimal
-// digits (sign, dot, exponent, and leading zeros excluded).
 func significantDigits(s string) int {
 	if i := strings.IndexAny(s, "eE"); i >= 0 {
 		s = s[:i]
@@ -495,7 +458,7 @@ func significantDigits(s string) int {
 			continue
 		}
 		if r == '0' && !seen {
-			continue // leading zeros
+			continue
 		}
 		seen = true
 		digits++

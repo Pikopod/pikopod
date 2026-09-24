@@ -1,5 +1,3 @@
-// Package importer normalizes spec bytes into the IR: detection, hardened
-// parsing, Swagger 2.0 conversion, local $ref resolution. Pure, no network.
 package importer
 
 import (
@@ -10,7 +8,6 @@ import (
 	"github.com/pikopod/pikopod/internal/ir"
 )
 
-// Kind is a detected source kind.
 type Kind string
 
 const (
@@ -21,14 +18,10 @@ const (
 	KindDocumentation        Kind = "documentation"
 )
 
-// Detect classifies raw bytes by structural markers, never provider names; an
-// unrecognized JSON document is a typed error, never a guess.
 func Detect(raw []byte) (Kind, error) {
 	s := string(raw)
 	trimmed := strings.TrimLeftFunc(s, isJSWhitespace)
 
-	// Binary/markup documents are Tier C (unstructured) — checked first so a
-	// PDF or HTML page is never mis-parsed as a spec.
 	if strings.HasPrefix(s, "%PDF-") {
 		return KindDocumentation, nil
 	}
@@ -37,8 +30,7 @@ func Detect(raw []byte) (Kind, error) {
 		head = head[:512]
 	}
 	lowerHead := strings.ToLower(head)
-	// The <body> heuristic must NOT fire on JSON: real Postman collections
-	// embed HTML descriptions within their first 512 bytes.
+
 	jsonLeading := strings.HasPrefix(trimmed, "{") || strings.HasPrefix(trimmed, "[")
 	if strings.HasPrefix(lowerHead, "<!doctype html") || strings.HasPrefix(lowerHead, "<html") || (!jsonLeading && strings.Contains(lowerHead, "<body")) {
 		return KindDocumentation, nil
@@ -79,7 +71,6 @@ func Detect(raw []byte) (Kind, error) {
 		return "", &SpecError{Code: SpecUnsupportedVersion, Message: "unrecognized JSON document"}
 	}
 
-	// Not JSON: structured YAML/SDL, or unstructured documentation.
 	if yamlSpecMarker.MatchString(s) {
 		return KindOpenAPI, nil
 	}
@@ -88,12 +79,10 @@ func Detect(raw []byte) (Kind, error) {
 			return KindGraphQLSDL, nil
 		}
 	}
-	// Anything else — Markdown, prose, HTML fragments — is unstructured Tier C.
+
 	return KindDocumentation, nil
 }
 
-// NormalizeOpenAPI normalizes OpenAPI 3.x or Swagger 2.0 bytes into the IR. A
-// 2.0 converter upgrade re-versions every 2.0-sourced API via normalizerVersion.
 func NormalizeOpenAPI(raw []byte) (*ir.ApiDefinition, error) {
 	def, _, err := NormalizeOpenAPIFrom(raw, nil)
 	return def, err
@@ -157,8 +146,6 @@ func normalizeOpenAPIFrom(raw []byte, src *Source) (*ir.ApiDefinition, Positions
 	return def, pos, nil
 }
 
-// NormalizeLLMExtracted runs the pipeline over a MODEL-WRITTEN spec, then
-// downgrades every tier to LLM_EXTRACTED so OBSERVED traffic wins on conflict.
 func NormalizeLLMExtracted(raw []byte) (*ir.ApiDefinition, error) {
 	kind, err := Detect(raw)
 	if err != nil {
@@ -182,8 +169,6 @@ func NormalizeLLMExtracted(raw []byte) (*ir.ApiDefinition, error) {
 	return def, nil
 }
 
-// downgradeProvenance rewrites every Prov tier via a JSON walk; wrappers are
-// identified structurally, so no field enumeration can rot.
 func downgradeProvenance(def *ir.ApiDefinition, tier string, confidence float64) error {
 	raw, err := json.Marshal(def)
 	if err != nil {
@@ -222,8 +207,6 @@ func downgradeProvenance(def *ir.ApiDefinition, tier string, confidence float64)
 	return json.Unmarshal(rewritten, def)
 }
 
-// userFacing wraps a SpecError in the pikopod error contract; other errors
-// pass through unchanged.
 func userFacing(err error) error {
 	spec, ok := err.(*SpecError)
 	if !ok {

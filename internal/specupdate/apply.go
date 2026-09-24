@@ -1,5 +1,3 @@
-// Format-preserving application by SURGERY on the yaml.v3 AST (and an
-// order-preserving JSON encoder) so the artifact diffs only the lines changed.
 package specupdate
 
 import (
@@ -11,22 +9,17 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// Result of applying a change set to a spec document.
 type Result struct {
 	Applied     []Patch `json:"applied"`
 	Suggestions []Patch `json:"suggestions"`
-	// Skipped: additive intent whose document anchor wasn't found — reported,
-	// never guessed into place.
+
 	Skipped []Patch `json:"skipped"`
 	Out     []byte  `json:"-"`
 	JSON    bool    `json:"-"`
 }
 
-// maxApplyBytes caps the document handed to the AST parser, closing the
-// memory-amplification gap yaml.v3's depth/alias limits leave open.
 const maxApplyBytes = 32 << 20
 
-// Apply derives patches for every change and applies the additive ones.
 func Apply(specRaw []byte, changes []Change) (*Result, error) {
 	if len(specRaw) > maxApplyBytes {
 		return nil, fmt.Errorf("spec document exceeds the %d MiB cap", maxApplyBytes>>20)
@@ -87,7 +80,7 @@ func (a *applier) apply(c Change) (Patch, bool) {
 	if c.Kind == AddStatus {
 		code := fmt.Sprint(c.Status)
 		if mapGet(responses, code) != nil {
-			return Patch{}, false // already declared
+			return Patch{}, false
 		}
 		val := mapping(
 			"description", str("Observed in traffic; added by pikopod spec-update."),
@@ -99,8 +92,6 @@ func (a *applier) apply(c Change) (Patch, bool) {
 				"x-pikopod-observed": evidenceValue(c.Evidence)}}}}, true
 	}
 
-	// Schema-level changes: resolve the declared response and its json media
-	// type, then walk the pointer through $refs to the anchor node.
 	respKey, resp := a.findResponse(responses, c.Status, c.StatusClass)
 	if resp == nil {
 		return Patch{}, false
@@ -115,7 +106,7 @@ func (a *applier) apply(c Change) (Patch, bool) {
 				break
 			}
 		}
-	} else if s := mapGet(resp, "schema"); s != nil { // Swagger 2.0 shape
+	} else if s := mapGet(resp, "schema"); s != nil {
 		schema, schemaPath = s, opPath+"/responses/"+esc(respKey)+"/schema"
 	}
 	if schema == nil {
@@ -131,11 +122,11 @@ func (a *applier) apply(c Change) (Patch, bool) {
 	case EnumUnion:
 		enum := mapGet(target, "enum")
 		if enum == nil || enum.Kind != yaml.SequenceNode {
-			return Patch{}, false // no documented enum — nothing to union
+			return Patch{}, false
 		}
 		for _, v := range enum.Content {
 			if v.Value == c.Value {
-				return Patch{}, false // already present
+				return Patch{}, false
 			}
 		}
 		enum.Content = append(enum.Content, str(c.Value))
@@ -158,8 +149,7 @@ func (a *applier) apply(c Change) (Patch, bool) {
 	case AddProperty:
 		props := mapGet(target, "properties")
 		if props == nil {
-			// Only create `properties` on a node that IS an object schema —
-			// never guess a shape onto a scalar.
+
 			if t := mapGet(target, "type"); t == nil || t.Value != "object" {
 				return Patch{}, false
 			}
@@ -197,20 +187,16 @@ func (a *applier) operationNode(template, method string) *yaml.Node {
 	return mapGet(item, strings.ToLower(method))
 }
 
-// findResponse resolves the declared response node: exact code, then class
-// range key ("4XX"), then default.
 func (a *applier) findResponse(responses *yaml.Node, status int, class string) (string, *yaml.Node) {
 	if status > 0 {
-		// Mirror conformance's declaredResponse EXACTLY so the edit lands on
-		// the response the violation was checked against.
+
 		code := fmt.Sprint(status)
 		if n := mapGet(responses, code); n != nil {
 			return code, a.deref(n)
 		}
 		class = code[:1] + "xx"
 	} else if len(class) == 3 {
-		// Overlay changes carry only a class; its first exact code is the
-		// conventional carrier of that class's schema.
+
 		for i := 0; i+1 < len(responses.Content); i += 2 {
 			k := responses.Content[i].Value
 			if len(k) == 3 && k[0] == class[0] && k[1] >= '0' && k[1] <= '9' {
@@ -231,8 +217,6 @@ func (a *applier) findResponse(responses *yaml.Node, status int, class string) (
 	return "", nil
 }
 
-// navigate walks a pointer through in-document $refs, rewriting the op path to
-// where the edit lands. Returns ok=false rather than guessing a missing hop.
 func (a *applier) navigate(schema *yaml.Node, path, pointer string) (*yaml.Node, string, bool) {
 	node := schema
 	for hops := 0; ; hops++ {
@@ -285,7 +269,7 @@ func (a *applier) navigate(schema *yaml.Node, path, pointer string) (*yaml.Node,
 		}
 		node, path = child, path+"/properties/"+esc(seg)
 	}
-	// Final deref so the edit lands on the real definition.
+
 	for hops := 0; ; hops++ {
 		if hops > 32 || node == nil {
 			return nil, "", false
@@ -303,8 +287,6 @@ func (a *applier) navigate(schema *yaml.Node, path, pointer string) (*yaml.Node,
 	return node, path, true
 }
 
-// resolveRef follows an in-document "#/components/schemas/X" (or Swagger
-// "#/definitions/X") reference. External refs return nil — never fetched.
 func (a *applier) resolveRef(ref string) (*yaml.Node, string) {
 	if !strings.HasPrefix(ref, "#/") {
 		return nil, ""
@@ -333,7 +315,6 @@ func (a *applier) deref(n *yaml.Node) *yaml.Node {
 	return n
 }
 
-// annotate sets/replaces x-pikopod-observed on a schema node.
 func annotate(schema *yaml.Node, ev Evidence) {
 	if existing := mapGet(schema, "x-pikopod-observed"); existing != nil {
 		*existing = *evidenceNode(ev)
@@ -370,13 +351,12 @@ func evidenceValue(ev Evidence) map[string]any {
 	return out
 }
 
-// openapiType maps the overlay's observed-type space onto OpenAPI types.
 func openapiType(t string) string {
 	switch t {
 	case "string", "number", "boolean", "object", "array", "integer":
 		return t
 	default:
-		return "" // unknown: annotate without a type claim
+		return ""
 	}
 }
 
@@ -457,8 +437,6 @@ func looksJSON(raw []byte) bool {
 	return false
 }
 
-// writeJSON re-emits a yaml.Node tree as pretty JSON preserving key order —
-// the format-preserving path for JSON-authored specs.
 func writeJSON(buf *bytes.Buffer, n *yaml.Node, indent int) {
 	if n == nil {
 		buf.WriteString("null")

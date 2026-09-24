@@ -1,5 +1,3 @@
-// The PR surface, two-step by design: finding commands write a JSON handoff,
-// these consume it. Auth comes from the env or gh — tokens NEVER reach argv.
 package main
 
 import (
@@ -50,8 +48,6 @@ func newPRCommentCmd() *cobra.Command {
 				return nil
 			}
 
-			// Degradation ladder for read-only tokens: comment → job summary
-			// → stderr notice with the markdown on stdout.
 			if fe, ok := upErr.(*pr.ForgeError); ok && fe.ReadOnly() {
 				if summary := os.Getenv("GITHUB_STEP_SUMMARY"); summary != "" {
 					f, ferr := os.OpenFile(summary, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
@@ -107,8 +103,7 @@ func newPROpenCmd() *cobra.Command {
 			if base == "" {
 				base = defaultBaseBranch()
 			}
-			// Same argv discipline as gitShow: a name that parses as a git option must
-			// never reach the git argv, or --branch becomes flag injection.
+
 			if strings.HasPrefix(branch, "-") || strings.HasPrefix(base, "-") {
 				return errfmt.New("invalid branch name", "branch/base names may not start with '-'", "pick a name like pikopod/spec-update", "")
 			}
@@ -164,14 +159,10 @@ func addForgeFlags(c *cobra.Command) {
 	c.Flags().String("api", "", "API base URL override (GHE / self-hosted GitLab)")
 }
 
-// forgeFromFlags builds the platform client from flags + CI environment. Tokens
-// come from env or `gh auth token`, never argv; it refuses when neither exists.
 func forgeFromFlags(cmd *cobra.Command) (pr.Forge, string, error) {
 	return forgeFromFlagsOpts(cmd, true)
 }
 
-// forgeForOpen is forgeFromFlags without the PR/MR-number requirement: opening a
-// PR creates the number; only commenting on an existing one needs coordinates.
 func forgeForOpen(cmd *cobra.Command) (pr.Forge, string, error) {
 	return forgeFromFlagsOpts(cmd, false)
 }
@@ -203,7 +194,7 @@ func forgeFromFlagsOpts(cmd *cobra.Command, needNumber bool) (pr.Forge, string, 
 			sha = os.Getenv("GITHUB_SHA")
 		}
 		if number == 0 {
-			// refs/pull/123/merge
+
 			if ref := os.Getenv("GITHUB_REF"); strings.HasPrefix(ref, "refs/pull/") {
 				number, _ = strconv.Atoi(strings.Split(strings.TrimPrefix(ref, "refs/pull/"), "/")[0])
 			}
@@ -254,7 +245,6 @@ func firstEnv(names ...string) string {
 	return ""
 }
 
-// ghAuthToken reads the gh CLI's stored token (stdout capture, never argv).
 func ghAuthToken() string {
 	out, err := exec.Command("gh", "auth", "token").Output()
 	if err != nil {

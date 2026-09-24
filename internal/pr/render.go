@@ -1,5 +1,3 @@
-// Handoff rendering: a JSON handoff's "source" discriminator selects the
-// PR-comment markdown, and each source owns its own comment marker.
 package pr
 
 import (
@@ -11,8 +9,6 @@ import (
 	"github.com/pikopod/pikopod/internal/specupdate"
 )
 
-// RenderHandoff returns (source, markdown). Unknown sources fail loudly —
-// a marker per unknown source would fragment the update-in-place contract.
 func RenderHandoff(raw []byte) (string, string, error) {
 	var head struct {
 		Source string `json:"source"`

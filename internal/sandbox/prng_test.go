@@ -7,8 +7,6 @@ import (
 	"testing"
 )
 
-// TestParity_Prng: bit-for-bit against committed goldens. Determinism here is
-// what makes sandbox replay byte-identical.
 func TestParity_Prng(t *testing.T) {
 	raw, err := os.ReadFile("../../testdata/parity/prng/goldens.json")
 	if err != nil {
@@ -30,7 +28,7 @@ func TestParity_Prng(t *testing.T) {
 	for _, c := range cases {
 		p := NewPrng(c.Seed)
 		for i, want := range c.Next {
-			if got := p.Next(); math.Abs(got-want) > 0 { // exact float64 equality expected
+			if got := p.Next(); math.Abs(got-want) > 0 {
 				t.Errorf("seed %q next[%d] = %.17g, golden = %.17g", c.Seed, i, got, want)
 			}
 		}

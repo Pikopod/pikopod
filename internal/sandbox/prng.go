@@ -5,14 +5,12 @@ import (
 	"unicode/utf16"
 )
 
-// Prng is xmur3 feeding mulberry32; all sandbox randomness flows through it, so a
-// DETERMINISTIC sandbox replays byte-for-byte. Goldens pin the exact arithmetic.
 type Prng struct {
 	a uint32
 }
 
 func NewPrng(seed string) *Prng {
-	// xmur3 over UTF-16 code units (JS charCodeAt), one finalizer call.
+
 	h := uint32(1779033703) ^ uint32(len(utf16.Encode([]rune(seed))))
 	for _, cu := range utf16.Encode([]rune(seed)) {
 		h = (h ^ uint32(cu)) * 3432918353
@@ -24,7 +22,6 @@ func NewPrng(seed string) *Prng {
 	return &Prng{a: h}
 }
 
-// Next returns a float in [0, 1) — mulberry32.
 func (p *Prng) Next() float64 {
 	p.a += 0x6d2b79f5
 	t := (p.a ^ (p.a >> 15)) * (1 | p.a)
@@ -32,7 +29,6 @@ func (p *Prng) Next() float64 {
 	return float64(t^(t>>14)) / 4294967296
 }
 
-// Int returns an integer in [min, max] inclusive.
 func (p *Prng) Int(min, max int) int {
 	if max <= min {
 		return min
@@ -58,7 +54,6 @@ func (p *Prng) fromAlphabet(alphabet string, length int) string {
 	return string(out)
 }
 
-// Word returns a lowercase word of 3–9 letters.
 func (p *Prng) Word() string { return p.fromAlphabet(prngLower, p.Int(3, 9)) }
 
 func (p *Prng) Token(length int) string { return p.fromAlphabet(prngAlnum, length) }

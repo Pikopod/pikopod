@@ -21,8 +21,6 @@ func normalizeWebhookEnvelope(doc *OrdMap) (*ir.WebhookEnvelope, error) {
 	return env, nil
 }
 
-// DecodeWebhookEnvelope turns a parsed object (from a spec extension or a
-// sidecar file) into a validated envelope; unknown fields are refused.
 func DecodeWebhookEnvelope(value any) (*ir.WebhookEnvelope, error) {
 	b, err := json.Marshal(value)
 	if err != nil {

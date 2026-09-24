@@ -11,9 +11,6 @@ import (
 	"github.com/pikopod/pikopod/internal/scenario/archetype"
 )
 
-// A minimal spec that DECLARES webhooks (OpenAPI 3.1 top-level `webhooks`) —
-// the catalogue's duplicate_delivery archetype requires a webhookEvent role,
-// so it only binds against an IR like this one.
 const webhookArchetypeSpec = `{
   "openapi": "3.1.0",
   "info": {"title": "Orders", "version": "1.0.0"},
@@ -50,12 +47,6 @@ func webhookArchetypeIR(t *testing.T) *ir.ApiDefinition {
 	return def
 }
 
-// The catalogue's duplicate_delivery archetype — dormant until the outbox
-// landed because no IR role could satisfy `bind: webhookEvent` at runtime —
-// now binds, expands, and RUNS against a webhook-declaring spec. The emitted
-// event (`orders.created` = typeSlug.action) matches the declared one, so
-// EXPECT_WEBHOOK observes the create's delivery, and the run is
-// deterministic.
 func TestDuplicateDeliveryArchetypeEndToEnd(t *testing.T) {
 	apiDef := webhookArchetypeIR(t)
 	a := archetype.Find("duplicate_delivery")
@@ -108,9 +99,7 @@ func TestDuplicateDeliveryArchetypeEndToEnd(t *testing.T) {
 	if r1.ResultHash != r2.ResultHash {
 		t.Fatalf("run must be deterministic: %s vs %s", r1.ResultHash, r2.ResultHash)
 	}
-	// The first EXPECT_WEBHOOK observed the create's delivery (matched 1), so
-	// it consumed no timeout; the CLIENT-subject count assertion in the last
-	// step stays NOT_EVALUATED locally (no client binding), never a failure.
+
 	await1 := r1.Steps[1]
 	if await1.Type != "EXPECT_WEBHOOK" || await1.Detail["matched"].(int) != 1 {
 		t.Fatalf("await1 must observe the create's delivery: %+v", await1)

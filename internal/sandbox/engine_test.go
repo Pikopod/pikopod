@@ -11,8 +11,6 @@ import (
 	"github.com/pikopod/pikopod/internal/ir"
 )
 
-// ------------------------------------------------------------------ fixtures
-
 func loadAppveyor(t *testing.T) *ir.ApiDefinition {
 	t.Helper()
 	raw, err := os.ReadFile("../../testdata/parity/importer/specs/appveyor-swagger.json")
@@ -130,11 +128,6 @@ func do(t *testing.T, e *Engine, method, path, body string, headers map[string]s
 	return out
 }
 
-// --------------------------------------------------------------- determinism
-
-// Same spec + seed + clock ⇒ byte-identical responses across two fresh engine
-// instances, for a create→read→list→read-your-write sequence, plus a
-// synthesis-heavy declared-error body.
 func TestDeterminismAcrossEngines(t *testing.T) {
 	def := loadAppveyor(t)
 	cfg := Config{ID: "sbx_det", Seed: "seed-alpha", Mode: "deterministic", VirtualClockMs: SandboxBaseEpochMs}
@@ -166,7 +159,7 @@ func TestDeterminismAcrossEngines(t *testing.T) {
 		}
 		for k, v := range r1.headers {
 			if k == "date" {
-				continue // stamped by net/http's recorder-independent plumbing
+				continue
 			}
 			if r2.headers[k] != v {
 				t.Fatalf("%s: header %q diverges: %q vs %q", s.name, k, v, r2.headers[k])
@@ -175,7 +168,7 @@ func TestDeterminismAcrossEngines(t *testing.T) {
 		switch s.name {
 		case "create":
 			createBody = r1.body
-			if r1.status != 200 { // POST /roles declares 200, not 201
+			if r1.status != 200 {
 				t.Fatalf("create status = %d, want 200: %s", r1.status, r1.body)
 			}
 		case "read-your-write":
@@ -184,19 +177,17 @@ func TestDeterminismAcrossEngines(t *testing.T) {
 			if r1.status != 404 {
 				t.Fatalf("missing id status = %d, want 404", r1.status)
 			}
-			// The declared default error schema is synthesized — not the
-			// neutral structural envelope.
+
 			if r1.body == `{"message":"Not Found"}` || r1.body == "" {
 				t.Fatalf("expected a synthesized declared-error body, got %q", r1.body)
 			}
 		}
 	}
-	// Read-your-write: the read returns exactly what create stored.
+
 	if createBody != readBody {
 		t.Fatalf("read-your-write mismatch:\n  create: %s\n  read:   %s", createBody, readBody)
 	}
-	// A different seed must change synthesized output (sanity that the seed
-	// actually flows).
+
 	e3 := newEngine(t, def, Config{ID: "sbx_det", Seed: "seed-beta", VirtualClockMs: SandboxBaseEpochMs})
 	r3 := do(t, e3, "GET", "/roles/missing_9", "", map[string]string{"Authorization": e3.Credential()})
 	r1 := do(t, e1, "GET", "/roles/missing_9", "", auth)
@@ -205,14 +196,10 @@ func TestDeterminismAcrossEngines(t *testing.T) {
 	}
 }
 
-// -------------------------------------------------------------- statefulness
-
 func TestStatefulCRUD(t *testing.T) {
 	def := loadWidgets(t)
 	e := newEngine(t, def, Config{ID: "sbx_state", Seed: "s1"})
 
-	// Create echoes the client's fields, fills declared server fields, and
-	// assigns the canonical id.
 	create := do(t, e, "POST", "/widgets", `{"name":"Anvil"}`, nil)
 	if create.status != 201 {
 		t.Fatalf("create status = %d body=%s", create.status, create.body)
@@ -234,13 +221,11 @@ func TestStatefulCRUD(t *testing.T) {
 		t.Fatalf("etag = %q, want \"0\"", create.headers["etag"])
 	}
 
-	// Read returns the stored resource byte-for-byte.
 	read := do(t, e, "GET", "/widgets/widgets_1", "", nil)
 	if read.status != 200 || read.body != create.body {
 		t.Fatalf("read = %d %s, want the created body %s", read.status, read.body, create.body)
 	}
 
-	// List contains it.
 	list := do(t, e, "GET", "/widgets", "", nil)
 	if list.status != 200 {
 		t.Fatalf("list status = %d", list.status)
@@ -256,7 +241,6 @@ func TestStatefulCRUD(t *testing.T) {
 		t.Fatalf("list envelope wrong: %s", list.body)
 	}
 
-	// Update (PUT) bumps the optimistic version.
 	put := do(t, e, "PUT", "/widgets/widgets_1", `{"name":"Anvil II"}`, nil)
 	if put.status != 200 || put.headers["etag"] != `"1"` {
 		t.Fatalf("put = %d etag=%q body=%s, want 200 etag \"1\"", put.status, put.headers["etag"], put.body)
@@ -267,19 +251,16 @@ func TestStatefulCRUD(t *testing.T) {
 		t.Fatalf("put body wrong: %s", put.body)
 	}
 
-	// A stale If-Match is refused.
 	stale := do(t, e, "PUT", "/widgets/widgets_1", `{"name":"X"}`, map[string]string{"If-Match": `"0"`})
 	if stale.status != 412 {
 		t.Fatalf("stale If-Match status = %d, want 412", stale.status)
 	}
 
-	// PATCH merges shallowly and bumps again.
 	patch := do(t, e, "PATCH", "/widgets/widgets_1", `{"name":"Anvil III"}`, nil)
 	if patch.status != 200 || patch.headers["etag"] != `"2"` {
 		t.Fatalf("patch = %d etag=%q, want 200 etag \"2\"", patch.status, patch.headers["etag"])
 	}
 
-	// Delete, then the resource is gone.
 	del := do(t, e, "DELETE", "/widgets/widgets_1", "", nil)
 	if del.status != 204 || del.body != "" {
 		t.Fatalf("delete = %d body=%q, want bare 204", del.status, del.body)
@@ -290,31 +271,25 @@ func TestStatefulCRUD(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------- auth
-
 func TestAuthEnforcement(t *testing.T) {
 	def := loadAppveyor(t)
 	e := newEngine(t, def, Config{ID: "sbx_auth", Seed: "auth-seed"})
 
-	// Missing credential: the "Authentication required" 401 envelope.
 	missing := do(t, e, "GET", "/roles", "", nil)
 	if missing.status != 401 || missing.body != `{"message":"Authentication required"}` {
 		t.Fatalf("missing cred = %d %s", missing.status, missing.body)
 	}
 
-	// Wrong (but benign-looking) credential: "Unauthorized".
 	wrong := do(t, e, "GET", "/roles", "", map[string]string{"Authorization": "nope"})
 	if wrong.status != 401 || wrong.body != `{"message":"Unauthorized"}` {
 		t.Fatalf("wrong cred = %d %s", wrong.status, wrong.body)
 	}
 
-	// A real-looking secret is rejected loudly, never matched.
 	real := do(t, e, "GET", "/roles", "", map[string]string{"Authorization": "xpay_secret_A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6"})
 	if real.status != 403 || !strings.Contains(real.body, "issued test credentials") {
 		t.Fatalf("real-looking cred = %d %s, want the loud 403", real.status, real.body)
 	}
 
-	// The issued credential passes.
 	ok := do(t, e, "GET", "/roles", "", map[string]string{"Authorization": e.Credential()})
 	if ok.status != 200 {
 		t.Fatalf("issued cred = %d %s, want 200", ok.status, ok.body)
@@ -324,20 +299,16 @@ func TestAuthEnforcement(t *testing.T) {
 	}
 }
 
-// --------------------------------------------------------------- 404/405 etc
-
 func TestRouteSemantics(t *testing.T) {
 	def := loadAppveyor(t)
 	e := newEngine(t, def, Config{ID: "sbx_routes", Seed: "r"})
 	auth := map[string]string{"Authorization": e.Credential()}
 
-	// Unknown path: 404 before auth even applies.
 	nf := do(t, e, "GET", "/definitely-not-a-path", "", nil)
 	if nf.status != 404 || nf.body != `{"message":"Not Found"}` {
 		t.Fatalf("unknown path = %d %s", nf.status, nf.body)
 	}
 
-	// Known path, wrong method: 405 with the sorted Allow set.
 	mna := do(t, e, "DELETE", "/roles", "", auth)
 	if mna.status != 405 || mna.body != `{"message":"Method Not Allowed"}` {
 		t.Fatalf("method not allowed = %d %s", mna.status, mna.body)
@@ -347,10 +318,6 @@ func TestRouteSemantics(t *testing.T) {
 	}
 }
 
-// ------------------------------------------------------------ pure synthesis
-
-// A GET against an endpoint with no stored resources returns schema-shaped
-// JSON: the declared envelope with synthesized non-array fields.
 func TestPureSynthesisEmptyList(t *testing.T) {
 	def := loadWidgets(t)
 	e := newEngine(t, def, Config{ID: "sbx_synth", Seed: "s"})
@@ -378,15 +345,10 @@ func TestPureSynthesisEmptyList(t *testing.T) {
 	}
 }
 
-// ------------------------------------------------------- validation + bodies
-
 func TestBodyHandling(t *testing.T) {
 	def := loadWidgets(t)
 	e := newEngine(t, def, Config{ID: "sbx_body", Seed: "b"})
 
-	// An inline (trustworthy) request schema enforces required fields and
-	// scalar types; a $ref'd one is never resolved, because the validator does
-	// not follow refs.
 	invalid := do(t, e, "POST", "/gadgets", `{}`, nil)
 	if invalid.status != 400 || invalid.body != `{"message":"Validation failed","errors":["name is required"]}` {
 		t.Fatalf("missing required = %d %s", invalid.status, invalid.body)
@@ -396,20 +358,16 @@ func TestBodyHandling(t *testing.T) {
 		t.Fatalf("wrong type = %d %s", wrongType.status, wrongType.body)
 	}
 
-	// Malformed JSON is a mirrored 400.
 	malformed := do(t, e, "POST", "/gadgets", `{"name":`, nil)
 	if malformed.status != 400 || malformed.body != `{"message":"Malformed JSON body"}` {
 		t.Fatalf("malformed = %d %s", malformed.status, malformed.body)
 	}
 
-	// A non-object body is refused.
 	array := do(t, e, "POST", "/gadgets", `[1,2]`, nil)
 	if array.status != 400 || array.body != `{"message":"Request body must be a JSON object"}` {
 		t.Fatalf("array body = %d %s", array.status, array.body)
 	}
 }
-
-// ------------------------------------------------------------- idempotency
 
 func TestIdempotencyReplay(t *testing.T) {
 	def := loadWidgets(t)
@@ -431,7 +389,7 @@ func TestIdempotencyReplay(t *testing.T) {
 	if reused.status != 422 {
 		t.Fatalf("reused key with different request = %d, want 422", reused.status)
 	}
-	// The replay really did not create a second resource.
+
 	list := do(t, e, "GET", "/widgets", "", nil)
 	var envelope struct {
 		Total int `json:"total"`
@@ -441,8 +399,6 @@ func TestIdempotencyReplay(t *testing.T) {
 		t.Fatalf("total = %d, want 1 (no duplicate create)", envelope.Total)
 	}
 }
-
-// ---------------------------------------------------------------- pagination
 
 func TestListPagination(t *testing.T) {
 	def := loadWidgets(t)
@@ -458,7 +414,7 @@ func TestListPagination(t *testing.T) {
 	if link == "" || !strings.Contains(link, `rel="next"`) {
 		t.Fatalf("page 1 missing the Link next cursor: %v", page1.headers)
 	}
-	// Follow the cursor: extract the URL between < and >.
+
 	url := link[strings.Index(link, "<")+1 : strings.Index(link, ">")]
 	page2 := do(t, e, "GET", url, "", nil)
 	if page2.status != 200 {

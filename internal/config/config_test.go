@@ -33,8 +33,6 @@ func TestDefaultsAndUpstreamListen(t *testing.T) {
 	}
 }
 
-// Production gate #3: non-loopback bind without a token must REFUSE, with the
-// error contract shape; token comes from env or file, never argv.
 func TestListenSafety(t *testing.T) {
 	body := "listen: 0.0.0.0\nupstreams:\n  p:\n    target: https://example.com\n"
 
@@ -80,9 +78,6 @@ func TestUpstreamValidation(t *testing.T) {
 	}
 }
 
-// min_hours: 0 is an EXPLICIT evaluation setting, distinguishable from
-// unset — a zero-valued int field would silently become the 48h default and
-// baselines would never freeze in an eval run.
 func TestWarmupMinHoursZeroIsExpressible(t *testing.T) {
 	cfg, err := Load(writeCfg(t, "upstreams:\n  p:\n    target: http://x\nwarmup:\n  min_samples: 5\n  min_hours: 0\n"))
 	if err != nil {
@@ -93,27 +88,22 @@ func TestWarmupMinHoursZeroIsExpressible(t *testing.T) {
 	}
 }
 
-// Unknown keys are startup errors, not silent no-ops — a removed or typo'd
-// knob must never let a user believe something is configured (dead-knob
-// audit).
 func TestUnknownConfigKeysRefuse(t *testing.T) {
 	for _, body := range []string{
-		"upstreams:\n  p:\n    target: http://x\nenum_fieldz: [a]\n",            // typo'd top-level
-		"upstreams:\n  p:\n    target: http://x\n    enum_fields: [status]\n",   // removed upstream knob
-		"upstreams:\n  p:\n    target: http://x\nslack:\n  bot_token: xoxb-1\n", // removed slack knob
+		"upstreams:\n  p:\n    target: http://x\nenum_fieldz: [a]\n",
+		"upstreams:\n  p:\n    target: http://x\n    enum_fields: [status]\n",
+		"upstreams:\n  p:\n    target: http://x\nslack:\n  bot_token: xoxb-1\n",
 	} {
 		if _, err := Load(writeCfg(t, body)); err == nil {
 			t.Fatalf("unknown key must refuse at startup, accepted:\n%s", body)
 		}
 	}
-	// The full init scaffold must of course still parse.
+
 	if _, err := Load(writeCfg(t, "upstreams:\n  p:\n    target: http://x\n    volatile_fields: [ref]\n    mute: [\"/a/{id}\"]\nslack:\n  webhook_url: https://hooks.example\nllm:\n  model: m\nwarmup:\n  min_samples: 5\n  min_hours: 0\n")); err != nil {
 		t.Fatalf("valid config refused: %v", err)
 	}
 }
 
-// Storage knobs validate at startup: an impossible rate or age must never
-// silently become "keep everything".
 func TestStorageKnobValidation(t *testing.T) {
 	if _, err := Load(writeCfg(t, "upstreams: {}\nsampling:\n  rate: 1.5\n")); err == nil {
 		t.Fatal("rate > 1 must be a startup error")
@@ -128,7 +118,7 @@ func TestStorageKnobValidation(t *testing.T) {
 	if cfg.SampleRate() != 0.1 || cfg.RetentionTTL() != 168*time.Hour {
 		t.Fatalf("resolved knobs wrong: %v %v", cfg.SampleRate(), cfg.RetentionTTL())
 	}
-	// Defaults: unset means keep everything, forever (size rotation only).
+
 	plain, err := Load(writeCfg(t, "upstreams: {}\n"))
 	if err != nil {
 		t.Fatal(err)
@@ -136,16 +126,13 @@ func TestStorageKnobValidation(t *testing.T) {
 	if plain.SampleRate() != 1 || plain.RetentionTTL() != 0 {
 		t.Fatalf("defaults must be rate 1 / TTL off: %v %v", plain.SampleRate(), plain.RetentionTTL())
 	}
-	// An explicit rate 0 (guaranteed classes only) is legal and distinct
-	// from unset.
+
 	zero, err := Load(writeCfg(t, "upstreams: {}\nsampling:\n  rate: 0\n"))
 	if err != nil || zero.SampleRate() != 0 {
 		t.Fatalf("explicit rate 0 must resolve to 0: %v %v", zero.SampleRate(), err)
 	}
 }
 
-// Overlapping/duplicate/"/" listen routes are refused at load —
-// prefix routing would silently mis-attribute recordings between them.
 func TestListenRouteOverlapRefused(t *testing.T) {
 	base := func() *Config {
 		return &Config{Upstreams: map[string]Upstream{
@@ -174,15 +161,13 @@ func TestListenRouteOverlapRefused(t *testing.T) {
 
 	ok := &Config{Upstreams: map[string]Upstream{
 		"pay":  {Listen: "/pay", Target: "https://a.example.com"},
-		"docs": {Listen: "/payments", Target: "https://b.example.com"}, // shared string prefix, distinct SEGMENTS
+		"docs": {Listen: "/payments", Target: "https://b.example.com"},
 	}}
 	if err := ok.finish(); err != nil {
 		t.Fatalf("distinct segments must pass: %v", err)
 	}
 }
 
-// A pikopod.yaml that itself carries the BYOK key must be private — the same
-// posture token_file takes.
 func TestWorldReadableYAMLWithLLMKeyRefused(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "pikopod.yaml")

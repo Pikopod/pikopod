@@ -1,5 +1,3 @@
-// Rendering: text (terminal), json (machine handoff — the same shape the PR
-// surface consumes), markdown (PR comments).
 package specdiff
 
 import (
@@ -48,9 +46,8 @@ func (r *Report) WriteGitHubActions(w io.Writer, positions Positions) {
 	}
 }
 
-// Report is the JSON envelope — also the PR-surface handoff shape.
 type Report struct {
-	Source  string          `json:"source"` // "spec-diff"
+	Source  string          `json:"source"`
 	Old     string          `json:"old"`
 	New     string          `json:"new"`
 	Summary map[Level]int   `json:"summary"`
@@ -62,7 +59,6 @@ type ReportFinding struct {
 	Fingerprint string `json:"fingerprint"`
 }
 
-// BuildReport wraps findings with fingerprints and a severity summary.
 func BuildReport(oldSrc, newSrc string, findings []Finding) *Report {
 	r := &Report{Source: "spec-diff", Old: oldSrc, New: newSrc, Summary: map[Level]int{}, Items: []ReportFinding{}}
 	for _, f := range findings {
@@ -78,7 +74,6 @@ func (r *Report) WriteJSON(w io.Writer) error {
 	return enc.Encode(r)
 }
 
-// WriteText renders for the terminal, grouped by severity (ERR first).
 func (r *Report) WriteText(w io.Writer) {
 	if len(r.Items) == 0 {
 		fmt.Fprintln(w, "no declared changes between the two specs")
@@ -94,7 +89,6 @@ func (r *Report) WriteText(w io.Writer) {
 	}
 }
 
-// WriteMarkdown renders for a PR comment body.
 func (r *Report) WriteMarkdown(w io.Writer) {
 	if len(r.Items) == 0 {
 		fmt.Fprintln(w, "No declared changes between the two specs.")

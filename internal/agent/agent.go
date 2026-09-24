@@ -1,5 +1,3 @@
-// Package agent composes the drift data plane: proxy → recorder → learner/differ
-// → alerter. Every observer stage is recover()-wrapped; serving never breaks.
 package agent
 
 import (
@@ -37,43 +35,31 @@ type Agent struct {
 
 	mu       sync.Mutex
 	learners map[string]*baseline.Learner
-	// classes tracks status classes ever seen per upstream|method|template —
-	// StatusNew detection needs cross-family knowledge.
+
 	classes map[string]map[string]bool
-	// clientErrs counts requests and 4xx per endpoint family, so a 4xx rate
-	// has a denominator. Guarded by mu.
+
 	clientErrs map[string]errCounts
-	// muted: upstream → endpoint templates whose alerts are suppressed
-	// (config `mute`). Findings are still computed; emission is skipped.
+
 	muted map[string]map[string]bool
-	// refiners: the contract-refinement tap (config `refine.enabled`) — a
-	// SIBLING consumer of the observe stream; shares nothing with learners.
+
 	refiners map[string]*contract.Refiner
-	// behaviours: the state-machine tap (config `behaviour.enabled`), another
-	// sibling consumer of the observe stream.
+
 	behaviours map[string]*behaviour.Tracker
-	// contracts: upstream → spec-derived IR, for admission passes. Set by
-	// the CLI (registry-linked sandboxes); empty when refinement is off.
+
 	contracts map[string]*ir.ApiDefinition
-	// volatile: upstream → compiled volatile_fields, built once at startup.
+
 	volatile map[string]*volatile.Matcher
 	started  time.Time
-	// watch is the optional declared-drift watcher; its checks ride the persist
-	// tick as a goroutine — a slow spec fetch must never delay persistence.
+
 	watch *specwatch.Watcher
-	// documented caches per-upstream declared-changes journals for the
-	// observed×declared join (minute TTL — the observe path is hot).
+
 	documented map[string]*documentedCache
 
-	// EventsEmitted counts findings reported to the alerter. Atomic: the
-	// observer goroutine increments while /healthz reads.
 	EventsEmitted atomic.Int64
 }
 
-// errCounts is one endpoint family's request and 4xx tallies.
 type errCounts struct{ total, errors int }
 
-// New wires everything. Alert options are configurable for demo/eval.
 func New(cfg *config.Config, alertOpts alert.Options, extraSinks ...alert.Sink) (*Agent, error) {
 	salt, err := store.LoadOrCreateSalt(cfg.SaltPath())
 	if err != nil {
@@ -139,8 +125,6 @@ func New(cfg *config.Config, alertOpts alert.Options, extraSinks ...alert.Sink) 
 	return a, nil
 }
 
-// acceptHandler: POST /accept?fp=fp_… refreezes the family's baseline from live
-// stats; without it the overlay and the frozen baseline diverge forever.
 func (a *Agent) acceptHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "POST only", http.StatusMethodNotAllowed)
@@ -187,28 +171,19 @@ func (a *Agent) learner(upstream string) *baseline.Learner {
 			MinAge:     time.Duration(*a.Cfg.Warmup.MinHours) * time.Hour,
 		})
 		l.SetVolatileMatcher(a.volatile[upstream])
-		// Curated response-side value-volatility: request ids and timestamps
-		// never become tracked enum values; presence/type stay.
+
 		l.SetValueVolatile(volatile.ResponseFieldNames())
 		a.learners[upstream] = l
 	}
 	return l
 }
 
-// VolatileMatcher returns an upstream's compiled volatile_fields (nil when
-// the upstream is unknown), so callers can read Drops().
 func (a *Agent) VolatileMatcher(upstream string) *volatile.Matcher { return a.volatile[upstream] }
 
-// SetWatcher arms the declared-drift watcher (built by the CLI, which owns
-// pin resolution). Call before Run.
 func (a *Agent) SetWatcher(w *specwatch.Watcher) { a.watch = w }
 
-// SetSpecRules gives the recorder each upstream's contract-derived sanitizer
-// rules; call before Run.
 func (a *Agent) SetSpecRules(rules map[string][]sanitize.Rule) { a.Recorder.SetSpecRules(rules) }
 
-// SetContracts links upstreams to their spec-derived IRs so admission passes can
-// compare traffic against the spec (`pikopod up` wires it from the registry).
 func (a *Agent) SetContracts(m map[string]*ir.ApiDefinition) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -271,20 +246,15 @@ func (a *Agent) observe(rec *proxy.Record) (notable bool) {
 		pathOnly = pathOnly[:i]
 	}
 	obs := l.Observe(rec.Method, pathOnly, rec.Status, rec.RespBody, rec.TS)
-	// Pre-warmup records ARE the baseline being learned (and the family may
-	// be a brand-new endpoint) — always worth keeping on disk.
+
 	notable = !obs.Ready
 
-	// Muted endpoints: everything still LEARNS (baselines stay warm), but no
-	// finding on this template may emit.
 	if a.muted[rec.Upstream][obs.Template] {
 		return notable
 	}
 
-	// Incidents are facts about THIS exchange, so unlike drift they need no
-	// baseline and fire from the first request.
 	if kind, ok := a.incidentKind(rec, obs.Template); ok {
-		notable = true // the recording IS the reproduction; sampling must not drop it
+		notable = true
 		a.EventsEmitted.Add(1)
 		a.Alerter.Report(drift.Finding{
 			Upstream: rec.Upstream, Method: rec.Method, Template: obs.Template,
@@ -303,12 +273,11 @@ func (a *Agent) observe(rec *proxy.Record) (notable bool) {
 	newClass := !known[obs.Family.StatusClass]
 	known[obs.Family.StatusClass] = true
 	a.mu.Unlock()
-	// StatusNew means nothing before warmup. Runs OUTSIDE a.mu so the agent lock
-	// never nests over the learner lock.
+
 	hasFrozenSibling := l.HasFrozen(rec.Method, obs.Template)
 
 	if newClass && hasFrozenSibling && !obs.Ready {
-		notable = true // a class this endpoint never returned before
+		notable = true
 		a.EventsEmitted.Add(1)
 		fs := []drift.Finding{{
 			Upstream: rec.Upstream, Method: rec.Method, Template: obs.Template,
@@ -324,7 +293,7 @@ func (a *Agent) observe(rec *proxy.Record) (notable bool) {
 	}
 	findings := drift.Diff(rec.Upstream, obs, map[string]bool{obs.Family.StatusClass: true})
 	if len(findings) > 0 {
-		notable = true // drift evidence must reach disk regardless of rate
+		notable = true
 		AnnotateDocumented(findings, a.documentedFor(rec.Upstream))
 	}
 	for _, f := range findings {
@@ -410,14 +379,12 @@ func (a *Agent) Run(ctx context.Context) error {
 		select {
 		case <-ctx.Done():
 			a.persistAll()
-			// Attempt every queued alert delivery before exit (Close is
-			// idempotent and Flushes first) — Ctrl-C must not eat alerts.
+
 			a.Alerter.Close()
 			shutdownCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 			defer cancel()
 			if err := srv.Shutdown(shutdownCtx); err != nil {
-				// A straggler conn must not turn an orderly stop into an error exit:
-				// state is persisted and the grace has passed, so hard-close.
+
 				srv.Close()
 			}
 			return nil
@@ -472,11 +439,10 @@ func (a *Agent) persistAll() {
 	for _, l := range ls {
 		l.Persist()
 	}
-	// Retention sweeps ride the same tick: a quiet upstream's recordings and
-	// the event log still age out without fresh traffic.
+
 	a.Recorder.Sweep()
 	a.Alerter.SweepLog()
-	// The digest is self-gating (slack.digest_hours); a no-op when off.
+
 	a.Alerter.MaybeDigest()
 }
 
@@ -490,7 +456,6 @@ func (a *Agent) Learners() map[string]*baseline.Learner {
 	return out
 }
 
-// healthz proves liveness and value in one curl.
 func (a *Agent) healthz(w http.ResponseWriter, r *http.Request) {
 	type famView struct {
 		Endpoint    string `json:"endpoint"`

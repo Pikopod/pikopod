@@ -28,7 +28,6 @@ type wireDelivery struct {
 	Headers map[string]string
 }
 
-// render produces exactly what the provider would put on the wire for d.
 func (r *envelopeRenderer) render(d *WebhookDelivery) (*wireDelivery, error) {
 	vars := map[string]string{
 		ir.EnvelopeRefBody:       string(d.Payload),
@@ -89,8 +88,6 @@ func (r *envelopeRenderer) render(d *WebhookDelivery) (*wireDelivery, error) {
 	return &wireDelivery{Body: raw, Headers: headers}, nil
 }
 
-// injectField adds one string field to a JSON object without re-encoding the
-// rest, so the bytes a signature covers are the bytes the sink receives.
 func injectField(payload []byte, name, value string) ([]byte, error) {
 	trimmed := bytes.TrimSpace(payload)
 	if len(trimmed) < 2 || trimmed[0] != '{' || trimmed[len(trimmed)-1] != '}' {
@@ -147,8 +144,6 @@ func expand(tpl string, vars map[string]string) string {
 	}
 }
 
-// DecodeSigningKey turns the environment value into key bytes per the
-// declared encoding.
 func DecodeSigningKey(value, encoding string) ([]byte, error) {
 	switch encoding {
 	case "", "raw":

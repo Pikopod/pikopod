@@ -1,5 +1,3 @@
-// Sandbox CLI wiring: a small on-disk registry (<data_dir>/sandboxes.json plus
-// apis/<name>.ir.json) that `pikopod up` serves on cfg.SandboxPort.
 package main
 
 import (
@@ -34,29 +32,24 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// sandboxEntry is one registered sandbox in <data_dir>/sandboxes.json.
 type sandboxEntry struct {
-	ID string `json:"id"` // sbx_<hex>
-	// Name is the route prefix on the sandbox server: /<name>/...
+	ID string `json:"id"`
+
 	Name string `json:"name"`
 	Seed string `json:"seed"`
-	Mode string `json:"mode"` // "deterministic"
-	// CreatedClockMs is the sandbox's pinned virtual clock (base epoch).
+	Mode string `json:"mode"`
+
 	CreatedClockMs int64 `json:"createdClockMs"`
-	// IRFile is the persisted ApiDefinition, relative to data_dir.
+
 	IRFile     string `json:"irFile"`
 	SpecSource string `json:"specSource"`
-	// Origin is how the spec was obtained: "spec" | "postman-documenter" |
-	// "spec-link" | "readme-embedded" | "llm-extracted".
+
 	Origin string `json:"origin,omitempty"`
-	// Upstream links this sandbox to a drift-agent upstream so its traffic refines
-	// this IR. Auto-matched when the sandbox name equals an upstream name.
+
 	Upstream string `json:"upstream,omitempty"`
-	// WebhookURL is an optional HTTP(S) sink that receives the sandbox's
-	// webhook deliveries as signed POSTs (--webhook-url on add/import).
+
 	WebhookURL string `json:"webhookUrl,omitempty"`
-	// RecordingsFallback opts into the recordings tier: recorded traffic answers
-	// requests neither the spec nor an admitted observed endpoint can.
+
 	RecordingsFallback bool `json:"recordingsFallback,omitempty"`
 }
 
@@ -85,8 +78,7 @@ func saveRegistry(dataDir string, entries []sandboxEntry) error {
 	if err != nil {
 		return err
 	}
-	// Atomic: the registry's seeds derive credentials and webhook signing secrets,
-	// which are unrecoverable if a crash or ENOSPC tears this file.
+
 	return store.WriteFileAtomic(registryPath(dataDir), append(raw, '\n'))
 }
 
@@ -102,13 +94,11 @@ func findEntry(entries []sandboxEntry, name string) *sandboxEntry {
 func newSandboxID() string {
 	var b [8]byte
 	if _, err := rand.Read(b[:]); err != nil {
-		panic(err) // crypto/rand failing means the host is broken
+		panic(err)
 	}
 	return "sbx_" + hex.EncodeToString(b[:])
 }
 
-// loadSpec reads a spec from a file or URL, sending HTML doc pages through the
-// docimport ladder. It also returns the ORIGIN, so provenance stays honest.
 func loadSpec(cfg *config.Config, source string, out io.Writer) ([]byte, string, error) {
 	raw, err := loadSpecOnce(source)
 	if err != nil {
@@ -143,8 +133,6 @@ func loadSpec(cfg *config.Config, source string, out io.Writer) ([]byte, string,
 	return raw, "spec", nil
 }
 
-// emittedSpecRe marks a spec `--emit-spec` wrote; it re-imports as DRAFT until
-// the reviewer deletes the marker.
 var emittedSpecRe = regexp.MustCompile(`"?x-pikopod-origin"?\s*:\s*"?llm-extracted`)
 
 func normalizeByOrigin(raw []byte, origin string) (*ir.ApiDefinition, error) {
@@ -154,8 +142,6 @@ func normalizeByOrigin(raw []byte, origin string) (*ir.ApiDefinition, error) {
 	return importer.NormalizeOpenAPI(raw)
 }
 
-// emitSpec writes the spec the ladder produced so it can be read, corrected
-// and committed; an extracted one carries the origin marker.
 func emitSpec(path string, raw []byte, origin string, out io.Writer) error {
 	body := raw
 	if origin == "llm-extracted" {
@@ -193,8 +179,7 @@ func loadSpecOnce(source string) ([]byte, error) {
 	if strings.HasPrefix(source, "http://") || strings.HasPrefix(source, "https://") {
 		client := &http.Client{
 			Timeout: 30 * time.Second,
-			// Cap redirect hops: a pasted spec URL must not walk the fetcher through a
-			// long chain. (Go refuses non-http(s) schemes, so file:// is unreachable.)
+
 			CheckRedirect: func(req *http.Request, via []*http.Request) error {
 				if len(via) >= 3 {
 					return fmt.Errorf("too many redirects (%d) fetching the spec", len(via))
@@ -223,7 +208,6 @@ func loadSpecOnce(source string) ([]byte, error) {
 	return raw, nil
 }
 
-// sandboxAdd imports the spec, persists its IR, and registers the sandbox.
 func sandboxAdd(cfg *config.Config, name, specSource, seed, webhookURL, upstreamLink string, recordingsFallback bool, out io.Writer) error {
 	return sandboxAddOpts(cfg, name, addOptions{SpecSource: specSource, Seed: seed, WebhookURL: webhookURL, UpstreamLink: upstreamLink, RecordingsFallback: recordingsFallback}, out)
 }
@@ -277,7 +261,7 @@ func sandboxAddOpts(cfg *config.Config, name string, o addOptions, out io.Writer
 	}
 	if upstreamLink == "" {
 		if _, isUpstream := cfg.Upstreams[name]; isUpstream {
-			upstreamLink = name // the common case: same slug both sides
+			upstreamLink = name
 		}
 	}
 	entry := sandboxEntry{
@@ -319,8 +303,6 @@ func sandboxAddOpts(cfg *config.Config, name string, o addOptions, out io.Writer
 	return nil
 }
 
-// sandboxUpdate re-imports a spec and resets the declared-drift pin — the
-// operator's "reviewed, accept" step. It prints what it absorbs first.
 func sandboxUpdate(cfg *config.Config, name, specSource string, out io.Writer) error {
 	entries, err := loadRegistry(cfg.DataDir)
 	if err != nil {
@@ -345,7 +327,6 @@ func sandboxUpdate(cfg *config.Config, name, specSource string, out io.Writer) e
 		return err
 	}
 
-	// Show what this update absorbs (old pin vs new spec) before overwriting.
 	irAbs := filepath.Join(cfg.DataDir, entry.IRFile)
 	if oldRaw, rErr := os.ReadFile(irAbs); rErr == nil {
 		var oldDef ir.ApiDefinition
@@ -376,8 +357,7 @@ func sandboxUpdate(cfg *config.Config, name, specSource string, out io.Writer) e
 	if err := saveRegistry(cfg.DataDir, entries); err != nil {
 		return err
 	}
-	// Reset the watcher-owned pin so the next check re-seeds against the refreshed
-	// contract instead of re-reporting absorbed findings.
+
 	watchName := entry.Upstream
 	if watchName == "" {
 		watchName = name
@@ -421,8 +401,6 @@ func sandboxList(cfg *config.Config, out io.Writer) error {
 	return nil
 }
 
-// webhookCounts splits declared events into the ones that can fire and the
-// ones that cannot, which import and list both report.
 func webhookCounts(def *ir.ApiDefinition) (declared, triggered, emitOnly, untriggered int) {
 	for i := range def.Webhooks {
 		declared++
@@ -455,20 +433,17 @@ func sandboxReset(cfg *config.Config, name string, out io.Writer) error {
 	if err := st.Clear(entry.ID); err != nil {
 		return errfmt.Newf("cannot clear sandbox state", "check permissions on "+cfg.DataDir, "docs/config-reference.md#data_dir", "%v", err)
 	}
-	// The id sequence is monotonic and never reused, so a reset continues
-	// numbering rather than replaying old ids.
+
 	fmt.Fprintf(out, "sandbox %s cleared — stored state is empty (seed %s unchanged)\n", name, entry.Seed)
 	fmt.Fprintln(out, "note: a running `pikopod up` keeps in-memory journal/idempotency/webhook state for this sandbox — restart it for a fully fresh slate")
 	fmt.Fprintln(out, "note: the id sequence keeps advancing after a reset; for a byte-identical replay from scratch, register a fresh sandbox with the same seed")
 	return nil
 }
 
-// effectiveFor resolves the linked upstream's traffic overlay (nil when none).
-// version 0 means latest; a positive version pins, for from-drift runs.
 func effectiveFor(cfg *config.Config, entry *sandboxEntry, version int) *contract.Effective {
 	upstream := entry.Upstream
 	if upstream == "" {
-		upstream = entry.Name // auto-link by name (the common case)
+		upstream = entry.Name
 	}
 	ov, err := contract.LoadOverlay(cfg.DataDir, upstream)
 	if err != nil || ov == nil || ov.Version == 0 {
@@ -481,8 +456,6 @@ func effectiveFor(cfg *config.Config, entry *sandboxEntry, version int) *contrac
 	return contract.ResolveAt(ov, at)
 }
 
-// recordingsFor loads the linked upstream's recordings for the recordings tier.
-// Recordings only exist after traffic flows, so an empty load notes, never fails.
 func recordingsFor(cfg *config.Config, entry *sandboxEntry) *replay.Set {
 	if !entry.RecordingsFallback {
 		return nil
@@ -499,21 +472,17 @@ func recordingsFor(cfg *config.Config, entry *sandboxEntry) *replay.Set {
 	return set
 }
 
-// sandboxServer serves /<name>/... for every registered sandbox. Engines share
-// one SQLite store, so a sandbox at rest is exactly its committed rows.
 type sandboxServer struct {
 	cfg   *config.Config
 	store *sandbox.Store
-	// wallclockFaults makes every engine's faults act on the real wire
-	// (`up --wallclock-faults`).
+
 	wallclockFaults bool
 
 	mu      sync.Mutex
 	entries map[string]sandboxEntry
-	// modes is the standing state each sandbox was put into, by name.
+
 	modes map[string]*mode.Spec
-	// handlers caches built engines. Tests may pre-register any http.Handler
-	// (e.g. a panicking one) to exercise the recovery boundary.
+
 	handlers map[string]http.Handler
 }
 
@@ -562,7 +531,6 @@ func (s *sandboxServer) Names() []string {
 	return names
 }
 
-// handlerFor lazily builds (and caches) the engine for one sandbox.
 func (s *sandboxServer) handlerFor(name string) (http.Handler, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -599,14 +567,12 @@ func (s *sandboxServer) handlerFor(name string) (http.Handler, error) {
 	if err != nil {
 		return nil, err
 	}
-	// Self-referential URLs (pagination Link headers) must carry the mount.
+
 	engine.SetMountPrefix("/" + name)
 	s.handlers[name] = engine
 	return engine, nil
 }
 
-// ServeHTTP routes /<name>/... to that sandbox's engine. PER-SUBSYSTEM PANIC
-// RECOVERY: a panic 500s this one caller and never takes the process down.
 func (s *sandboxServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	defer func() {
 		if recover() != nil {
@@ -616,8 +582,6 @@ func (s *sandboxServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}()
 
-	// Same token gate as the agent proxy (listen-safety invariant);
-	// constant-time so a non-loopback bind can't leak the token via timing.
 	if token := s.cfg.Token(); token != "" {
 		if subtle.ConstantTimeCompare([]byte(r.Header.Get("X-Pikopod-Token")), []byte(token)) != 1 {
 			http.Error(w, "pikopod: missing or wrong X-Pikopod-Token", http.StatusUnauthorized)
@@ -626,8 +590,6 @@ func (s *sandboxServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		r.Header.Del("X-Pikopod-Token")
 	}
 
-	// Admin surface (chaos), reachable only through this server — chaos can never
-	// target anything but a sandbox, which IS the default-deny allowlist.
 	if strings.HasPrefix(r.URL.Path, "/_pikopod/") {
 		s.serveAdmin(w, r)
 		return
@@ -640,8 +602,7 @@ func (s *sandboxServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	h, err := s.handlerFor(name)
 	if err != nil {
-		// Config/IO faults are the operator's problem, never the caller's:
-		// mirror a neutral 500 (details go nowhere near the data plane).
+
 		writeSandboxJSONError(w, http.StatusInternalServerError, "Internal Server Error")
 		return
 	}
@@ -649,23 +610,20 @@ func (s *sandboxServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		writeSandboxJSONError(w, http.StatusNotFound, "Not Found")
 		return
 	}
-	// Strip the /<name> prefix keeping BOTH URL forms consistent: escaped remainder
-	// to RawPath, decoded to Path, or EscapedPath() re-escapes literal '%' bytes.
+
 	r2 := r.Clone(r.Context())
 	_, decodedRest := splitSandboxPath(r.URL.Path)
 	r2.URL.Path = decodedRest
 	r2.URL.RawPath = rest
 	if decodedRest == rest {
-		r2.URL.RawPath = "" // no escaping in play — canonical form
+		r2.URL.RawPath = ""
 	}
 	h.ServeHTTP(w, r2)
 }
 
-// serveAdmin handles /_pikopod/sandboxes/<name>/faults. Rules live on the served
-// engine, so chaos applies to the traffic your app is sending RIGHT NOW.
 func (s *sandboxServer) serveAdmin(w http.ResponseWriter, r *http.Request) {
 	parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
-	// _pikopod / sandboxes / <name> / faults|requests|mode|webhooks/emit
+
 	admin := len(parts) == 4 && (parts[3] == "faults" || parts[3] == "requests" || parts[3] == "mode" || parts[3] == "webhooks")
 	emit := len(parts) == 5 && parts[3] == "webhooks" && parts[4] == "emit"
 	if len(parts) < 4 || parts[1] != "sandboxes" || (!admin && !emit) {
@@ -700,8 +658,7 @@ func (s *sandboxServer) serveAdmin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if parts[3] == "requests" {
-		// The request journal (P1): what the CLIENT sent this sandbox —
-		// GET lists (newest last, ?limit=), DELETE resets.
+
 		switch r.Method {
 		case http.MethodGet:
 			limit := 0
@@ -731,7 +688,7 @@ func (s *sandboxServer) serveAdmin(w http.ResponseWriter, r *http.Request) {
 			writeSandboxJSONError(w, http.StatusBadRequest, "kind must be one of "+strings.Join(sandbox.FaultKinds(), ", "))
 			return
 		}
-		// Webhook rules match on the event, never method/path.
+
 		if !sandbox.IsWebhookFaultKind(rule.Kind) && (rule.Method == "" || rule.Path == "") {
 			writeSandboxJSONError(w, http.StatusBadRequest, "method and path are required")
 			return
@@ -830,8 +787,6 @@ func newSandboxResetCmd() *cobra.Command {
 	return c
 }
 
-// newSandboxRequestsCmd inspects a RUNNING sandbox's request journal —
-// what the client actually sent.
 func newSandboxRequestsCmd() *cobra.Command {
 	c := &cobra.Command{Use: "requests <name>", Short: "Show the requests a running sandbox has received (the client-behavior journal)", Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -843,8 +798,7 @@ func newSandboxRequestsCmd() *cobra.Command {
 			reset, _ := cmd.Flags().GetBool("reset")
 			url := fmt.Sprintf("%s://%s:%d/_pikopod/sandboxes/%s/requests", cfg.Scheme(), cfg.Listen, cfg.SandboxPort, args[0])
 			client := cfg.LocalClient(5 * time.Second)
-			// The sandbox server gates EVERY request on the token when one is resolved,
-			// so this command must send it or it 401s in tokenized setups.
+
 			var resp *http.Response
 			method, target := http.MethodGet, url+"?limit="+strconv.Itoa(limit)
 			if reset {

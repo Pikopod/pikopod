@@ -14,7 +14,6 @@ import (
 	"github.com/pikopod/pikopod/internal/scenario"
 )
 
-// Old spec: Widget has no fee_bearer.
 const widgetsV1 = `{
   "openapi": "3.0.0", "info": {"title": "W", "version": "1"},
   "paths": {"/widgets": {"post": {
@@ -26,7 +25,6 @@ const widgetsV1 = `{
   }}}}
 }`
 
-// The provider's change adopted: fee_bearer is now part of the model.
 const widgetsV2 = `{
   "openapi": "3.0.0", "info": {"title": "W", "version": "2"},
   "paths": {"/widgets": {"post": {
@@ -64,9 +62,6 @@ func runAgainst(t *testing.T, spec string, pack map[string]any) *scenario.RunRes
 	return res
 }
 
-// The from-drift loop, both directions: the pinned baseline PASSES on the
-// sandbox modelling the spec you integrated against, and FAILS the moment the
-// sandbox adopts the provider's change — the break lands locally.
 func TestFromDriftPinsBaselineBothDirections(t *testing.T) {
 	ev := &alert.DriftEvent{
 		SchemaVersion: "1", Fingerprint: "fp_abc123def456",
@@ -92,8 +87,6 @@ func TestFromDriftPinsBaselineBothDirections(t *testing.T) {
 	}
 }
 
-// Item endpoints seed a probe under the collection so the read has something
-// to echo; field_removed pins existence via the seeded baseline value.
 func TestFromDriftItemEndpointSeedsProbe(t *testing.T) {
 	ev := &alert.DriftEvent{
 		Fingerprint: "fp_001122334455", Upstream: "pay", Method: "GET",

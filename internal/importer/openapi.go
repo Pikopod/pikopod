@@ -8,9 +8,6 @@ import (
 	"github.com/pikopod/pikopod/internal/ir"
 )
 
-// OpenAPI 3.0/3.1 → ApiDefinition, the deterministic pass: every value is
-// EXPLICIT or DERIVED, and the heuristic collections stay empty here.
-
 var httpMethods = []string{"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS", "TRACE"}
 
 func normalizeOpenAPIValue(parsed any, limits ParseLimits, status string) (*ir.ApiDefinition, error) {
@@ -109,7 +106,7 @@ func normalizeMetadata(doc *OrdMap) ir.Metadata {
 func normalizeServers(doc *OrdMap) []ir.Server {
 	serversRaw, _ := doc.GetOr("servers").([]any)
 	out := []ir.Server{}
-	i := 0 // post-filter index (filter then map)
+	i := 0
 	for _, sRaw := range serversRaw {
 		s, ok := sRaw.(*OrdMap)
 		if !ok {
@@ -262,7 +259,7 @@ func normalizeEndpoints(doc *OrdMap, resolver *refResolver, limits ParseLimits, 
 			}
 
 			securityRaw := op.GetOr("security")
-			if securityRaw == nil { // ?? — null and undefined both fall through
+			if securityRaw == nil {
 				securityRaw = doc.GetOr("security")
 			}
 
@@ -312,8 +309,7 @@ func normalizeTags(raw any) []string {
 }
 
 func normalizeParameters(rawParams []any, epID, opPointer string, resolver *refResolver, limits ParseLimits) ([]ir.Parameter, error) {
-	// Later declarations (operation) override earlier (path) for the same
-	// (name, location) — OpenAPI's documented precedence.
+
 	byKey := map[string]ir.Parameter{}
 	for i, rawParam := range rawParams {
 		resolved, err := resolver.resolve(rawParam)
@@ -334,7 +330,7 @@ func normalizeParameters(rawParams []any, epID, opPointer string, resolver *refR
 
 		var required ir.Prov[bool]
 		if location == "path" {
-			required = ir.Derived(true, ptr) // path params are always required
+			required = ir.Derived(true, ptr)
 		} else if b, ok := p.GetOr("required").(bool); ok && b {
 			required = ir.Explicit(true, ptr+"/required")
 		} else {
@@ -570,8 +566,6 @@ func webhookTriggerOf(pathItem, op *OrdMap) *ir.WebhookTrigger {
 	return nil
 }
 
-// collectExamples reads a media type's `example` and named `examples`; an
-// absent example yields nothing, never an invented value.
 func collectExamples(mt *OrdMap, parentID, mediaType, pointer string, resolver *refResolver, examples *[]ir.Example) error {
 	if examples == nil {
 		return nil

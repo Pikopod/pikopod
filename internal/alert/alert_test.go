@@ -48,8 +48,6 @@ func newAlerter(t *testing.T, dir string, sink Sink) *Alerter {
 	return a
 }
 
-// N-occurrence emission then dedupe: no alert before the threshold, exactly
-// one at it, none after — while occurrence counting continues.
 func TestNOccurrenceThenDedupe(t *testing.T) {
 	sink := &memSink{}
 	a := newAlerter(t, t.TempDir(), sink)
@@ -81,8 +79,6 @@ func TestNOccurrenceThenDedupe(t *testing.T) {
 	}
 }
 
-// A slow drip below the threshold never alerts: the window resets and the
-// count restarts — the 2am five-minute wobble stays silent forever.
 func TestWindowResetKeepsSlowDripSilent(t *testing.T) {
 	sink := &memSink{}
 	a := newAlerter(t, t.TempDir(), sink)
@@ -92,14 +88,14 @@ func TestWindowResetKeepsSlowDripSilent(t *testing.T) {
 	for i := 0; i < 6; i++ {
 		a.Report(testFinding)
 		a.Report(testFinding)
-		now = now.Add(16 * time.Minute) // past the 15m window before the 3rd
+		now = now.Add(16 * time.Minute)
 	}
 	a.Flush()
 	if sink.count() != 0 {
 		a.Flush()
 		t.Fatalf("2-per-window forever must never alert: %v", sink.texts)
 	}
-	// Three inside one window still fires.
+
 	a.Report(testFinding)
 	a.Report(testFinding)
 	a.Report(testFinding)
@@ -110,9 +106,6 @@ func TestWindowResetKeepsSlowDripSilent(t *testing.T) {
 	}
 }
 
-// Dedupe survives restarts: an alerted fingerprint reported again by a
-// fresh Alerter over the same data dir stays silent (redeploys must not
-// re-storm the channel), and an acked fingerprint stays acked.
 func TestDedupeAndAckSurviveRestart(t *testing.T) {
 	dir := t.TempDir()
 	sink := &memSink{}
@@ -120,7 +113,7 @@ func TestDedupeAndAckSurviveRestart(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	a.Report(testFinding) // MinOccurrences 1 → alerts immediately
+	a.Report(testFinding)
 	a.Flush()
 	if sink.count() != 1 {
 		a.Flush()
@@ -146,18 +139,16 @@ func TestDedupeAndAckSurviveRestart(t *testing.T) {
 	if sink2.count() != 0 {
 		t.Fatalf("a restart must not re-alert alerted or acked fingerprints: %v", sink2.texts)
 	}
-	// The persisted event keeps counting occurrences across the restart.
+
 	ev, ok := b.EventFor(testFinding.Fingerprint())
 	if !ok || ev.Occurrences != 2 {
 		t.Fatalf("occurrences must continue from persisted state: %+v", ev)
 	}
-	if len(b.Active()) != 1 { // the acked one is not active
+	if len(b.Active()) != 1 {
 		t.Fatalf("active must show alerted-and-unacked only: %+v", b.Active())
 	}
 }
 
-// Two different findings alert independently — dedupe is per fingerprint,
-// not per endpoint.
 func TestDistinctFindingsAlertIndependently(t *testing.T) {
 	sink := &memSink{}
 	a := newAlerter(t, t.TempDir(), sink)
@@ -180,8 +171,6 @@ func TestDistinctFindingsAlertIndependently(t *testing.T) {
 	}
 }
 
-// ------------------------------------------------------- declared findings
-
 func declaredEvent() DriftEvent {
 	return DriftEvent{
 		Method: "GET", Endpoint: "/tx/{id}",
@@ -199,7 +188,7 @@ func TestDeclaredAlertsOnFirstOccurrence(t *testing.T) {
 		a.Flush()
 		t.Fatalf("declared drift is deterministic — must alert on first occurrence, got %d", sink.count())
 	}
-	// Re-running the watcher over the same standing diff never re-alerts.
+
 	a.ReportDeclared("pay", "fp_decl_test1", declaredEvent())
 	a.ReportDeclared("pay", "fp_decl_test1", declaredEvent())
 	a.Flush()
@@ -255,8 +244,6 @@ func TestRenderDeclared(t *testing.T) {
 	}
 }
 
-// --------------------------------------------------------- severity floor
-
 func TestMinLevelFloorsDeliveryNotRecord(t *testing.T) {
 	sink := &memSink{}
 	dir := t.TempDir()
@@ -266,7 +253,6 @@ func TestMinLevelFloorsDeliveryNotRecord(t *testing.T) {
 	}
 	defer a.Close()
 
-	// INFO-grade observed finding (additive field): floored from the channel.
 	info := drift.Finding{Upstream: "pay", Method: "GET", Template: "/tx", StatusClass: "2xx",
 		Kind: drift.FieldAdded, Field: "fee", After: "string"}
 	a.Report(info)
@@ -275,12 +261,11 @@ func TestMinLevelFloorsDeliveryNotRecord(t *testing.T) {
 		a.Flush()
 		t.Fatalf("INFO must not reach the channel under min_level WARN: %d", sink.count())
 	}
-	// ...but the record survives: dedupe state + Active() still carry it.
+
 	if evs := a.Active(); len(evs) != 1 || evs[0].Level != "INFO" {
 		t.Fatalf("floored alert must stay on record: %+v", evs)
 	}
 
-	// ERR-grade delivers.
 	a.Report(drift.Finding{Upstream: "pay", Method: "GET", Template: "/tx", StatusClass: "2xx",
 		Kind: drift.FieldRemoved, Field: "amount", Before: "number"})
 	a.Flush()
@@ -289,7 +274,6 @@ func TestMinLevelFloorsDeliveryNotRecord(t *testing.T) {
 		t.Fatalf("ERR must deliver: %d", sink.count())
 	}
 
-	// Declared WARN delivers at the WARN floor.
 	a.ReportDeclared("pay", "fp_floor_warn", DriftEvent{Method: "GET", Endpoint: "/tx",
 		Kind: drift.Kind("declared:response-enum-value-added"), Level: "WARN", Detail: "d"})
 	a.Flush()
@@ -310,17 +294,17 @@ func TestDigest(t *testing.T) {
 	now := time.Now()
 	a.SetClock(func() time.Time { return now })
 
-	a.MaybeDigest() // arms the window
+	a.MaybeDigest()
 	a.Report(drift.Finding{Upstream: "pay", Method: "GET", Template: "/a", StatusClass: "2xx",
-		Kind: drift.FieldAdded, Field: "x", After: "string"}) // INFO, floored
+		Kind: drift.FieldAdded, Field: "x", After: "string"})
 	a.Report(drift.Finding{Upstream: "pay", Method: "GET", Template: "/b", StatusClass: "2xx",
-		Kind: drift.FieldRemoved, Field: "y", Before: "string"}) // ERR, delivered
+		Kind: drift.FieldRemoved, Field: "y", Before: "string"})
 	a.ReportDeclared("pay", "fp_digest_1", DriftEvent{Method: "GET", Endpoint: "/c",
 		Kind: drift.Kind("declared:endpoint-removed"), Level: "ERR", Detail: "d"})
 
 	a.Flush()
 	before := sink.count()
-	a.MaybeDigest() // window not elapsed
+	a.MaybeDigest()
 	a.Flush()
 	if sink.count() != before {
 		t.Fatal("digest fired early")
@@ -339,15 +323,13 @@ func TestDigest(t *testing.T) {
 			t.Fatalf("digest missing %q:\n%s", want, msg)
 		}
 	}
-	// The window reset: an immediate re-check posts nothing.
+
 	a.MaybeDigest()
 	a.Flush()
 	if sink.count() != before+1 {
 		t.Fatal("digest double-fired")
 	}
 }
-
-// --------------------------------------------------------------- delivery
 
 func TestSlackWebhookSinkDeliver(t *testing.T) {
 	var got map[string]string
@@ -393,8 +375,6 @@ func TestDeliveryHealthReflectsSinkFailure(t *testing.T) {
 	}
 }
 
-// Crash-safety ordering: the dedupe latch persists BEFORE network delivery,
-// so a crash mid-delivery re-alerts nothing on restart.
 func TestLatchPersistedBeforeDelivery(t *testing.T) {
 	dir := t.TempDir()
 	var persistedDuringDelivery bool
@@ -409,7 +389,7 @@ func TestLatchPersistedBeforeDelivery(t *testing.T) {
 	}
 	defer a.Close()
 	a.Report(testFinding)
-	a.Flush() // Wait/Done ordering makes the probe's write visible here
+	a.Flush()
 	if !persistedDuringDelivery {
 		t.Fatal("the Alerted latch must be on disk before the sink is called")
 	}
@@ -420,7 +400,6 @@ type sinkFunc func(string) error
 func (f sinkFunc) Deliver(text string) error { return f(text) }
 func (f sinkFunc) Name() string              { return "probe" }
 
-// F10: the fingerprint cap must never become a silent permanent blackout.
 func TestSaturationEvictsInsteadOfBlackout(t *testing.T) {
 	sink := &memSink{}
 	a, err := New(t.TempDir(), Options{MinOccurrences: 3, Window: 15 * time.Minute, MaxTracked: 50}, sink)
@@ -429,7 +408,6 @@ func TestSaturationEvictsInsteadOfBlackout(t *testing.T) {
 	}
 	defer a.Close()
 
-	// Fill to the (test-sized) cap with ALERTED states (evictable).
 	for i := 0; i < 50; i++ {
 		a.ReportDeclared("pay", fmt.Sprintf("fp_fill_%05d", i), declaredEvent())
 	}
@@ -439,8 +417,6 @@ func TestSaturationEvictsInsteadOfBlackout(t *testing.T) {
 		t.Fatalf("setup: %d", filled)
 	}
 
-	// One more NEW fingerprint: an old alerted state is evicted, the new
-	// drift still alerts — the product's one job keeps working at the cap.
 	a.ReportDeclared("pay", "fp_the_new_one", declaredEvent())
 	a.Flush()
 	if sink.count() != filled+1 {
@@ -457,7 +433,6 @@ func TestSaturationEvictsInsteadOfBlackout(t *testing.T) {
 	}
 }
 
-// Acked states are evicted before alerted ones.
 func TestSaturationPrefersAckedVictims(t *testing.T) {
 	sink := &memSink{}
 	a, err := New(t.TempDir(), Options{MinOccurrences: 3, Window: 15 * time.Minute, MaxTracked: 50}, sink)
@@ -478,8 +453,6 @@ func TestSaturationPrefersAckedVictims(t *testing.T) {
 	}
 }
 
-// A wedged sink must not stall the caller: Report returns immediately and
-// overflow drops-and-counts.
 func TestSlowSinkNeverBlocksReport(t *testing.T) {
 	release := make(chan struct{})
 	slow := sinkFunc(func(string) error { <-release; return nil })
@@ -487,25 +460,20 @@ func TestSlowSinkNeverBlocksReport(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// The 60/h delivery ceiling would cap deliver() calls below the queue
-	// size — advance the clock across ceiling windows so >256 deliveries
-	// are attempted while the first one wedges the loop.
+
 	base := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	var reports int
 	a.SetClock(func() time.Time { return base.Add(time.Duration(reports/50) * 2 * time.Hour) })
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		// 400 distinct fingerprints: the first delivery wedges the loop, the
-		// 256-slot queue fills, the rest drop — none of it blocks Report.
+
 		for i := 0; i < 400; i++ {
 			reports = i
 			a.ReportDeclared("pay", fmt.Sprintf("fp_slow_%03d", i), declaredEvent())
 		}
 	}()
-	// A hang detector, not a performance budget: a Report that genuinely
-	// blocks on the wedged sink never returns, so the deadline only has to
-	// outlast a slow shared CI runner under -race.
+
 	select {
 	case <-done:
 	case <-time.After(60 * time.Second):
@@ -521,9 +489,6 @@ func TestSlowSinkNeverBlocksReport(t *testing.T) {
 	a.Close()
 }
 
-// Alert bodies are authored for Slack. The stdout sink is a different medium:
-// no :emoji: codes, no *asterisks*, no backticks — and field names carrying
-// underscores must survive untouched.
 func TestPlainTextRendersSlackMarkdownForATerminal(t *testing.T) {
 	in := ":rotating_light: *pikopod drift — new field* on `GET /transaction/tx_{id}` (fakepay)\n" +
 		"`fee_bearer` (string) appeared in responses\n" +
@@ -540,8 +505,8 @@ func TestPlainTextRendersSlackMarkdownForATerminal(t *testing.T) {
 		"[ERR]",
 		"pikopod drift — new field",
 		"GET /transaction/tx_{id}",
-		"fee_bearer (string) appeared in responses", // underscore field name intact
-		"documented in the provider's changelog",    // whole-line italic unwrapped
+		"fee_bearer (string) appeared in responses",
+		"documented in the provider's changelog",
 		"fp_6d540d187d44",
 	} {
 		if !strings.Contains(got, want) {
@@ -550,7 +515,6 @@ func TestPlainTextRendersSlackMarkdownForATerminal(t *testing.T) {
 	}
 }
 
-// Two underscored field names on one line must not be read as an italic span.
 func TestPlainTextDoesNotTreatFieldUnderscoresAsItalics(t *testing.T) {
 	got := PlainText("`account_number` and `fee_bearer` both changed")
 	if got != "account_number and fee_bearer both changed" {

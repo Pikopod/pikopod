@@ -1,5 +1,3 @@
-// The in-process scenario runner. One run drives one sandbox Engine from one
-// goroutine; the virtual clock does all waiting (a 60s WAIT completes in ms).
 package scenario
 
 import (
@@ -15,17 +13,13 @@ import (
 	"github.com/pikopod/pikopod/internal/sandbox"
 )
 
-// EngineVersion participates in the result hash: bump it when runner
-// semantics change so old hashes stop comparing equal.
 const EngineVersion = "pikopod-scenario/1"
 
-// Step statuses beyond the assertion trio (assert.go).
 const (
 	StatusErrored = "ERRORED"
 	StatusSkipped = "SKIPPED"
 )
 
-// Run verdicts. ERRORED is its own verdict, never a kind of FAILED.
 const (
 	RunPassed             = "PASSED"
 	RunFailed             = "FAILED"
@@ -33,10 +27,8 @@ const (
 	RunErrored            = "ERRORED"
 )
 
-// subjectsPresent: SANDBOX always; CLIENT never exists locally.
 var subjectsPresent = []string{"SANDBOX"}
 
-// StepResult records one executed (or skipped) step.
 type StepResult struct {
 	Key            string         `json:"key"`
 	Type           string         `json:"type"`
@@ -48,7 +40,6 @@ type StepResult struct {
 	Detail         map[string]any `json:"detail,omitempty"`
 }
 
-// RunResult is the run's terminal verdict.
 type RunResult struct {
 	Status       string       `json:"status"`
 	Summary      string       `json:"summary"`
@@ -57,7 +48,6 @@ type RunResult struct {
 	Steps        []StepResult `json:"steps"`
 }
 
-// stepOutcome is the result of executing one step.
 type stepOutcome struct {
 	status       string
 	virtualEndMs int64
@@ -65,12 +55,10 @@ type stepOutcome struct {
 	detail       map[string]any
 	captures     map[string]any
 	notEvaluated int
-	// intrinsicChecks are verifications a step performs without declared
-	// assertions, so a run whose only check is a sequence still PASSES.
+
 	intrinsicChecks int
 }
 
-// runner carries the per-run scope.
 type runner struct {
 	eng            Target
 	seed           string
@@ -79,16 +67,14 @@ type runner struct {
 	captures       map[string]any
 	defaults       map[string]any
 	virtualClockMs int64
-	seedCounter    int // SEED_STATE default-key stream
-	faultCounter   int // INJECT_FAULT condition-id stream
+	seedCounter    int
+	faultCounter   int
 }
 
 func (r *runner) tpl() *TemplateContext {
 	return &TemplateContext{Inputs: r.inputs, Captures: r.captures, Defaults: r.defaults, Generators: r.generators}
 }
 
-// ResolveInputs applies InputDecl defaults and type checks over the provided
-// values; a missing required input or a type mismatch is a run-blocking error.
 func ResolveInputs(def *ScenarioDefinition, provided map[string]any) (map[string]any, error) {
 	out := map[string]any{}
 	for _, decl := range def.Inputs {
@@ -117,7 +103,7 @@ func ResolveInputs(def *ScenarioDefinition, provided map[string]any) (map[string
 		}
 		out[decl.Name] = v
 	}
-	// Unknown extra inputs are rejected — a typoed name must not silently no-op.
+
 	for name := range provided {
 		known := false
 		for _, decl := range def.Inputs {
@@ -133,15 +119,12 @@ func ResolveInputs(def *ScenarioDefinition, provided map[string]any) (map[string
 	return out, nil
 }
 
-// Run executes a validated definition against a sandbox engine. Per-step errors
-// become ERRORED outcomes; Run itself only fails on input resolution.
 func Run(eng Target, def *ScenarioDefinition, provided map[string]any, seed string) (*RunResult, error) {
 	inputs, err := ResolveInputs(def, provided)
 	if err != nil {
 		return nil, err
 	}
 
-	// The run's clock starts at the sandbox's clock (never below base epoch).
 	startClock := eng.VirtualClockMs()
 	r := &runner{
 		eng:            eng,
@@ -178,7 +161,7 @@ func Run(eng Target, def *ScenarioDefinition, provided map[string]any, seed stri
 		})
 		stepHashes = append(stepHashes, fmt.Sprintf("%s:%s:%d", step.Key, out.status, out.virtualEndMs))
 		r.virtualClockMs = out.virtualEndMs
-		// A hard failure stops the run; remaining steps are SKIPPED, not FAILED.
+
 		if (out.status == StatusFailed || out.status == StatusErrored) && !step.ContinueOnFailure {
 			hardFailedAt = i
 			hardStatus = out.status
@@ -215,10 +198,8 @@ func Run(eng Target, def *ScenarioDefinition, provided map[string]any, seed stri
 	return res, nil
 }
 
-// resultHash fingerprints a run: definition + engine version + seed +
-// subjects + every step's (key, status, virtual end).
 func resultHash(def *ScenarioDefinition, seed string, stepHashes []string) string {
-	defJSON, _ := json.Marshal(def) // encoding/json sorts map keys → stable
+	defJSON, _ := json.Marshal(def)
 	defHash := sha256.Sum256(defJSON)
 	parts := append([]string{hex.EncodeToString(defHash[:]), EngineVersion, seed, strings.Join(subjectsPresent, ",")}, stepHashes...)
 	sum := sha256.Sum256([]byte(strings.Join(parts, "|")))
@@ -300,8 +281,6 @@ func (r *runner) request(step *Step) (stepOutcome, error) {
 		}
 	}
 
-	// Auto-inject the issued credential unless the step authenticates itself — or
-	// asserts an auth-failure status, where injecting would assert a contradiction.
 	if !stepExpectsAuthFailure(step) {
 		if name, value, ok := r.eng.AuthHeader(); ok {
 			if _, set := headers[name]; !set {
@@ -312,7 +291,7 @@ func (r *runner) request(step *Step) (stepOutcome, error) {
 
 	target := path
 	if !strings.HasPrefix(target, "/") {
-		target = "/" + target // httptest.NewRequest panics on relative targets
+		target = "/" + target
 	}
 	if enc := query.Encode(); enc != "" {
 		target += "?" + enc
@@ -342,8 +321,7 @@ func (r *runner) request(step *Step) (stepOutcome, error) {
 	for k, vs := range rec.Header() {
 		respHeaders[strings.ToLower(k)] = strings.Join(vs, ", ")
 	}
-	// Fault annotations ride pikopod's own headers: map them into assertion docs
-	// and strip them so scripted header assertions see the provider's surface.
+
 	var latencyMs *float64
 	var faultApplied *bool
 	if v, ok := respHeaders[sandbox.FaultDelayHeader]; ok {
@@ -395,8 +373,6 @@ func (r *runner) request(step *Step) (stepOutcome, error) {
 	}, nil
 }
 
-// stepExpectsAuthFailure reports whether any assertion pins response.status
-// to 401 or 403.
 func stepExpectsAuthFailure(step *Step) bool {
 	for i := range step.Assertions {
 		a := &step.Assertions[i]
@@ -410,14 +386,10 @@ func stepExpectsAuthFailure(step *Step) bool {
 	return false
 }
 
-// expectWebhook queries the outbox, advancing the virtual clock by the timeout
-// ONLY when nothing was delivered. The engine's clock is bumped only by WAIT.
 func (r *runner) expectWebhook(step *Step) (stepOutcome, error) {
 	cfg := step.Config.(*ExpectWebhookConfig)
 	eventType, _ := cfg.Match["eventType"].(string)
 
-	// Due-by semantics: a delivery a delay_webhook fault pushed into the future
-	// arrives here if due inside the timeout window. Never a real sleep.
 	deliveries, lastArrivalMs := r.eng.DeliveriesDueBy(eventType, r.virtualClockMs+cfg.TimeoutMs)
 	if len(deliveries) > 100 {
 		deliveries = deliveries[:100]
@@ -435,7 +407,7 @@ func (r *runner) expectWebhook(step *Step) (stepOutcome, error) {
 	if len(payloads) == 0 {
 		virtualEndMs += cfg.TimeoutMs
 	} else if lastArrivalMs > virtualEndMs {
-		virtualEndMs = lastArrivalMs // waited (virtually) for the delayed delivery
+		virtualEndMs = lastArrivalMs
 		r.eng.SetVirtualClockMs(virtualEndMs)
 	}
 	captures := map[string]any{}
@@ -465,8 +437,7 @@ func (r *runner) expectWebhook(step *Step) (stepOutcome, error) {
 func (r *runner) wait(step *Step) (stepOutcome, error) {
 	cfg := step.Config.(*WaitConfig)
 	end := r.virtualClockMs + cfg.DurationMs
-	// Advance the sandbox's own clock so time-dependent synthesis reflects the
-	// wait. Virtual only — no real sleep.
+
 	r.eng.SetVirtualClockMs(end)
 	return stepOutcome{
 		status: StatusNotEvaluated, virtualEndMs: end,
@@ -474,12 +445,9 @@ func (r *runner) wait(step *Step) (stepOutcome, error) {
 	}, nil
 }
 
-// FaultRuleFor maps a validated INJECT_FAULT config onto the rule the engine
-// arms. ok is false when the step names no standing condition to arm.
 func FaultRuleFor(cfg *InjectFaultConfig, id string) (rule sandbox.FaultRule, ok bool) {
 	if sandbox.IsWebhookFaultKind(cfg.Kind) {
-		// The engine owns the outbox, so the rule arms for real, keyed by the
-		// webhook EVENT (config.target; absent = any event). See faults.go.
+
 		event := ""
 		if cfg.Target != nil {
 			event = *cfg.Target
@@ -524,7 +492,7 @@ func (r *runner) injectFault(step *Step) (stepOutcome, error) {
 	cfg := step.Config.(*InjectFaultConfig)
 	rule, ok := FaultRuleFor(cfg, r.nextFaultID())
 	if !ok {
-		// materializeArmedFault: only standing sandbox conditions arm.
+
 		return stepOutcome{
 			status: StatusNotEvaluated, virtualEndMs: r.virtualClockMs,
 			summary: "fault skipped (not a standing condition)",
@@ -547,8 +515,6 @@ func (r *runner) injectFault(step *Step) (stepOutcome, error) {
 	}, nil
 }
 
-// delayDistributionFromConfig maps the validated definition object onto the
-// engine's DelayDistribution (numbers arrive as float64 from JSON).
 func delayDistributionFromConfig(dd map[string]any) *sandbox.DelayDistribution {
 	num := func(key string) int64 {
 		if f, ok := dd[key].(float64); ok {
@@ -607,8 +573,6 @@ func (r *runner) seedState(step *Step) (stepOutcome, error) {
 	}, nil
 }
 
-// upperBoundOps become UNPROVABLE once the journal has evicted entries: the true
-// count may be higher, so any claim but a lower bound must fail closed.
 var upperBoundOps = map[string]bool{
 	"equals": true, "notEquals": true, "lt": true, "lte": true,
 	"countEquals": true, "isOneOf": true, "in": true,
@@ -624,8 +588,6 @@ func (r *runner) verifyRequests(step *Step) (stepOutcome, error) {
 	count, evicted := r.eng.JournalCount(cfg.Method, path)
 	last, found, _ := r.eng.JournalLast(cfg.Method, path)
 
-	// Fail-closed gates BEFORE evaluation: an evicted journal cannot prove
-	// upper bounds; a truncated body cannot prove body claims.
 	for i := range step.Assertions {
 		a := &step.Assertions[i]
 		if evicted && a.Target == "sandbox.requestCount" && upperBoundOps[a.Op] {
@@ -669,7 +631,6 @@ func (r *runner) verifyRequests(step *Step) (stepOutcome, error) {
 	}, nil
 }
 
-// failedVerification renders a fail-closed VERIFY_REQUESTS outcome.
 func (r *runner) failedVerification(step *Step, reason string) stepOutcome {
 	return stepOutcome{
 		status: StatusFailed, virtualEndMs: r.virtualClockMs,
@@ -728,8 +689,6 @@ func (r *runner) note(text string) stepOutcome {
 	}
 }
 
-// nextSeedHex / nextFaultID derive from the run seed, so identical runs
-// produce identical rows.
 func (r *runner) nextSeedHex() string {
 	r.seedCounter++
 	return sandbox.NewPrng(fmt.Sprintf("%s:seedstate:%d", r.seed, r.seedCounter)).Hex(12)
@@ -751,8 +710,6 @@ func parseResponseBody(raw []byte) any {
 	return v
 }
 
-// headersDoc/queryDoc lift journal maps into plain JSON documents so JSONPath
-// resolves against them like any other body.
 func headersDoc(h map[string]string) any {
 	if h == nil {
 		return nil
@@ -779,14 +736,11 @@ func queryDoc(q map[string][]string) any {
 	return out
 }
 
-// verifySequence walks the journal once, advancing through matchers greedily:
-// unmatched requests between matches are allowed, order is not.
 func (r *runner) verifySequence(step *Step) (stepOutcome, error) {
 	cfg := step.Config.(*VerifySequenceConfig)
 	entries, evicted := r.eng.JournalEntries(0)
 	if evicted > 0 {
-		// The missing prefix may have held the match, so no ordered claim is
-		// provable any more.
+
 		return r.failedVerification(step, fmt.Sprintf(
 			"journal evicted %d entries — an ordered subsequence is unprovable; raise the journal cap or reset it", evicted)), nil
 	}
@@ -838,8 +792,6 @@ func orAny(s string) string {
 	return s
 }
 
-// gapViolation checks the virtual-time distance from the previous match. The
-// first match has no previous, so gaps do not apply to it.
 func gapViolation(m *SequenceMatcher, atMs, prevAtMs int64, hasPrev bool) string {
 	if !hasPrev || (m.MinGapMs == nil && m.MaxGapMs == nil) {
 		return ""
@@ -854,7 +806,6 @@ func gapViolation(m *SequenceMatcher, atMs, prevAtMs int64, hasPrev bool) string
 	return ""
 }
 
-// unprovable reports a matcher touching a field the journal had to truncate.
 func unprovable(m *SequenceMatcher, entry *sandbox.JournalEntry) string {
 	if len(m.Headers) > 0 && entry.HeadersTruncated {
 		return "the request carried more headers than the journal caps"
@@ -865,8 +816,6 @@ func unprovable(m *SequenceMatcher, entry *sandbox.JournalEntry) string {
 	return ""
 }
 
-// emitWebhook fires a declared event; an undeclared one is a pack error, not
-// a failed assertion, because the pack asked for something the spec lacks.
 func (r *runner) emitWebhook(step *Step) (stepOutcome, error) {
 	cfg := step.Config.(*EmitWebhookConfig)
 	var raw json.RawMessage

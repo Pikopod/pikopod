@@ -73,10 +73,6 @@ func driveEnumDrift(t *testing.T, rules map[string][]sanitize.Rule) string {
 	return strings.Join(sink.texts, "\n")
 }
 
-// With the contract's enums declared, the alert names the field and the
-// known set in the provider's own vocabulary. The new value is not in the
-// declared set, so it is still tokenized: the set is readable, the drift
-// fires, and nothing undeclared reaches disk.
 func TestUppercaseEnumDriftIsReadableWithSpecRules(t *testing.T) {
 	def, err := importer.NormalizeOpenAPI([]byte(uppercaseEnumSpec))
 	if err != nil {
@@ -93,8 +89,6 @@ func TestUppercaseEnumDriftIsReadableWithSpecRules(t *testing.T) {
 	}
 }
 
-// Without a contract the same drift is either invisible or unreadable, as
-// today; pinned so the fallback never silently changes.
 func TestUppercaseEnumDriftWithoutContractStaysAsToday(t *testing.T) {
 	text := driveEnumDrift(t, nil)
 	if strings.Contains(text, "ACTIVE") || strings.Contains(text, "PENDING") {

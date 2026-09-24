@@ -1,5 +1,3 @@
-// Stats become CONTRACT only through journaled admissions, and any historical
-// version stays reproducible (ResolveAt) — the property from-drift pins need.
 package contract
 
 import (
@@ -9,19 +7,13 @@ import (
 	"github.com/pikopod/pikopod/internal/ir"
 )
 
-// Admission gates beyond warmup: deterministic floors, nothing statistically
-// derived — the same discipline as the drift thresholds.
 const (
-	// Traffic wins a type conflict only at this share of ALLOW-mode samples with
-	// typeMinSamples of them; below it spec wins and the gate is recorded.
 	typeSustainRate = 0.98
 	typeMinSamples  = 10
-	// valueMinCount: an enum value must be seen this often to be admitted.
+
 	valueMinCount = 3
 )
 
-// Admit journals every change matured overlay stats make to the effective
-// contract. Idempotent; returns the number of NEW admissions.
 func (r *Refiner) Admit(def *ir.ApiDefinition, preferSpec bool) int {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -60,13 +52,11 @@ func (r *Refiner) Admit(def *ir.ApiDefinition, preferSpec bool) int {
 
 	for _, k := range sortedKeys(r.overlay.Endpoints) {
 		ep := r.overlay.Endpoints[k]
-		// Gate 1: warmup — same thresholds drift alerts use, so nothing
-		// enters the sandbox the operator wasn't told about first.
+
 		if ep.Samples < int64(r.minSamples) || r.now().Sub(ep.FirstSeen) < r.minAge {
 			continue
 		}
-		// Traffic and spec spell the same route differently; journal under the
-		// SPEC's template so renderer lookups line up. Unmatched stay traffic-form.
+
 		template := canon.canonical(ep.Method, ep.Template)
 		sourceKey := endpointKey(ep.Method, ep.Template, ep.StatusClass)
 		specEp, endpointDeclared := specView[endpointKeyOf(ep.Method, template)]
@@ -78,21 +68,20 @@ func (r *Refiner) Admit(def *ir.ApiDefinition, preferSpec bool) int {
 			f := ep.Fields[fieldPath]
 			presence := f.PresenceRate()
 			if presence < r.presenceFloor {
-				continue // too rare to claim
+				continue
 			}
 			declaredType := ""
 			if endpointDeclared {
 				declaredType = specEp.fieldTypes[fieldPath]
 			}
 			if declaredType == "" {
-				// Gate 2: undeclared field, sufficiently present → OBSERVED tier.
+
 				admit(Admission{
 					Kind: AdmitField, Method: ep.Method, Template: template, StatusClass: ep.StatusClass,
 					Field: fieldPath, Type: dominantType(f.Types), Presence: presence, SourceKey: sourceKey,
 				})
 			} else if dom, share, n := dominantTypeStats(f.Types); dom != "" && dom != declaredType {
-				// Type conflict: warmup, ALLOW-only evidence and the sustain rate are
-				// what earn traffic the right to override a document.
+
 				if !preferSpec && share >= typeSustainRate && n >= typeMinSamples {
 					admit(Admission{
 						Kind: AdmitType, Method: ep.Method, Template: template, StatusClass: ep.StatusClass,
@@ -109,7 +98,7 @@ func (r *Refiner) Admit(def *ir.ApiDefinition, preferSpec bool) int {
 					})
 				}
 			}
-			// Gate 3: observed enum values beyond the spec's set (union).
+
 			if !f.HighCardinality {
 				declared := map[string]bool{}
 				if endpointDeclared {
@@ -127,7 +116,7 @@ func (r *Refiner) Admit(def *ir.ApiDefinition, preferSpec bool) int {
 				}
 			}
 		}
-		// Gate 4: observed status codes the spec never declared.
+
 		if endpointDeclared {
 			for _, code := range sortedKeys(ep.StatusCodes) {
 				if ep.StatusCodes[code] >= valueMinCount && !specEp.statuses[code] {
@@ -147,11 +136,9 @@ func endpointKeyOf(method, template string) string {
 	return strings.ToUpper(method) + "|" + template
 }
 
-// templateCanon maps traffic templates onto the spec's spelling: equal segment
-// count, statics must match literally, spec params accept anything.
 type templateCanon struct {
-	byMethod map[string][][]string // METHOD → list of spec-template segments
-	joined   map[string][]string   // METHOD → joined templates (parallel)
+	byMethod map[string][][]string
+	joined   map[string][]string
 }
 
 func newTemplateCanon(def *ir.ApiDefinition) *templateCanon {
@@ -175,7 +162,7 @@ func (c *templateCanon) canonical(method, trafficTemplate string) string {
 		match := true
 		for j := range spec {
 			if strings.Contains(spec[j], "{") {
-				continue // spec param accepts any traffic segment
+				continue
 			}
 			if spec[j] != segs[j] {
 				match = false
@@ -190,13 +177,11 @@ func (c *templateCanon) canonical(method, trafficTemplate string) string {
 }
 
 type specEndpoint struct {
-	fieldTypes map[string]string   // dotted path → declared type ("" unknown)
-	fieldEnums map[string][]string // dotted path → declared enum values
+	fieldTypes map[string]string
+	fieldEnums map[string][]string
 	statuses   map[string]bool
 }
 
-// buildSpecView flattens declared response shapes into the refiner's dotted-path
-// space. Only 2xx schemas are compared; error classes use their own observations.
 func buildSpecView(def *ir.ApiDefinition) map[string]*specEndpoint {
 	named := map[string]*ir.IrSchemaNode{}
 	for i := range def.Schemas {
@@ -253,18 +238,17 @@ func flattenSchema(node *ir.IrSchemaNode, named map[string]*ir.IrSchemaNode, pat
 	}
 }
 
-// specType maps IR types into the refiner's observed-type space.
 func specType(t string) string {
 	switch t {
 	case "integer", "number":
 		return "number"
 	case "string", "boolean", "object", "array", "null":
 		if t == "array" {
-			return "object" // arrays observe as their element paths
+			return "object"
 		}
 		return t
 	default:
-		return "" // unknown/uncertain: no conflict possible
+		return ""
 	}
 }
 
@@ -288,40 +272,32 @@ func dominantTypeStats(types map[string]int64) (dom string, share float64, n int
 	return dom, float64(best) / float64(total), total
 }
 
-// Effective is the resolved traffic contribution at a version. Every entry carries
-// OBSERVED provenance with the admission-time presence as confidence.
 type Effective struct {
 	Version int
-	// AddedFields: endpointKeyOf(method, template) → dotted path → spec.
+
 	AddedFields map[string]map[string]ObservedFieldSpec
-	// ValueUnions: endpoint → field → extra enum values (order journaled).
+
 	ValueUnions map[string]map[string][]string
-	// TypeOverrides: endpoint → field → traffic-won type.
+
 	TypeOverrides map[string]map[string]string
-	// AddedStatuses: endpoint → codes.
+
 	AddedStatuses map[string][]string
-	// AddedEndpoints: endpointKey → status class first observed.
+
 	AddedEndpoints map[string]string
 	Contradictions []Contradiction
 }
 
-// ObservedFieldSpec is one traffic-admitted field, provenance included.
 type ObservedFieldSpec struct {
 	Type       string
 	Presence   float64
-	Provenance ir.Prov[string] // Provenance "OBSERVED", Confidence = presence
+	Provenance ir.Prov[string]
 	Version    int
-	// Values are the observed ALLOW-mode values (sorted), when any — the
-	// renderer prefers real observed values over type-synthesized ones.
+
 	Values []string
 }
 
-// ProvenanceObserved is the traffic tier: it sits between DERIVED and
-// LLM_EXTRACTED in precedence.
 const ProvenanceObserved = "OBSERVED"
 
-// ResolveAt replays admissions ≤ version. A from-drift pin resolves at its pinned
-// version and is therefore immovable by later refinement.
 func ResolveAt(ov *Overlay, version int) *Effective {
 	eff := &Effective{
 		Version:        version,

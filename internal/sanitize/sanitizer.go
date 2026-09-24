@@ -56,18 +56,14 @@ var (
 
 	idKeyRE     = regexp.MustCompile(`(?i)(^|_|-)(id|ids|uuid|guid|email|account|customer|user|order|ref)($|_|-)`)
 	secretKeyRE = regexp.MustCompile(`(?i)(api[_-]?key|secret|password|passwd|token|credential|auth|signature|private[_-]?key|access[_-]?key|bearer)`)
-	// nameKeyRE: person/PII keys whose free-text values are enum-ish by shape, so
-	// this key list is the whole defense against a name reaching disk. DROP by key.
+
 	nameKeyRE  = regexp.MustCompile(`(?i)(^|_|-)(name|surname|username|nickname|city|street|address|dob|birthdate|birthday|birth|gender|beneficiary|sender|recipient|payee|payer|holder)($|_|-)`)
 	phoneKeyRE = regexp.MustCompile(`(?i)(^|_|-)(phone|mobile|msisdn)($|_|-)`)
-	// cardKeyRE: financial instrument numbers — often sent as JSON numbers,
-	// which the shape detectors never see.
+
 	cardKeyRE = regexp.MustCompile(`(?i)(^|_|-)(card|pan|iban|bvn|nin|ssn)($|_|-)`)
-	// secretNumberKeyRE: short-digit secrets no shape detector can catch ("123");
-	// SUBSTITUTE whatever the JSON type — {"cvv":123} and {"cvv":"123"} are equal.
+
 	secretNumberKeyRE = regexp.MustCompile(`(?i)(^|_|-)(cvv2?|cvc2?|cid|csc|pin|otp|passcode|security[_-]?code|one[_-]?time[_-]?(code|password|pin))($|_|-)`)
-	// expiryKeyRE: card expiry, tokenized regardless of JSON type; deliberately
-	// stricter than the goldens allow (see parity_test.go knownStricterKeyRE).
+
 	expiryKeyRE   = regexp.MustCompile(`(?i)(^|_|-)(expiry|expiration|exp[_-]?month|exp[_-]?year|valid[_-]?(thru|until))($|_|-)`)
 	jwtRE         = regexp.MustCompile(`^eyJ[A-Za-z0-9_-]{6,}\.[A-Za-z0-9_-]{6,}\.[A-Za-z0-9_-]*$`)
 	highEntropyRE = regexp.MustCompile(`^[A-Za-z0-9_\-+/=]{28,}$`)
@@ -80,8 +76,6 @@ var (
 	whitespaceRE  = regexp.MustCompile(`\s`)
 )
 
-// Classify a leaf value by key name and shape, ordered most→least confident.
-// The DEFAULT is DROP (fail closed). Non-string scalars carry no PII → ALLOW.
 func Classify(key string, value any, isHeader bool) Mode {
 	k := strings.ToLower(key)
 	if isHeader {
@@ -97,57 +91,52 @@ func Classify(key string, value any, isHeader bool) Mode {
 	}
 	v, isString := value.(string)
 	if !isString {
-		// Numbers can be credentials/identifiers too: a PAN or account number sent
-		// as a JSON number must not ride through on its type.
+
 		switch {
 		case secretKeyRE.MatchString(k) || secretNumberKeyRE.MatchString(k):
 			return ModeSubstitute
 		case idKeyRE.MatchString(k) || nameKeyRE.MatchString(k) || phoneKeyRE.MatchString(k) || cardKeyRE.MatchString(k) || expiryKeyRE.MatchString(k):
 			return ModeTokenize
 		}
-		// RESIDUAL, by design: numbers carry no shape signal, so key names are the
-		// only evidence and an unrecognized key passes through. `pikopod inspect` says so.
-		return ModeAllow // other numbers/bools/null; containers handled by the walker
+
+		return ModeAllow
 	}
 
 	switch {
 	case secretKeyRE.MatchString(k):
-		return ModeSubstitute // key name says credential
+		return ModeSubstitute
 	case secretNumberKeyRE.MatchString(k):
-		return ModeSubstitute // cvv/pin/otp: same secret whatever the JSON type
+		return ModeSubstitute
 	case jwtRE.MatchString(v):
 		return ModeSubstitute
 	case expiryKeyRE.MatchString(k):
-		return ModeTokenize // card expiry: tokenized in string form too
+		return ModeTokenize
 	case phoneKeyRE.MatchString(k):
-		return ModeTokenize // phone numbers are referential identifiers
+		return ModeTokenize
 	case nameKeyRE.MatchString(k):
-		return ModeDrop // person/PII field name → no replay role, fail closed
+		return ModeDrop
 	case idKeyRE.MatchString(k):
 		return ModeTokenize
 	case emailRE.MatchString(v) || uuidRE.MatchString(v) || prefixedIDRE.MatchString(v):
 		return ModeTokenize
 	case highEntropyRE.MatchString(v) && !whitespaceRE.MatchString(v):
-		return ModeSubstitute // 28+ opaque
+		return ModeSubstitute
 	case longAlnumRE.MatchString(v):
-		return ModeSubstitute // long opaque alnum → secret-shaped
+		return ModeSubstitute
 	case httpMethodRE.MatchString(v):
 		return ModeAllow
 	case enumishRE.MatchString(v):
-		// Lowercase word with no digits (or mime/path) is enum-ish → keep. Must
-		// precede the identifier rules so "pending" is not tokenized.
+
 		return ModeAllow
 	case longDigitsRE.MatchString(v):
-		return ModeTokenize // long numeric identifier
+		return ModeTokenize
 	case mediumAlnumRE.MatchString(v):
-		return ModeTokenize // medium alnum with digits/mixed → identifier
+		return ModeTokenize
 	default:
-		return ModeDrop // free text / unknown shape → fail closed
+		return ModeDrop
 	}
 }
 
-// KeyLooksLikeIdentifier reports value-shaped KEYS (emails, uuids, jwts, long
-// digits, prefixed ids); opaque shapes need a digit so field names are spared.
 func KeyLooksLikeIdentifier(k string) bool { return keyLooksLikeIdentifier(k) }
 
 func keyLooksLikeIdentifier(k string) bool {
@@ -163,15 +152,10 @@ func keyLooksLikeIdentifier(k string) bool {
 		longAlnumRE.MatchString(k)
 }
 
-// multiPrefixedIDRE covers multi-segment tokens (tok_live_abc12345); the digit
-// requirement above keeps ordinary snake_case field names out.
 var multiPrefixedIDRE = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9]*(_[A-Za-z0-9]+){2,4}$`)
 
-// dropped marks a value for removal; pruned before returning.
 type dropped struct{}
 
-// Sanitize walks value, substituting/tokenizing/dropping leaves. isHeaderRoot
-// applies header classification to top-level keys (pass headers as a map).
 func Sanitize(value any, tok *Tokenizer, rules []Rule, isHeaderRoot bool) Result {
 	var redactions []Redaction
 
@@ -206,8 +190,7 @@ func Sanitize(value any, tok *Tokenizer, rules []Rule, isHeaderRoot bool) Result
 		case map[string]any:
 			out := make(map[string]any, len(n))
 			for k, v := range n {
-				// Keys are payload bytes too (APIs key objects BY identifier). The
-				// sanitized key is chosen FIRST: pointers persist and would leak it.
+
 				outKey := k
 				keyTokenized := false
 				if keyLooksLikeIdentifier(k) {
@@ -226,7 +209,7 @@ func Sanitize(value any, tok *Tokenizer, rules []Rule, isHeaderRoot bool) Result
 			}
 			return out
 		}
-		// Leaf: rule override wins, else the detector; fail-closed default is DROP.
+
 		mode, ok := ruleFor(key, pointer, node)
 		if !ok {
 			mode = Classify(key, node, isHeader)
@@ -243,21 +226,19 @@ func Sanitize(value any, tok *Tokenizer, rules []Rule, isHeaderRoot bool) Result
 			if name == "" {
 				name = "value"
 			}
-			return "<<SUBSTITUTE:" + name + ">>" // resolved to a sandbox credential at replay
-		default: // TOKENIZE
+			return "<<SUBSTITUTE:" + name + ">>"
+		default:
 			redactions = append(redactions, Redaction{Pointer: pointer, Mode: ModeTokenize})
 			switch s := node.(type) {
 			case string:
 				token, _ := tok.Tokenize(s)
 				return token
 			case float64:
-				// Numeric identifier (PAN, account number): the JSON type becomes
-				// string — a visible redaction, never the raw digits.
+
 				token, _ := tok.Tokenize(strconv.FormatFloat(s, 'f', -1, 64))
 				return token
 			case json.Number:
-				// UseNumber path: the literal digits, no float64 round-trip
-				// (a 17-digit account number must tokenize losslessly).
+
 				token, _ := tok.Tokenize(s.String())
 				return token
 			}

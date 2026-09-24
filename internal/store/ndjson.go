@@ -9,8 +9,6 @@ import (
 	"time"
 )
 
-// NDJSON is an append-only newline-delimited JSON log, rotated drop-oldest at
-// maxBytes or a generational TTL (at most two generations; TTL 0 = size only).
 type NDJSON struct {
 	mu       sync.Mutex
 	path     string
@@ -19,8 +17,7 @@ type NDJSON struct {
 	w        *bufio.Writer
 	size     int64
 	ttl      time.Duration
-	// genStart is when the CURRENT generation's oldest record was written
-	// (recovered on open; zero until the first append on a fresh generation).
+
 	genStart time.Time
 	now      func() time.Time
 }
@@ -45,15 +42,12 @@ func OpenNDJSON(path string, maxBytes int64) (*NDJSON, error) {
 	return n, nil
 }
 
-// SetTTL arms age-based retention (0 disables — size-only rotation).
 func (n *NDJSON) SetTTL(ttl time.Duration) {
 	n.mu.Lock()
 	defer n.mu.Unlock()
 	n.ttl = ttl
 }
 
-// firstRecordTime recovers the generation's birth from its first line so the
-// TTL clock survives restarts; an unparseable line only lengthens retention.
 func firstRecordTime(path string) time.Time {
 	f, err := os.Open(path)
 	if err != nil {
@@ -77,8 +71,6 @@ func firstRecordTime(path string) time.Time {
 	return probe.FirstSeen
 }
 
-// Append writes one record. On error the caller counts and drops — the hot
-// path never blocks on storage.
 func (n *NDJSON) Append(v any) error {
 	raw, err := json.Marshal(v)
 	if err != nil {
@@ -96,8 +88,7 @@ func (n *NDJSON) Append(v any) error {
 		}
 	}
 	if n.w == nil {
-		// A previous rotation failed after the rename (see rotateLocked):
-		// recover by creating the fresh generation now.
+
 		f, oErr := os.OpenFile(n.path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
 		if oErr != nil {
 			return oErr
@@ -114,8 +105,6 @@ func (n *NDJSON) Append(v any) error {
 	return n.w.Flush()
 }
 
-// Sweep enforces the TTL between appends (a quiet log must still age out);
-// rename preserves mtime, so mtime(.1) is the previous gen's newest record.
 func (n *NDJSON) Sweep() error {
 	n.mu.Lock()
 	defer n.mu.Unlock()
@@ -138,8 +127,7 @@ func (n *NDJSON) rotateLocked() error {
 	n.f.Close()
 	_ = os.Remove(n.path + ".1")
 	if err := os.Rename(n.path, n.path+".1"); err != nil {
-		// The file was closed above; without a reopen the log wedges forever.
-		// A failed rotation must degrade to an oversized log, not to silence.
+
 		if f, oErr := os.OpenFile(n.path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600); oErr == nil {
 			n.f, n.w = f, bufio.NewWriter(f)
 		}
@@ -147,19 +135,16 @@ func (n *NDJSON) rotateLocked() error {
 	}
 	f, err := os.OpenFile(n.path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
 	if err != nil {
-		// Rename already happened: leave state so the NEXT Append retries this
-		// exact step (creating the file fresh is the recovery).
+
 		n.f, n.w, n.size = nil, nil, 0
 		n.genStart = time.Time{}
 		return err
 	}
 	n.f, n.w, n.size = f, bufio.NewWriter(f), 0
-	n.genStart = time.Time{} // fresh generation: clock restarts on first append
+	n.genStart = time.Time{}
 	return nil
 }
 
-// ReadLast returns up to limit most-recent records (current generation only)
-// decoded into out slices by the caller via json.RawMessage.
 func (n *NDJSON) ReadLast(limit int) ([]json.RawMessage, error) {
 	n.mu.Lock()
 	n.w.Flush()
@@ -191,7 +176,6 @@ func (n *NDJSON) Close() error {
 	return n.f.Close()
 }
 
-// WriteFileAtomic writes raw to path via temp+rename (0600, parent dirs made).
 func WriteFileAtomic(path string, raw []byte) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return err

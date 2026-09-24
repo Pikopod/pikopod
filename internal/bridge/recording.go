@@ -15,9 +15,6 @@ import (
 	"github.com/pikopod/pikopod/internal/proxy"
 )
 
-// FindRecording returns the most recent recording that produced an incident.
-// Unlike FindEvent's template, a recording carries the CONCRETE path, so this
-// path never needs concretize() and has none of its single-parameter limit.
 func FindRecording(dataDir string, ev *alert.DriftEvent) (*proxy.Record, error) {
 	path := filepath.Join(dataDir, "recordings", ev.Upstream+".ndjson")
 	f, err := os.Open(path)
@@ -44,7 +41,7 @@ func FindRecording(dataDir string, ev *alert.DriftEvent) (*proxy.Record, error) 
 		}
 		var rec proxy.Record
 		if json.Unmarshal([]byte(line), &rec) != nil {
-			continue // recordings are drop-oldest logs; a torn tail line is fine
+			continue
 		}
 		if rec.Method != ev.Method || rec.Status != want {
 			continue
@@ -67,8 +64,6 @@ func FindRecording(dataDir string, ev *alert.DriftEvent) (*proxy.Record, error) 
 	return best, nil
 }
 
-// pathFitsTemplate reports whether a concrete path could have produced a
-// template: same segment count, and every literal segment matching.
 func pathFitsTemplate(path, template string) bool {
 	if i := strings.IndexByte(path, '?'); i >= 0 {
 		path = path[:i]
@@ -80,7 +75,7 @@ func pathFitsTemplate(path, template string) bool {
 	}
 	for i, seg := range ts {
 		if strings.Contains(seg, "{") {
-			continue // a parameter matches any single segment
+			continue
 		}
 		if seg != ps[i] {
 			return false
@@ -89,9 +84,6 @@ func pathFitsTemplate(path, template string) bool {
 	return true
 }
 
-// faultForKind maps an incident to the fault that reproduces it. An unreachable
-// upstream is a dead socket, not a status — reproducing it as a 502 would test
-// the wrong branch of the caller's error handling.
 func faultForKind(kind drift.Kind, status int) map[string]any {
 	switch kind {
 	case drift.UpstreamUnreachable:
@@ -103,8 +95,6 @@ func faultForKind(kind drift.Kind, status int) map[string]any {
 	}
 }
 
-// BuildFromRecord turns a recorded failure into a scenario that arms the same
-// failure in the sandbox and replays the same request at it.
 func BuildFromRecord(ev *alert.DriftEvent, rec *proxy.Record, contractVersion int) (string, map[string]any, error) {
 	if !ev.Kind.IsIncident() {
 		return "", nil, errfmt.New("not an incident",
@@ -120,8 +110,8 @@ func BuildFromRecord(ev *alert.DriftEvent, rec *proxy.Record, contractVersion in
 
 	fault := faultForKind(ev.Kind, rec.Status)
 	fault["method"] = rec.Method
-	fault["path"] = ev.Endpoint // the fault matches on the spec template
-	fault["times"] = 1          // fail once, then recover: the shape retry bugs need
+	fault["path"] = ev.Endpoint
+	fault["times"] = 1
 
 	steps := []any{
 		map[string]any{
@@ -140,7 +130,7 @@ func BuildFromRecord(ev *alert.DriftEvent, rec *proxy.Record, contractVersion in
 			map[string]any{"target": "response.status", "op": "equals", "expected": rec.Status},
 		},
 	}
-	// An unreachable upstream has no status to assert; the transport dies.
+
 	if ev.Kind == drift.UpstreamUnreachable {
 		delete(request, "assertions")
 	}
@@ -164,9 +154,6 @@ func BuildFromRecord(ev *alert.DriftEvent, rec *proxy.Record, contractVersion in
 	return name, pack, nil
 }
 
-// provenanceNote states where the request came from and what that costs. The
-// body is post-sanitizer, so fields the classifier could not place are GONE —
-// which matters far more for a 4xx we caused than for a 5xx the upstream threw.
 func provenanceNote(ev *alert.DriftEvent, rec *proxy.Record) string {
 	base := fmt.Sprintf(
 		"incident %s: %s answered %d on %s %s, first seen %s. "+
@@ -183,8 +170,6 @@ func provenanceNote(ev *alert.DriftEvent, rec *proxy.Record) string {
 	return base + " The fault is armed on method and path, so the failure reproduces regardless."
 }
 
-// replayBody returns the recorded request body when it is JSON we can replay.
-// A binary or dropped body is not fabricated — the scenario goes without.
 func replayBody(rec *proxy.Record) (any, bool) {
 	if rec.ReqKind != "json" || rec.ReqBody == nil {
 		return nil, false

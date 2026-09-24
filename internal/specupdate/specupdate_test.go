@@ -58,8 +58,7 @@ func TestEnumUnionThroughRef(t *testing.T) {
 	if len(res.Applied) != 1 || len(res.Skipped) != 0 {
 		t.Fatalf("applied=%d skipped=%d", len(res.Applied), len(res.Skipped))
 	}
-	// The op path must point where the edit LANDED — inside components,
-	// through the $ref — not at the logical paths location.
+
 	op := res.Applied[0].Ops[0]
 	if op.Path != "/components/schemas/Tx/properties/status/enum/-" || op.Value != "on_hold" {
 		t.Fatalf("op: %+v", op)
@@ -68,7 +67,7 @@ func TestEnumUnionThroughRef(t *testing.T) {
 	if !strings.Contains(out, "on_hold") || !strings.Contains(out, "x-pikopod-observed") {
 		t.Fatalf("output missing the union/annotation:\n%s", out)
 	}
-	// Format preservation: comments survive AST surgery.
+
 	for _, comment := range []string{"the provider's own comment", "operation comment that must survive"} {
 		if !strings.Contains(out, comment) {
 			t.Fatalf("comment lost: %q\n%s", comment, out)
@@ -89,7 +88,7 @@ func TestAdditiveOnlyNeverNarrows(t *testing.T) {
 	if len(res.Applied) != 0 || len(res.Suggestions) != 3 {
 		t.Fatalf("narrowings must NEVER apply: applied=%d suggestions=%d", len(res.Applied), len(res.Suggestions))
 	}
-	// The document is byte-identical to a no-change application.
+
 	clean, _ := Apply([]byte(yamlSpec), nil)
 	if string(res.Out) != string(clean.Out) {
 		t.Fatal("suggestions must not touch the document")
@@ -99,7 +98,7 @@ func TestAdditiveOnlyNeverNarrows(t *testing.T) {
 func TestAddStatusAndAlreadyDeclaredSkip(t *testing.T) {
 	res, err := Apply([]byte(yamlSpec), []Change{
 		change(AddStatus, func(c *Change) { c.Status = 429 }),
-		change(AddStatus, func(c *Change) { c.Status = 404 }), // declared already
+		change(AddStatus, func(c *Change) { c.Status = 404 }),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -125,7 +124,7 @@ func TestNullableWrap(t *testing.T) {
 	if !strings.Contains(string(res.Out), "nullable: true") {
 		t.Fatalf("no nullable:\n%s", res.Out)
 	}
-	// Fixpoint: re-applying to the patched document is a no-op.
+
 	res2, err := Apply(res.Out, []Change{change(NullableWrap, func(c *Change) { c.Pointer = "/ref" })})
 	if err != nil {
 		t.Fatal(err)
@@ -154,7 +153,7 @@ func TestAddPropertyWithProvenance(t *testing.T) {
 			t.Fatalf("missing %q:\n%s", want, out)
 		}
 	}
-	// Existing property: skipped, never overwritten.
+
 	res2, _ := Apply([]byte(yamlSpec), []Change{
 		change(AddProperty, func(c *Change) { c.Pointer, c.Value = "", "status" }),
 	})
@@ -206,7 +205,7 @@ func TestJSONSourceOrderedReEmit(t *testing.T) {
 		t.Fatalf("output is not valid JSON: %v\n%s", err, res.Out)
 	}
 	out := string(res.Out)
-	// Key order preserved: openapi before info before paths.
+
 	if !(strings.Index(out, `"openapi"`) < strings.Index(out, `"info"`) &&
 		strings.Index(out, `"info"`) < strings.Index(out, `"paths"`)) {
 		t.Fatalf("key order lost:\n%s", out)
@@ -241,8 +240,6 @@ paths:
 	}
 }
 
-// ---------------------------------------------------------------- derive
-
 func TestDeriveChangesFromConformance(t *testing.T) {
 	rep := &conformance.Report{Violations: []conformance.Violation{
 		{Method: "GET", Template: "/tx/{id}", Status: 418, Code: "status_undeclared", Occurrences: 5},
@@ -275,7 +272,7 @@ func TestDeriveChangesFromOverlayAndDedupe(t *testing.T) {
 		{Kind: contract.AdmitEndpoint, Method: "POST", Template: "/new", StatusClass: "2xx", At: at},
 	}}
 	rep := &conformance.Report{Violations: []conformance.Violation{
-		// Same status both streams — must collapse to one change.
+
 		{Method: "GET", Template: "/tx/{id}", Status: 418, Code: "status_undeclared", Occurrences: 5},
 	}}
 	changes := DeriveChanges(rep, ov)
@@ -312,9 +309,6 @@ func TestDottedToPointer(t *testing.T) {
 	}
 }
 
-// findResponse's fallback ladder: range keys and default must anchor edits
-// when no exact code exists — otherwise patches silently miss on specs that
-// declare only 4XX/default.
 func TestFindResponseLadder(t *testing.T) {
 	rangeSpec := `openapi: 3.0.0
 info: {title: T, version: "1"}
@@ -358,7 +352,6 @@ paths:
 		t.Fatalf("default anchor: %v applied=%d", err, len(res.Applied))
 	}
 
-	// Overlay-derived (class only): first exact code in the class carries.
 	classSpec := `openapi: 3.0.0
 info: {title: T, version: "1"}
 paths:

@@ -12,11 +12,6 @@ import (
 	"github.com/pikopod/pikopod/internal/ir"
 )
 
-// Normalizer behaviour is pinned by goldens over real-world specs — never
-// hand-written, never unit toys. The golden IR is compared structurally
-// (JSON-normalized deep equality), and array order must match exactly: the
-// goldens are the contract, sourcePointer/evidence included.
-
 type importerGolden struct {
 	Spec           string          `json:"spec"`
 	Converted      *string         `json:"converted"`
@@ -80,14 +75,8 @@ func TestParity_ImporterPaystack(t *testing.T) { assertParity(t, "paystack") }
 func TestParity_ImporterStripe(t *testing.T)   { assertParity(t, "stripe") }
 func TestParity_ImporterAppveyor(t *testing.T) { assertParity(t, "appveyor") }
 
-// A second Swagger 2.0 corpus entry exercising http-basic auth (AppVeyor
-// covers apiKey). SYNTHETIC (tools/gen-synthetic-fixtures.py): shaped like a
-// real SMS provider's spec without any provider's content.
 func TestParity_ImporterSyntheticSMS(t *testing.T) { assertParity(t, "synthetic-sms") }
 
-// TestParity_IRRoundTrip proves the IR structs round-trip exactly: golden
-// JSON unmarshalled into ir.ApiDefinition and marshalled back must be
-// structurally identical (field names, nulls, empty arrays).
 func TestParity_IRRoundTrip(t *testing.T) {
 	for _, name := range []string{"paystack", "stripe", "appveyor", "synthetic-sms"} {
 		g, _ := loadImporterGolden(t, name)
@@ -111,7 +100,6 @@ func TestParity_IRRoundTrip(t *testing.T) {
 			t.Fatalf("%s: IR round-trip not structurally identical:\n%s", name, joinLines(diffs))
 		}
 
-		// The round-tripped struct must also reproduce the canonical hash.
 		hash, err := ir.NormalizedHash(&def)
 		if err != nil {
 			t.Fatalf("%s: NormalizedHash: %v", name, err)
@@ -142,7 +130,7 @@ func TestParity_Detect(t *testing.T) {
 			t.Errorf("Detect(%s) = %s, want %s", c.name, kind, c.want)
 		}
 	}
-	// The YAML source of the committed paystack.json must classify identically.
+
 	yamlRaw, err := os.ReadFile(filepath.Join("..", "..", "testdata", "parity", "importer", "specs", "paystack.yaml"))
 	if err != nil {
 		t.Fatalf("paystack.yaml missing: %v", err)
@@ -152,10 +140,6 @@ func TestParity_Detect(t *testing.T) {
 	}
 }
 
-// TestParity_YAMLSource feeds the original Paystack YAML (not the committed
-// JSON conversion) through the Go YAML path: it must produce the exact same
-// IR, proving the yaml.v3-based safe-yaml port agrees with the yaml npm
-// package on a real spec.
 func TestParity_YAMLSource(t *testing.T) {
 	g, _ := loadImporterGolden(t, "paystack")
 	yamlRaw, err := os.ReadFile(filepath.Join("..", "..", "testdata", "parity", "importer", "specs", "paystack.yaml"))
@@ -175,8 +159,6 @@ func TestParity_YAMLSource(t *testing.T) {
 	}
 }
 
-// ------------------------------------------------------------------- diffing
-
 func joinLines(lines []string) string {
 	s := ""
 	for _, l := range lines {
@@ -185,9 +167,6 @@ func joinLines(lines []string) string {
 	return s
 }
 
-// diffJSON walks two JSON-normalized values and reports the first divergent
-// paths, so a golden mismatch points at the offending node instead of dumping
-// megabytes.
 func diffJSON(path string, want, got any, acc []string, limit int) []string {
 	if len(acc) >= limit {
 		return acc

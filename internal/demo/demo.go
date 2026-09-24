@@ -1,5 +1,3 @@
-// Package demo is the zero-config first-run story: an in-process fake provider
-// serves traffic through a real agent, then silently ships a drifting change.
 package demo
 
 import (
@@ -47,7 +45,7 @@ func Run(out io.Writer) error {
 	cfg := &config.Config{
 		Listen: "127.0.0.1", DataDir: dir,
 		Upstreams: map[string]config.Upstream{"fakepay": {Listen: "/fakepay", Target: provider.URL}},
-		Warmup:    config.Warmup{MinSamples: warmupSamples, MinHours: new(int)}, // eval thresholds — demo only
+		Warmup:    config.Warmup{MinSamples: warmupSamples, MinHours: new(int)},
 	}
 	a, err := agent.New(cfg, alert.Options{MinOccurrences: 3, Window: time.Minute}, alert.StdoutSink{})
 	if err != nil {
@@ -81,7 +79,7 @@ func Run(out io.Writer) error {
 	mutated.Store(true)
 	hit(10)
 	waitFor(func() bool { return a.Alerter.Sent() >= 2 }, 10*time.Second)
-	time.Sleep(100 * time.Millisecond) // let alert prints flush
+	time.Sleep(100 * time.Millisecond)
 
 	say("")
 	say("④ ONE alert per change, deduped across %d drifted requests, with the exact", 10)

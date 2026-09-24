@@ -10,22 +10,19 @@ import (
 	"github.com/pikopod/pikopod/internal/proxy"
 )
 
-// buildOverlay grows a matured overlay: fee_bearer (undeclared by the
-// widgets spec) at ~2/3 presence with two observed values, plus an
-// undeclared endpoint /widgets/limits.
 func buildOverlay(t *testing.T) *contract.Overlay {
 	t.Helper()
 	r := contract.NewRefiner("prov", t.TempDir(), 10, 0)
 	r.SetClock(func() time.Time { return time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC) })
 	for i := 0; i < 12; i++ {
 		body := map[string]any{"id": "tok_x", "name": "gizmo", "createdAt": "2026-01-01T00:00:00Z"}
-		// fee_bearer: EVERY sample (presence 1.0 → always rendered).
+
 		val := "merchant"
 		if i%2 == 0 {
 			val = "customer"
 		}
 		body["fee_bearer"] = val
-		// discount: 2/3 of samples (subject to presence-rate omission).
+
 		if i%3 != 0 {
 			body["discount"] = float64(50)
 		}
@@ -39,9 +36,6 @@ func buildOverlay(t *testing.T) *contract.Overlay {
 	return r.Snapshot()
 }
 
-// The acceptance property: with the overlay attached, the sandbox returns a
-// field the docs NEVER declared — deterministically, with the contract
-// version visible on the response.
 func TestRenderTrafficAdmittedField(t *testing.T) {
 	ov := buildOverlay(t)
 	eff := contract.ResolveAt(ov, ov.Version)
@@ -62,27 +56,24 @@ func TestRenderTrafficAdmittedField(t *testing.T) {
 	if !ok {
 		t.Fatalf("the traffic-admitted field must render (spec never declared it): %v", body)
 	}
-	// Observed VALUES preferred over synthesized ones.
+
 	if fee != "merchant" && fee != "customer" {
 		t.Fatalf("observed values must be preferred: %v", fee)
 	}
 	if version == "" {
 		t.Fatalf("responses must carry %s", ContractVersionHeader)
 	}
-	// Read-your-write untouched.
+
 	if body["name"] != "g" {
 		t.Fatalf("stored attributes must never be rewritten: %v", body)
 	}
 
-	// Determinism: same seed, same rendering.
 	body2, _ := serve("b")
 	if body["fee_bearer"] != body2["fee_bearer"] {
 		t.Fatalf("rendering must be seed-deterministic: %v vs %v", body["fee_bearer"], body2["fee_bearer"])
 	}
 }
 
-// Presence-rate omission: a ~2/3-present field must be ABSENT for some
-// resources and present for others — seeded, stable per resource.
 func TestPresenceRateOmission(t *testing.T) {
 	ov := buildOverlay(t)
 	eff := contract.ResolveAt(ov, ov.Version)
@@ -109,7 +100,7 @@ func TestPresenceRateOmission(t *testing.T) {
 	if present == 0 || absent == 0 {
 		t.Fatalf("a 2/3-present field must be omitted for SOME resources and present for others: present=%d absent=%d", present, absent)
 	}
-	// Stability: the same resource renders the same either way, every read.
+
 	for i := 1; i <= 24; i++ {
 		key := "widgets_" + itoaInt(i)
 		got := do(t, e, "GET", "/widgets/"+key, "", nil)
@@ -121,7 +112,6 @@ func TestPresenceRateOmission(t *testing.T) {
 	}
 }
 
-// Undeclared-but-observed endpoints serve a synthesized body and say so.
 func TestServeObservedEndpoint(t *testing.T) {
 	ov := buildOverlay(t)
 	eff := contract.ResolveAt(ov, ov.Version)
@@ -142,17 +132,13 @@ func TestServeObservedEndpoint(t *testing.T) {
 	if _, ok := body["daily_max"]; !ok {
 		t.Fatalf("observed numeric field missing: %v", body)
 	}
-	// Shadowing rule: spec routes match FIRST, so a concrete path that a
-	// spec template covers (e.g. /widgets/limits under /widgets/{widgetId})
-	// is served by the SPEC route, never the observed one — traffic can add
-	// routes the spec lacks, but can never hijack declared ones.
+
 	specSide := do(t, e, "GET", "/widgets/limits", "", nil)
 	if specSide.headers["x-pikopod-contract"] == "observed-endpoint" {
 		t.Fatal("observed endpoints must never shadow spec routes")
 	}
 }
 
-// A pin resolved at an OLD version never sees later admissions.
 func TestRenderRespectsPinnedVersion(t *testing.T) {
 	ov := buildOverlay(t)
 	effNow := contract.ResolveAt(ov, ov.Version)

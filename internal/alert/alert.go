@@ -1,5 +1,3 @@
-// Package alert turns drift findings into humans being paged: N-in-window
-// emission, per-fingerprint dedupe, persisted ack state, sanitized egress.
 package alert
 
 import (
@@ -19,17 +17,14 @@ import (
 	"github.com/pikopod/pikopod/internal/store"
 )
 
-// SchemaVersion of DriftEvent — the versioned protocol.
 const SchemaVersion = "2"
 
-// DriftEvent is the one shape emitted everywhere (stdout, Slack, event log).
-// schema/drift-event.schema.json is its contract.
 type DriftEvent struct {
 	SchemaVersion string     `json:"schema_version"`
 	Fingerprint   string     `json:"fingerprint"`
 	Upstream      string     `json:"upstream"`
 	Method        string     `json:"method"`
-	Endpoint      string     `json:"endpoint"` // path template, never a concrete path
+	Endpoint      string     `json:"endpoint"`
 	StatusClass   string     `json:"status_class"`
 	Kind          drift.Kind `json:"kind"`
 	Field         string     `json:"field,omitempty"`
@@ -38,22 +33,16 @@ type DriftEvent struct {
 	FirstSeen     time.Time  `json:"first_seen"`
 	LastSeen      time.Time  `json:"last_seen"`
 	Occurrences   int        `json:"occurrences"`
-	// Source is "declared" (spec vs spec) vs observed (traffic vs baselines);
-	// empty for compatibility with persisted events.
+
 	Source string `json:"source,omitempty"`
-	// Level is the risk-classified severity (ERR/WARN/INFO). Empty on events
-	// persisted before it existed.
+
 	Level string `json:"level,omitempty"`
-	// Detail is the pre-rendered human sentence for declared findings (their
-	// vocabulary is open-ended; observed kinds render from the fields above).
+
 	Detail string `json:"detail,omitempty"`
-	// Note carries declared×observed join context (e.g. "documented: the
-	// provider's new spec version declares this change").
+
 	Note string `json:"note,omitempty"`
 }
 
-// ObservedLevel grades by what breaks consumers: removals/type changes break
-// parsers (ERR), new enum values break switches (WARN), additions are INFO.
 func ObservedLevel(f drift.Finding) string {
 	if f.Documented {
 		return "INFO"
@@ -63,8 +52,7 @@ func ObservedLevel(f drift.Finding) string {
 		return "INFO"
 	case drift.EnumValueNew:
 		return "WARN"
-	// Incidents: the upstream failing is ERR; being throttled or rejecting our
-	// request is WARN — actionable, but not the provider breaking its contract.
+
 	case drift.UpstreamError, drift.UpstreamUnreachable:
 		return "ERR"
 	case drift.RateLimited, drift.ClientError:
@@ -74,24 +62,18 @@ func ObservedLevel(f drift.Finding) string {
 	}
 }
 
-// Options tune emission; zero values take defaults. Demo/eval lower them.
 type Options struct {
-	MinOccurrences int           // default 3
-	Window         time.Duration // default 15m
-	SummaryEvery   time.Duration // default 15m; 0 disables the summary loop
-	// Retention ages the event log out of disk (0 = size-only rotation).
-	// Dedupe/ack state is NOT aged: forgetting it would re-alert old drifts.
+	MinOccurrences int
+	Window         time.Duration
+	SummaryEvery   time.Duration
+
 	Retention time.Duration
-	// MinLevel floors sink DELIVERY by severity ("" delivers all). The event
-	// log, dedupe state and digest still see everything.
+
 	MinLevel string
-	// MaxTracked overrides the fingerprint-state cap (tests; 0 = the
-	// production default maxTrackedFingerprints).
+
 	MaxTracked int
 }
 
-// levelRank orders severities for the delivery floor. Events persisted
-// before Level existed rank as ERR — the safe default is to deliver.
 func levelRank(level string) int {
 	switch level {
 	case "INFO":
@@ -103,8 +85,6 @@ func levelRank(level string) int {
 	}
 }
 
-// maxTrackedFingerprints / maxDeliveriesPerHour bound alerting state and
-// egress under a drift storm.
 const (
 	maxTrackedFingerprints = 10000
 	maxDeliveriesPerHour   = 60
@@ -121,7 +101,6 @@ type fpState struct {
 	Event       *DriftEvent `json:"event,omitempty"`
 }
 
-// Sink delivers a rendered alert. Errors are recorded, never fatal.
 type Sink interface {
 	Deliver(text string) error
 	Name() string
@@ -136,29 +115,21 @@ type Alerter struct {
 	sinks     []Sink
 	now       func() time.Time
 
-	// Delivery rate-ceiling window.
 	deliveryWindowStart time.Time
 	deliveryWindowCount int
 
-	// Digest window (slack.digest_hours): new-alert counts by source|level
-	// since the last digest post, plus how many the min_level floor muted.
 	digestStart   time.Time
 	digestCounts  map[string]int
 	digestFloored int
 
-	// Async delivery: the caller is the recorder's single observe goroutine,
-	// so a wedged webhook must never stall it. Bounded queue, drop-and-count.
 	deliveries        chan deliveryItem
 	deliveryWG        sync.WaitGroup
 	DeliveriesDropped int
 
-	// Saturation bookkeeping: the fingerprint-state cap must never become a
-	// silent, permanent alert blackout.
 	SaturationEvictions int
 	saturationNotified  bool
 	closed              bool
 
-	// Delivery health for /healthz.
 	LastDeliveryOK  bool
 	LastDeliveryErr string
 	AlertsSent      int
@@ -193,8 +164,6 @@ func New(dataDir string, opts Options, sinks ...Sink) (*Alerter, error) {
 	return a, nil
 }
 
-// deliveryLoop drains the queue on its own goroutine — the only place sink
-// network I/O happens.
 func (a *Alerter) deliveryLoop() {
 	for item := range a.deliveries {
 		a.deliverSync(item.text, item.countsAsAlert)
@@ -202,14 +171,10 @@ func (a *Alerter) deliveryLoop() {
 	}
 }
 
-// Flush blocks until every queued delivery has been attempted (tests and
-// orderly shutdown; a wedged sink still bounds this via its own timeout).
 func (a *Alerter) Flush() { a.deliveryWG.Wait() }
 
 func (a *Alerter) SetClock(now func() time.Time) { a.now = now }
 
-// Report ingests one finding occurrence, emitting at most one alert per
-// fingerprint once the N-in-window threshold clears.
 func (a *Alerter) Report(f drift.Finding) {
 	fp := f.Fingerprint()
 	now := a.now()
@@ -217,8 +182,7 @@ func (a *Alerter) Report(f drift.Finding) {
 	a.mu.Lock()
 	st, ok := a.states[fp]
 	if !ok {
-		// At the cap the least-valuable state is evicted so a NEW drift is
-		// still tracked; only an unevictable storm drops it, and it notifies.
+
 		if len(a.states) >= a.opts.MaxTracked && !a.evictOneLocked() {
 			notify := !a.saturationNotified
 			a.saturationNotified = true
@@ -261,8 +225,6 @@ func (a *Alerter) Report(f drift.Finding) {
 	}
 }
 
-// ReportDeclared ingests one DECLARED-drift finding. A spec diff is
-// deterministic, so it alerts on FIRST occurrence; dedupe still applies.
 func (a *Alerter) ReportDeclared(upstream string, fingerprint string, ev DriftEvent) {
 	now := a.now()
 
@@ -299,13 +261,11 @@ func (a *Alerter) ReportDeclared(upstream string, fingerprint string, ev DriftEv
 	}
 }
 
-// emit logs one first-alert event and delivers it under the global ceiling
-// so a drift storm cannot flood Slack; the event log still carries all.
 func (a *Alerter) emit(ev *DriftEvent, now time.Time) {
-	a.log.Append(ev) // the local log always gets the event
+	a.log.Append(ev)
 
 	a.mu.Lock()
-	// Digest accounting sees EVERY new alert, delivered or floored.
+
 	if a.digestCounts == nil {
 		a.digestCounts = map[string]int{}
 	}
@@ -319,8 +279,6 @@ func (a *Alerter) emit(ev *DriftEvent, now time.Time) {
 	}
 	a.digestCounts[source+"|"+level]++
 
-	// An unset floor delivers everything: levelRank's ERR default errs loud
-	// for event levels, but the floor itself must err open.
 	floor := 0
 	if a.opts.MinLevel != "" {
 		floor = levelRank(a.opts.MinLevel)
@@ -338,8 +296,7 @@ func (a *Alerter) emit(ev *DriftEvent, now time.Time) {
 	deliverable := a.deliveryWindowCount <= maxDeliveriesPerHour
 	suppressedNote := a.deliveryWindowCount == maxDeliveriesPerHour+1
 	a.mu.Unlock()
-	// Persist the Alerted latch BEFORE the network delivery; persisting after
-	// would re-alert the same fingerprint on a crash-restart.
+
 	a.persist()
 	if deliverable {
 		a.deliver(RenderWithRetention(ev, a.opts.Retention), true)
@@ -348,8 +305,6 @@ func (a *Alerter) emit(ev *DriftEvent, now time.Time) {
 	}
 }
 
-// MaybeDigest posts the periodic digest when SummaryEvery has elapsed. The
-// window is in-memory: a restart starts fresh — the event log is the record.
 func (a *Alerter) MaybeDigest() {
 	a.mu.Lock()
 	if a.opts.SummaryEvery <= 0 {
@@ -373,7 +328,6 @@ func (a *Alerter) MaybeDigest() {
 	a.deliver(renderDigest(counts, floored), false)
 }
 
-// renderDigest summarizes new findings by source and severity.
 func renderDigest(counts map[string]int, floored int) string {
 	part := func(source string) string {
 		total := counts[source+"|ERR"] + counts[source+"|WARN"] + counts[source+"|INFO"]
@@ -396,35 +350,26 @@ func renderDigest(counts map[string]int, floored int) string {
 	return msg + "\ndetails: `pikopod status`"
 }
 
-// SweepLog enforces the event log's retention TTL (the agent's persist
-// tick calls it); no-op when retention is off.
 func (a *Alerter) SweepLog() { a.log.Sweep() }
 
-// Sent returns how many alerts have been delivered (lock-safe — AlertsSent
-// itself is written under the mutex, so concurrent pollers must come here).
 func (a *Alerter) Sent() int {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	return a.AlertsSent
 }
 
-// QueueStats snapshots the delivery-queue and saturation counters for
-// /healthz (written under the mutex, so read under it too).
 func (a *Alerter) QueueStats() (deliveriesDropped, saturationEvictions, tracked int) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	return a.DeliveriesDropped, a.SaturationEvictions, len(a.states)
 }
 
-// DeliveryHealth snapshots the delivery-state fields for /healthz — the
-// fields are written under the mutex, so concurrent readers must be too.
 func (a *Alerter) DeliveryHealth() (sent int, ok bool, lastErr string) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	return a.AlertsSent, a.LastDeliveryOK, a.LastDeliveryErr
 }
 
-// EventFor returns the alerted event for a fingerprint, if any.
 func (a *Alerter) EventFor(fingerprint string) (*DriftEvent, bool) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -436,8 +381,6 @@ func (a *Alerter) EventFor(fingerprint string) (*DriftEvent, bool) {
 	return &ev, true
 }
 
-// Ack suppresses a fingerprint until its diff changes (a changed diff is a
-// new fingerprint by construction).
 func (a *Alerter) Ack(fingerprint string) bool {
 	a.mu.Lock()
 	st, ok := a.states[fingerprint]
@@ -451,7 +394,6 @@ func (a *Alerter) Ack(fingerprint string) bool {
 	return ok
 }
 
-// Active returns alerted, un-acked events (for status/summary), newest last.
 func (a *Alerter) Active() []DriftEvent {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -464,8 +406,6 @@ func (a *Alerter) Active() []DriftEvent {
 	return out
 }
 
-// deliver ENQUEUES one message so the observe path never blocks on sink I/O.
-// countsAsAlert excludes housekeeping posts from AlertsSent.
 func (a *Alerter) deliver(text string, countsAsAlert bool) {
 	a.mu.Lock()
 	if a.closed {
@@ -485,7 +425,6 @@ func (a *Alerter) deliver(text string, countsAsAlert bool) {
 	}
 }
 
-// deliverSync pushes one message to every sink (delivery goroutine only).
 func (a *Alerter) deliverSync(text string, countsAsAlert bool) {
 	ok := true
 	var lastErr string
@@ -502,15 +441,13 @@ func (a *Alerter) deliverSync(text string, countsAsAlert bool) {
 	a.mu.Unlock()
 }
 
-// evictOneLocked frees one slot: acked first, then oldest alerted. Un-alerted
-// live windows are never evicted (pending signal). Requires a.mu.
 func (a *Alerter) evictOneLocked() bool {
 	victim, victimAcked := "", false
 	var victimLast time.Time
 	for fp, st := range a.states {
 		candAcked := st.Acked
 		if !candAcked && !st.Alerted {
-			continue // pending window — never evict
+			continue
 		}
 		better := false
 		switch {
@@ -533,7 +470,6 @@ func (a *Alerter) evictOneLocked() bool {
 	return true
 }
 
-// Render formats the one loud message (Slack-markdown-compatible plain text).
 func Render(ev *DriftEvent) string { return RenderWithRetention(ev, 0) }
 
 func RenderWithRetention(ev *DriftEvent, retention time.Duration) string {
@@ -594,10 +530,9 @@ func RenderWithRetention(ev *DriftEvent, retention time.Duration) string {
 	}
 	icon := ":rotating_light:"
 	if ev.Note != "" && ev.Level == "INFO" {
-		icon = ":memo:" // a documented change informs; it does not page
+		icon = ":memo:"
 	}
-	// An incident is a failed exchange, not a shape change, and it reproduces
-	// through a different command. Saying "drift" for both misroutes the reader.
+
 	word, replay, portable := "drift", "from-drift", ""
 	if ev.Kind.IsIncident() {
 		word, replay = "incident", "reproduce"
@@ -613,8 +548,7 @@ func RenderWithRetention(ev *DriftEvent, retention time.Duration) string {
 }
 
 func (a *Alerter) persist() {
-	// Snapshot under the lock (cheap value copies), marshal + write OUTSIDE
-	// it: a multi-MB MarshalIndent under a.mu stalled the observe path.
+
 	a.mu.Lock()
 	snap := make(map[string]fpState, len(a.states))
 	for fp, st := range a.states {
@@ -650,13 +584,12 @@ func (a *Alerter) Close() {
 	a.closed = true
 	a.mu.Unlock()
 	if !alreadyClosed {
-		a.Flush() // every accepted delivery attempted before the loop stops
+		a.Flush()
 		close(a.deliveries)
 	}
 	a.log.Close()
 }
 
-// StdoutSink prints alerts (demo + default when Slack is unconfigured).
 type StdoutSink struct{ W *os.File }
 
 func (s StdoutSink) Name() string { return "stdout" }
@@ -674,8 +607,6 @@ var (
 	reItalic = regexp.MustCompile(`(?m)^_(.*)_$`)
 )
 
-// PlainText renders a Slack mrkdwn alert body for a terminal. Italics match
-// whole-line only — field names carry underscores that are not markup.
 func PlainText(s string) string {
 	s = strings.NewReplacer(
 		":rotating_light:", "[ERR]",
@@ -688,8 +619,6 @@ func PlainText(s string) string {
 	return strings.TrimLeft(s, " ")
 }
 
-// SlackWebhookSink posts to an incoming webhook (no edit capability —
-// summaries arrive as separate posts).
 type SlackWebhookSink struct {
 	URL    string
 	Client *http.Client

@@ -1,5 +1,3 @@
-// Request-body validation, enforced ONLY on trustworthy provenance: rejecting on
-// an inferred guess would refuse traffic the real API accepts.
 package sandbox
 
 import (
@@ -15,8 +13,6 @@ func isEnforceableSchema(schema *ir.IrSchemaNode) bool {
 	return schema != nil
 }
 
-// bodyTypeMatches mirrors typeMatches over the parsed JSON value model
-// (json.Number for numbers, *JSONObject for objects).
 func bodyTypeMatches(expected string, value any) bool {
 	switch expected {
 	case "string":
@@ -39,7 +35,7 @@ func bodyTypeMatches(expected string, value any) bool {
 	case "null":
 		return value == nil
 	default:
-		return true // 'unknown' / unrecognized — do not constrain
+		return true
 	}
 }
 
@@ -66,8 +62,6 @@ func asFloat(value any) (float64, bool) {
 	return 0, false
 }
 
-// jsStrictEqual mirrors `e === value` between an IR enum value (decoded by
-// encoding/json: float64/string/bool/nil) and a body value (json.Number etc).
 func jsStrictEqual(enumValue, value any) bool {
 	switch ev := enumValue.(type) {
 	case string:
@@ -102,7 +96,7 @@ func validateNode(schema *ir.IrSchemaNode, value any, path string, depth int, er
 	expected := schema.Type.Value
 	if expected != "unknown" && !bodyTypeMatches(expected, value) {
 		*errors = append(*errors, label+" must be "+expected)
-		return // shape is wrong; deeper checks would be noise
+		return
 	}
 
 	if schema.EnumValues != nil && len(schema.EnumValues.Value) > 0 {
@@ -146,7 +140,6 @@ func validateNode(schema *ir.IrSchemaNode, value any, path string, depth int, er
 	}
 }
 
-// validateBody returns validation errors (empty ⇒ valid or not enforceable).
 func validateBody(schema *ir.IrSchemaNode, value any) []string {
 	if !isEnforceableSchema(schema) {
 		return nil

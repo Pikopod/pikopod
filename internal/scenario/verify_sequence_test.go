@@ -111,7 +111,6 @@ func TestVerifySequenceEnforcesMinGap(t *testing.T) {
 	}
 }
 
-// A header matcher narrows which entries count.
 func TestVerifySequenceMatchesOnHeaders(t *testing.T) {
 	def := parseDef(t, `{
 	  "steps": [

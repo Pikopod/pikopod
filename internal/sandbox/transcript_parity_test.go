@@ -12,12 +12,6 @@ import (
 	"github.com/pikopod/pikopod/internal/importer"
 )
 
-// Golden transcripts of a full request/response sequence. Each was captured
-// twice with the same seed; the ONLY run-to-run difference was the issued
-// credential, recorded as the "$CREDENTIAL" placeholder in reqHeaders (see
-// meta.normalizedPaths). Everything else — status, bodies, etags, Link
-// cursors, synthesized error bodies — is stable and asserted verbatim.
-
 type transcriptStep struct {
 	Name        string            `json:"name"`
 	Method      string            `json:"method"`
@@ -42,8 +36,6 @@ type transcript struct {
 	Steps []transcriptStep `json:"steps"`
 }
 
-// capturedRespHeaders is the header subset the capture tool recorded; parity
-// is asserted in both directions over exactly this set.
 var capturedRespHeaders = []string{"content-type", "etag", "allow", "link", "idempotent-replayed", "www-authenticate"}
 
 func TestParity_SandboxTranscripts(t *testing.T) {
@@ -51,8 +43,7 @@ func TestParity_SandboxTranscripts(t *testing.T) {
 	if err != nil {
 		t.Fatalf("glob transcripts: %v", err)
 	}
-	// Transcripts are committed. Zero matches means they were lost, not that
-	// there is nothing to check — skipping would turn that into a green run.
+
 	if len(files) == 0 {
 		t.Fatal("no transcripts under testdata/parity/sandbox — restore them from git")
 	}
@@ -91,9 +82,7 @@ func replayTranscript(t *testing.T, file string) {
 		Seed:           tr.Meta.SandboxSeed,
 		Mode:           "deterministic",
 		VirtualClockMs: tr.Meta.VirtualClockMs,
-		// The captured credential is random per issuance
-		// (meta.normalizedPaths): inject it so auth steps replay
-		// byte-for-byte.
+
 		Credential: tr.Meta.Credential,
 	}, store)
 	if err != nil {
@@ -130,8 +119,6 @@ func replayTranscript(t *testing.T, file string) {
 				t.Fatalf("status: got %d want %d (body %s)", rec.Code, step.Status, rec.Body.String())
 			}
 
-			// Body: deep-equal as parsed JSON. The transcript records `null`
-			// for an empty body (204s).
 			wantBody := decodeJSON(t, step.RespBody)
 			var gotBody any
 			if rec.Body.Len() > 0 {
@@ -141,7 +128,6 @@ func replayTranscript(t *testing.T, file string) {
 				t.Fatalf("body:\n got  %s\n want %s", rec.Body.String(), string(step.RespBody))
 			}
 
-			// Headers: both directions over the captured subset.
 			for _, h := range capturedRespHeaders {
 				got := rec.Header().Get(h)
 				want := step.RespHeaders[h]
@@ -153,8 +139,6 @@ func replayTranscript(t *testing.T, file string) {
 	}
 }
 
-// decodeJSON parses to a comparable tree (json.Number keeps 3 vs 3.0
-// honest).
 func decodeJSON(t *testing.T, raw []byte) any {
 	t.Helper()
 	if len(raw) == 0 || string(raw) == "null" {

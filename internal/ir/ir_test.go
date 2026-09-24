@@ -7,9 +7,6 @@ import (
 	"github.com/pikopod/pikopod/internal/ir"
 )
 
-// The product property behind the normalized hash: a source document
-// reformatted (whitespace, key order) yields an IDENTICAL hash — no phantom
-// versions, no fabricated diffs — while a real change yields a new one.
 func TestNormalizedHashIgnoresSourceFormatting(t *testing.T) {
 	compact := `{"openapi":"3.0.0","info":{"title":"W","version":"1"},"paths":{"/widgets":{"get":{"responses":{"200":{"description":"ok"}}}}}}`
 	reformatted := `{
@@ -39,17 +36,13 @@ func TestNormalizedHashIgnoresSourceFormatting(t *testing.T) {
 	}
 }
 
-// Evidence pointers are debug-only: two IR fragments differing ONLY in
-// evidence canonicalize identically (a re-import with different source
-// pointers is the same contract).
 func TestCanonicalStripsVolatileBackPointers(t *testing.T) {
 	a := map[string]any{"value": "GET", "provenance": "EXPLICIT", "confidence": float64(1), "evidence": "#/paths/x"}
 	b := map[string]any{"value": "GET", "provenance": "EXPLICIT", "confidence": float64(1), "evidence": "#/other/place", "sourcePointer": "line 9"}
 	if ir.CanonicalStringify(a) != ir.CanonicalStringify(b) {
 		t.Fatalf("evidence must not affect canonical form:\n%s\n%s", ir.CanonicalStringify(a), ir.CanonicalStringify(b))
 	}
-	// Order independence and JS-number quirks: arrays sort canonically, -0
-	// normalizes to 0 (JSON.stringify parity — the goldens depend on it).
+
 	x := ir.CanonicalStringify([]any{"b", "a", float64(0)})
 	y := ir.CanonicalStringify([]any{"a", float64(-0.0), "b"})
 	if x != y {

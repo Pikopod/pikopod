@@ -37,14 +37,13 @@ func TestScenarioListDefaultOutput(t *testing.T) {
 
 	got := out.String()
 
-	// Must include header and applicable / non-applicable archetypes.
 	if !strings.Contains(got, "archetypes vs widgets") {
 		t.Fatalf("expected header 'archetypes vs widgets', got:\n%s", got)
 	}
 	if !strings.Contains(got, "✓ happy_path") {
 		t.Fatalf("expected '✓ happy_path' in output, got:\n%s", got)
 	}
-	// Non-verbose output must NOT contain candidate bindings like '      op='
+
 	if strings.Contains(got, "      op=") {
 		t.Fatalf("non-verbose output must not contain candidate bindings, got:\n%s", got)
 	}
@@ -60,7 +59,6 @@ func TestScenarioListVerboseOutput(t *testing.T) {
 
 	got := out.String()
 
-	// Must contain archetype line AND indented candidate bindings following archetype's canonical role order.
 	if !strings.Contains(got, "  ✓ happy_path                 Happy path  (1 candidate binding(s))\n      op=ep_1a284091a72f\n") {
 		t.Fatalf("expected exact happy_path binding in verbose output, got:\n%s", got)
 	}
@@ -72,7 +70,6 @@ func TestScenarioListVerboseOutput(t *testing.T) {
 func TestScenarioListCLIFlag(t *testing.T) {
 	setupTestSandbox(t)
 
-	// Non-verbose via CLI
 	cmdNonVerbose := newScenarioCmd()
 	outNonVerbose, err := runCLI(t, cmdNonVerbose, "list", "widgets")
 	if err != nil {
@@ -82,7 +79,6 @@ func TestScenarioListCLIFlag(t *testing.T) {
 		t.Fatalf("CLI non-verbose should not have '      op=', got:\n%s", outNonVerbose)
 	}
 
-	// Verbose via --verbose
 	cmdVerbose := newScenarioCmd()
 	outVerbose, err := runCLI(t, cmdVerbose, "list", "widgets", "--verbose")
 	if err != nil {
@@ -92,7 +88,6 @@ func TestScenarioListCLIFlag(t *testing.T) {
 		t.Fatalf("CLI --verbose should have '      op=', got:\n%s", outVerbose)
 	}
 
-	// Verbose via -v
 	cmdShortVerbose := newScenarioCmd()
 	outShortVerbose, err := runCLI(t, cmdShortVerbose, "list", "widgets", "-v")
 	if err != nil {

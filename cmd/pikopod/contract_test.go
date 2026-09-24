@@ -13,12 +13,9 @@ import (
 	"github.com/pikopod/pikopod/internal/proxy"
 )
 
-// Every tier: OBSERVED additions with their introducing version, contradictions
-// with both sides, and pin staleness ("N versions behind", never "fixed").
 func TestContractReport(t *testing.T) {
 	cfg := testConfig(t, "https://example.invalid")
-	// A spec that DECLARES name as string, so sustained numeric traffic can
-	// demonstrate the traffic-wins contradiction row.
+
 	spec := `{
 	  "openapi": "3.0.0", "info": {"title": "W", "version": "1"},
 	  "paths": {"/widgets/{id}": {"get": {
@@ -36,7 +33,6 @@ func TestContractReport(t *testing.T) {
 		t.Fatalf("add: %v", err)
 	}
 
-	// No overlay yet → the honest "spec only" message, not an error.
 	var empty strings.Builder
 	if err := contractReport(cfg, "widgets", &empty); err != nil {
 		t.Fatalf("report without overlay: %v", err)
@@ -45,7 +41,6 @@ func TestContractReport(t *testing.T) {
 		t.Fatalf("missing spec-only message: %q", empty.String())
 	}
 
-	// Grow and persist an overlay under the sandbox's auto-linked upstream.
 	_, def, err := loadSandboxDef(cfg, "widgets")
 	if err != nil {
 		t.Fatal(err)
@@ -64,7 +59,6 @@ func TestContractReport(t *testing.T) {
 	}
 	ov := r.Snapshot()
 
-	// A saved from-drift pin one version behind the live contract.
 	packYAML := "name: drift-cafe01\nprovider: widgets\ncontractVersion: 1\ndefinition:\n  steps:\n    - key: context\n      type: NOTE\n      config:\n        text: pinned baseline\n"
 	dir := filepath.Join(cfg.DataDir, "scenarios")
 	if err := os.MkdirAll(dir, 0o700); err != nil {
@@ -85,8 +79,7 @@ func TestContractReport(t *testing.T) {
 	if !strings.Contains(got, "fee_bearer") || !strings.Contains(got, "presence 1.00") {
 		t.Fatalf("OBSERVED field row missing: %q", got)
 	}
-	// name: spec says string, traffic sustained number → traffic-wins type
-	// override AND a both-sides contradiction row.
+
 	if !strings.Contains(got, "spec says string, traffic says number") || !strings.Contains(got, "winner: traffic") {
 		t.Fatalf("contradiction row missing both sides: %q", got)
 	}

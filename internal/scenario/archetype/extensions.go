@@ -1,5 +1,3 @@
-// Pikopod extension archetypes (declines, timeouts, partial failure, downtime
-// recovery). Provider-agnostic; outside catalogue.go because that is golden-gated.
 package archetype
 
 import "encoding/json"
@@ -208,8 +206,6 @@ const extensionsJSON = `[
   }
 ]`
 
-// Extensions is the pikopod-native archetype set, parsed at load like the
-// catalogue.
 var Extensions = func() []Archetype {
 	var out []Archetype
 	if err := json.Unmarshal([]byte(extensionsJSON), &out); err != nil {
@@ -218,8 +214,6 @@ var Extensions = func() []Archetype {
 	return out
 }()
 
-// All returns the catalogue plus the pikopod extensions — what the CLI and
-// the NL inventory offer. Parity tests pin Catalogue alone.
 func All() []Archetype {
 	out := make([]Archetype, 0, len(Catalogue)+len(Extensions))
 	out = append(out, Catalogue...)

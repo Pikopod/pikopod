@@ -26,10 +26,6 @@ func seedIR(t *testing.T, specFile string) *ir.ApiDefinition {
 	return def
 }
 
-// Every shipped extension archetype must bind, expand, and RUN to PASSED
-// against MULTIPLE unrelated real APIs — the proof that scenarios are
-// provider-agnostic, not authored to one provider's paths. Runs must also be
-// deterministic: same seed, same result hash.
 func TestExtensionArchetypesRunGreenOnAnyProvider(t *testing.T) {
 	providers := map[string]*ir.ApiDefinition{
 		"appveyor": seedIR(t, "appveyor-swagger.json"),
@@ -38,7 +34,7 @@ func TestExtensionArchetypesRunGreenOnAnyProvider(t *testing.T) {
 	if len(archetype.Extensions) < 4 {
 		t.Fatalf("expected at least 4 extension archetypes, found %d", len(archetype.Extensions))
 	}
-	// Extension ids must never shadow the parity-gated catalogue.
+
 	for i := range archetype.Extensions {
 		if archetype.Find(archetype.Extensions[i].ID) != nil {
 			t.Fatalf("extension id %q collides with the catalogue", archetype.Extensions[i].ID)
@@ -95,8 +91,6 @@ func TestExtensionArchetypesRunGreenOnAnyProvider(t *testing.T) {
 	}
 }
 
-// The pack schema file (the save format for user-authored and NL-generated
-// scenarios) must stay valid JSON.
 func TestPackSchemaIsValidJSON(t *testing.T) {
 	raw, err := os.ReadFile(filepath.Join("..", "..", "schema", "scenario-pack.schema.json"))
 	if err != nil {

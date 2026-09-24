@@ -1,5 +1,3 @@
-// The documented-changes journal records ADDITIVE declared changes so the
-// OBSERVED-drift path can downgrade a matching traffic finding instead of paging.
 package specwatch
 
 import (
@@ -13,28 +11,21 @@ import (
 	"github.com/pikopod/pikopod/internal/specdiff"
 )
 
-// DocumentedChange is one declared additive change, keyed loosely enough to
-// join against traffic findings (canonical positional templates).
 type DocumentedChange struct {
-	ID       string    `json:"id"` // specdiff check id
+	ID       string    `json:"id"`
 	Method   string    `json:"method"`
 	Template string    `json:"template"`
-	Path     string    `json:"path,omitempty"`  // response field path
-	Value    string    `json:"value,omitempty"` // enum value or status code
+	Path     string    `json:"path,omitempty"`
+	Value    string    `json:"value,omitempty"`
 	At       time.Time `json:"at"`
 }
 
-// Documented is the per-upstream journal of declared additive changes.
 type Documented struct {
 	Changes []DocumentedChange `json:"changes"`
 }
 
-// documentedCap bounds the journal (a hostile/churny spec must not grow it
-// without bound; oldest entries fall off).
 const documentedCap = 5000
 
-// CanonicalTemplate reduces any template spelling to positional form — the
-// same identity rule the IR's CanonicalPath uses.
 func CanonicalTemplate(t string) string {
 	segs := strings.Split(t, "/")
 	for i, s := range segs {
@@ -45,14 +36,10 @@ func CanonicalTemplate(t string) string {
 	return strings.Join(segs, "/")
 }
 
-// CanonicalFieldPath gives dot-joined (specdiff/overlay) and slash-joined
-// (baseline learner) field paths one identity for the join.
 func CanonicalFieldPath(p string) string {
 	return strings.ReplaceAll(p, ".", "/")
 }
 
-// HasFieldAdded reports whether the journal documents this response field
-// appearing.
 func (d *Documented) HasFieldAdded(method, template, fieldPath string) bool {
 	return d.has(func(c DocumentedChange) bool {
 		return (c.ID == "response-property-added" || c.ID == "endpoint-added") &&
@@ -61,8 +48,6 @@ func (d *Documented) HasFieldAdded(method, template, fieldPath string) bool {
 	})
 }
 
-// HasEnumValueAdded reports whether the journal documents this value joining
-// the field's enum.
 func (d *Documented) HasEnumValueAdded(method, template, fieldPath, value string) bool {
 	return d.has(func(c DocumentedChange) bool {
 		return c.ID == "response-enum-value-added" && c.Method == method &&
@@ -71,8 +56,6 @@ func (d *Documented) HasEnumValueAdded(method, template, fieldPath, value string
 	})
 }
 
-// HasStatusAdded reports whether the journal documents a new status; exact
-// codes match directly, and a code documents its class ("429" ⇒ "4xx").
 func (d *Documented) HasStatusAdded(method, template, statusOrClass string) bool {
 	return d.has(func(c DocumentedChange) bool {
 		if c.ID != "response-status-added" || c.Method != method ||
@@ -82,7 +65,7 @@ func (d *Documented) HasStatusAdded(method, template, statusOrClass string) bool
 		if c.Value == statusOrClass {
 			return true
 		}
-		// Class match: declared "429" documents observed class "4xx".
+
 		return len(statusOrClass) == 3 && strings.HasSuffix(statusOrClass, "xx") &&
 			len(c.Value) == 3 && c.Value[0] == statusOrClass[0]
 	})
@@ -104,7 +87,6 @@ func documentedPath(dataDir, upstream string) string {
 	return filepath.Join(dataDir, "specwatch", upstream+".documented.json")
 }
 
-// LoadDocumented reads the journal (nil-safe: absent file → empty journal).
 func LoadDocumented(dataDir, upstream string) *Documented {
 	raw, err := os.ReadFile(documentedPath(dataDir, upstream))
 	if err != nil {
@@ -117,8 +99,6 @@ func LoadDocumented(dataDir, upstream string) *Documented {
 	return &d
 }
 
-// journalDocumented appends the additive declared changes among findings to
-// the upstream's journal (deduped; capped oldest-out).
 func (w *Watcher) journalDocumented(upstream string, findings []specdiff.Finding, now time.Time) {
 	var adds []DocumentedChange
 	for _, f := range findings {

@@ -1,5 +1,3 @@
-// The raw response a sandbox returns. Never the platform error envelope
-// (structural errors are a neutral `{ message }`), and always deterministic.
 package sandbox
 
 import (
@@ -10,7 +8,6 @@ import (
 	"github.com/pikopod/pikopod/internal/ir"
 )
 
-// RawResponse is the serialized response shape (body nil means no body).
 type RawResponse struct {
 	Status  int
 	Headers map[string]string
@@ -21,8 +18,6 @@ const jsonContentType = "application/json; charset=utf-8"
 
 var threeDigits = regexp.MustCompile(`^\d{3}$`)
 
-// statusIsSuccess maps a declared code to its numeric 2xx value, nil otherwise.
-// "2xx"/"2XX" counts as 200.
 func statusIsSuccess(code string) *int {
 	if threeDigits.MatchString(code) {
 		n, _ := strconv.Atoi(code)
@@ -38,7 +33,6 @@ func statusIsSuccess(code string) *int {
 	return nil
 }
 
-// pickSuccessStatus returns the lowest declared 2xx (falls back to fallback).
 func pickSuccessStatus(endpoint *ir.Endpoint, fallback int) int {
 	var best *int
 	for _, r := range endpoint.Responses {
@@ -65,7 +59,6 @@ func jsonContent(response *ir.ResponseDef) *ir.IrSchemaNode {
 	return nil
 }
 
-// successSchema matches the exact status code first, then a range ("2XX").
 func successSchema(endpoint *ir.Endpoint, status int) *ir.IrSchemaNode {
 	code := strconv.Itoa(status)
 	for i := range endpoint.Responses {
@@ -81,7 +74,6 @@ func successSchema(endpoint *ir.Endpoint, status int) *ir.IrSchemaNode {
 	return nil
 }
 
-// errorSchema matches exact, then NXX range, then default.
 func errorSchema(endpoint *ir.Endpoint, status int) *ir.IrSchemaNode {
 	code := strconv.Itoa(status)
 	rangeCode := code[:1] + "XX"
@@ -114,14 +106,12 @@ func jsonResponse(status int, value any, extraHeaders map[string]string) *RawRes
 	headers["content-type"] = jsonContentType
 	body, err := marshalJSValue(value)
 	if err != nil {
-		// Catch-all: an internal fault becomes a mirrored 500.
+
 		return buildErrorResponse(500, "Internal Server Error", nil)
 	}
 	return &RawResponse{Status: status, Headers: headers, Body: body}
 }
 
-// buildSuccessResponse answers a passthrough from the highest declared fact:
-// a spec example, then the response schema, then the empty shell.
 func (e *Engine) buildSuccessResponse(endpoint *ir.Endpoint) *RawResponse {
 	status := pickSuccessStatus(endpoint, 200)
 	if status == 204 {
@@ -147,7 +137,6 @@ func (e *Engine) buildSuccessResponse(endpoint *ir.Endpoint) *RawResponse {
 	return &RawResponse{Status: status, Headers: map[string]string{"content-type": jsonContentType}, Body: []byte(body)}
 }
 
-// buildErrorResponse is a neutral, non-platform `{ "message": ... }` body.
 func buildErrorResponse(status int, message string, extraHeaders map[string]string) *RawResponse {
 	headers := map[string]string{"content-type": jsonContentType}
 	for k, v := range extraHeaders {

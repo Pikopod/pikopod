@@ -1,5 +1,3 @@
-// Deterministic assertion evaluation: no model is ever involved in a pass/fail
-// decision. Go's regexp is RE2, so `matches` carries a linear-time bound.
 package scenario
 
 import (
@@ -9,7 +7,6 @@ import (
 	"strings"
 )
 
-// Assertion statuses.
 const (
 	StatusPassed       = "PASSED"
 	StatusFailed       = "FAILED"
@@ -29,8 +26,6 @@ type AssertionResult struct {
 	Diff     []DiffEntry `json:"diff,omitempty"`
 }
 
-// EvalDocs are the documents an assertion may read. A nil pointer / absent
-// entry means the step did not produce that document.
 type EvalDocs struct {
 	Response          *ResponseDoc
 	LatencyMs         *float64
@@ -40,27 +35,21 @@ type EvalDocs struct {
 	WebhookDeliveries []any
 	HasWebhooks       bool
 	FaultApplied      *bool
-	// Journal verification (VERIFY_REQUESTS steps): how many requests the
-	// sandbox received matching the step's filter, and the last one's body.
+
 	RequestCount     *float64
 	LastRequest      any
 	LastRequestFound bool
-	// LastRequestHeaders/Query are the redacted journal fields of that same
-	// entry. Unprovable is not the same as absent, so a truncated capture
-	// reports found=false and the assertion fails closed.
+
 	LastRequestHeaders any
 	LastRequestQuery   any
-	// LastRequestExists is whether an entry matched at all. Distinct from
-	// LastRequestFound, which means it also carried a body: a GET has none,
-	// but its headers and query are still assertable.
+
 	LastRequestExists   bool
 	LastRequestCaptured bool
 }
 
-// ResponseDoc is the response document (parsed JSON body).
 type ResponseDoc struct {
 	Status  float64
-	Headers map[string]string // lower-cased keys
+	Headers map[string]string
 	Body    any
 }
 
@@ -73,14 +62,12 @@ var (
 	catastrophicRe  = regexp.MustCompile(`(\([^)]*[+*][^)]*\))[+*]`)
 )
 
-// isCatastrophicRegex rejects nested unbounded quantifiers and uncompilable
-// patterns; RE2's linear bound holds even for shapes the heuristic misses.
 func isCatastrophicRegex(pattern string) bool {
 	if catastrophicRe.MatchString(pattern) {
 		return true
 	}
 	if _, err := regexp.Compile(pattern); err != nil {
-		return true // uncompilable is also rejected
+		return true
 	}
 	return false
 }
@@ -140,8 +127,6 @@ func toFloat(v any) (float64, bool) {
 	return 0, false
 }
 
-// deepEqual compares JSON-shaped values. Numbers compare by value regardless
-// of Go's concrete numeric type.
 func deepEqual(a, b any) bool {
 	if fa, ok := toFloat(a); ok {
 		fb, ok := toFloat(b)
@@ -195,10 +180,8 @@ func lengthOf(v any) (int, bool) {
 	return 0, false
 }
 
-// applyOp applies one operator to (actual, expected). Errors on a
-// structurally invalid op use.
 func applyOp(op string, actual, expected any, found bool) (bool, error) {
-	// Matcher placeholders make a volatile value pass by shape, not by literal.
+
 	if s, ok := expected.(string); ok {
 		if m := assertMatcherRe.FindStringSubmatch(s); m != nil && (op == "equals" || op == "matches") {
 			return matchesMatcher(m[1], actual), nil
@@ -276,7 +259,6 @@ func applyOp(op string, actual, expected any, found bool) (bool, error) {
 	}
 }
 
-// jsStringify approximates JS String(v) for the values that reach it.
 func jsStringify(v any) string {
 	switch t := v.(type) {
 	case string:
@@ -296,8 +278,6 @@ func jsStringify(v any) string {
 	}
 }
 
-// resolveActual returns the (found, value, pointer) an assertion targets
-// from the step docs.
 func resolveActual(a *Assertion, docs *EvalDocs) (found bool, value any, pointer *string) {
 	ptr := func(s string) *string { return &s }
 	switch a.Target {
@@ -346,8 +326,7 @@ func resolveActual(a *Assertion, docs *EvalDocs) (found bool, value any, pointer
 		if len(docs.WebhookDeliveries) == 0 {
 			return false, nil, ptr("/webhook/0")
 		}
-		// Path is honoured here: provider-faithful payloads make asserting INTO
-		// the delivery body the point — `$.status` must reach the real field.
+
 		return resolveBody(docs.WebhookDeliveries[0], true, a.Path)
 	case "sandbox.requestCount":
 		if docs.RequestCount == nil {
@@ -383,15 +362,12 @@ func resolveBody(body any, present bool, path *string) (bool, any, *string) {
 	}
 	found, value, err := getByPath(body, *path)
 	if err != nil {
-		// A malformed path surfaces via applyOp's error path — here we report
-		// not-found; the evaluator wraps the parse error.
+
 		return false, nil, path
 	}
 	return found, value, path
 }
 
-// EvaluateAssertion evaluates one assertion against the step's documents,
-// gated by subject presence.
 func EvaluateAssertion(a *Assertion, docs *EvalDocs, subjectsPresent []string) AssertionResult {
 	base := AssertionResult{Target: a.Target, Op: a.Op, Subject: a.Subject, Soft: a.Soft, Expected: a.Expected}
 	present := false
@@ -406,7 +382,7 @@ func EvaluateAssertion(a *Assertion, docs *EvalDocs, subjectsPresent []string) A
 		base.Message = fmt.Sprintf("subject %s is not present in this run", a.Subject)
 		return base
 	}
-	// Surface a malformed JSONPath as NOT_EVALUATED with the parse error.
+
 	if a.Path != nil && (a.Target == "response.body" || a.Target == "state.resource") {
 		if _, err := parseJSONPath(*a.Path); err != nil {
 			base.Status = StatusNotEvaluated
@@ -435,7 +411,7 @@ func EvaluateAssertion(a *Assertion, docs *EvalDocs, subjectsPresent []string) A
 	expJSON, _ := json.Marshal(a.Expected)
 	actJSON, _ := json.Marshal(value)
 	base.Message = fmt.Sprintf("expected %s%s %s %s, got %s", a.Target, pathNote, a.Op, string(expJSON), string(actJSON))
-	// A structural diff only helps when comparing composite values by equality.
+
 	if a.Op == "equals" || a.Op == "notEquals" {
 		if isComposite(value) || isComposite(a.Expected) {
 			base.Diff = structuralDiff(a.Expected, value)
@@ -449,7 +425,7 @@ func isComposite(v any) bool {
 	case map[string]any, []any:
 		return true
 	}
-	return v == nil // typeof null === 'object' in JS
+	return v == nil
 }
 
 type StepAssertionSummary struct {
@@ -459,8 +435,6 @@ type StepAssertionSummary struct {
 	FirstFailure *AssertionResult  `json:"firstFailure,omitempty"`
 }
 
-// EvaluateStepAssertions rolls a step up: FAILED if any HARD assertion failed,
-// PASSED if any was evaluated, else NOT_EVALUATED. Soft failures never fail it.
 func EvaluateStepAssertions(assertions []Assertion, docs *EvalDocs, subjectsPresent []string) StepAssertionSummary {
 	results := make([]AssertionResult, 0, len(assertions))
 	for i := range assertions {

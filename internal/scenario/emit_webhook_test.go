@@ -36,7 +36,6 @@ func emitEngine(t *testing.T, id string) *sandbox.Engine {
 	return eng
 }
 
-// A pack can cause an event no API call causes, and assert on what arrived.
 func TestEmitWebhookStepFiresAndIsObservable(t *testing.T) {
 	def := parseDef(t, `{
 	  "steps": [
@@ -59,8 +58,6 @@ func TestEmitWebhookStepFiresAndIsObservable(t *testing.T) {
 	}
 }
 
-// Asking the sandbox for an event the spec lacks is a pack error, not a
-// delivery: the sandbox never invents an event.
 func TestEmitWebhookStepRefusesUndeclaredEvent(t *testing.T) {
 	def := parseDef(t, `{
 	  "steps": [

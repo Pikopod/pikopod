@@ -1,5 +1,3 @@
-// Package drift diffs traffic against frozen baseline references. Alerts are
-// STRUCTURE ONLY; latency is recorded but never alerted (no certain claim).
 package drift
 
 import (
@@ -21,33 +19,24 @@ const (
 	TypeChanged  Kind = "type_changed"
 	EnumValueNew Kind = "enum_value_new"
 	StatusNew    Kind = "status_new"
-	// A never-null field arrived null. Its own kind, not TypeChanged: a
-	// different break, a different fix, its own fingerprint under dedupe.
+
 	FieldNullable Kind = "field_nullable"
-	// The exact code moved within a known class (200→201 is invisible to
-	// StatusNew, which compares classes).
+
 	StatusCodeChanged Kind = "status_code_changed"
-	// A 4xx/5xx body was restructured. Collapsed to one finding rather than a
-	// flood of adds+removes: an error-format swap is one event, not N.
+
 	ErrorShapeChanged Kind = "error_shape_changed"
 )
 
-// Incident kinds describe an exchange that FAILED, not a response that changed
-// shape. They are facts about one request, so they need no baseline.
 const (
-	// The upstream answered 5xx.
 	UpstreamError Kind = "upstream_error"
-	// pikopod could not reach the upstream at all and returned its own 502.
+
 	UpstreamUnreachable Kind = "upstream_unreachable"
-	// The upstream answered 429.
+
 	RateLimited Kind = "rate_limited"
-	// The upstream answered 4xx. Opt-in: usually the caller's own bug, and
-	// routine on endpoints where a 401 is the normal answer.
+
 	ClientError Kind = "client_error"
 )
 
-// IsIncident separates failed exchanges from shape changes. Incidents fire from
-// the first request; drift kinds wait for a frozen baseline.
 func (k Kind) IsIncident() bool {
 	switch k {
 	case UpstreamError, UpstreamUnreachable, RateLimited, ClientError:
@@ -56,11 +45,8 @@ func (k Kind) IsIncident() bool {
 	return false
 }
 
-// presenceFloor: a field only counts as "removed" if it was present in
-// (nearly) every reference sample — optional fields are not removals.
 const presenceFloor = 0.98
 
-// Finding is one structural divergence in one record.
 type Finding struct {
 	Upstream    string `json:"upstream"`
 	Method      string `json:"method"`
@@ -70,16 +56,12 @@ type Finding struct {
 	Field       string `json:"field,omitempty"`
 	Before      string `json:"before,omitempty"`
 	After       string `json:"after,omitempty"`
-	// Declared×observed join context. Presentation only — NEVER part of the
-	// fingerprint, so annotating a finding cannot re-alert it.
+
 	Note string `json:"note,omitempty"`
-	// The provider's new spec version declares this change, so severity
-	// routing treats it as informational: announced, not silent.
+
 	Documented bool `json:"documented,omitempty"`
 }
 
-// Fingerprint identifies a drift stably across occurrences. Components are
-// escaped so a "|" inside one cannot shift the component boundaries.
 func (f Finding) Fingerprint() string {
 	h := sha256.Sum256([]byte(fmt.Sprintf("%s|%s|%s|%s|%s|%s|%s|%s",
 		fpEscape(f.Upstream), fpEscape(f.Method), fpEscape(f.Template), fpEscape(f.StatusClass),
@@ -94,8 +76,6 @@ func fpEscape(s string) string {
 	return strings.ReplaceAll(strings.ReplaceAll(s, `\`, `\\`), "|", `\|`)
 }
 
-// Diff compares one observation against its frozen reference; caller
-// guarantees obs.Ready. StatusNew fires on a class never seen for the endpoint.
 func Diff(upstream string, obs baseline.Observation, knownStatusClasses map[string]bool) []Finding {
 	fam := obs.Family
 	ref := fam.Reference
@@ -109,8 +89,6 @@ func Diff(upstream string, obs baseline.Observation, knownStatusClasses map[stri
 		out = append(out, mk(StatusNew, "", "", fam.StatusClass))
 	}
 
-	// Claimed only when the frozen reference tracked codes: older baselines
-	// and caller-less statuses skip rather than guess.
 	if obs.Status != 0 && len(fam.RefStatusCodes) > 0 {
 		code := strconv.Itoa(obs.Status)
 		if _, seen := fam.RefStatusCodes[code]; !seen {
@@ -118,7 +96,6 @@ func Diff(upstream string, obs baseline.Observation, knownStatusClasses map[stri
 		}
 	}
 
-	// Deterministic field order keeps emission order stable across runs.
 	paths := make([]string, 0, len(obs.Fields))
 	for p := range obs.Fields {
 		paths = append(paths, p)
@@ -135,7 +112,7 @@ func Diff(upstream string, obs baseline.Observation, knownStatusClasses map[stri
 		}
 		if _, typeKnown := st.Types[fv.Type]; !typeKnown {
 			if fv.Type == "null" {
-				// Never-null field arrived null: nullability, not a type swap.
+
 				fieldFindings = append(fieldFindings, mk(FieldNullable, path, dominantType(st), "null"))
 			} else {
 				fieldFindings = append(fieldFindings, mk(TypeChanged, path, dominantType(st), fv.Type))
@@ -149,8 +126,6 @@ func Diff(upstream string, obs baseline.Observation, knownStatusClasses map[stri
 		}
 	}
 
-	// Removals: reference fields with ~always-there presence missing from
-	// this record. Presence-frequency keeps optional fields quiet.
 	var removed []Finding
 	refPaths := make([]string, 0, len(ref))
 	for p := range ref {
@@ -166,8 +141,6 @@ func Diff(upstream string, obs baseline.Observation, knownStatusClasses map[stri
 		}
 	}
 
-	// Adds AND removes together on an error family means a format swap: one
-	// event, one fingerprint, subsuming the add/remove findings it replaces.
 	if isErrorClass(fam.StatusClass) && len(added) > 0 && len(removed) > 0 {
 		out = append(out, mk(ErrorShapeChanged, "", shapeOf(refPaths), shapeOf(paths)))
 		return append(out, fieldFindings...)
@@ -180,8 +153,6 @@ func Diff(upstream string, obs baseline.Observation, knownStatusClasses map[stri
 
 func isErrorClass(class string) bool { return class == "4xx" || class == "5xx" }
 
-// knownCodes renders the frozen exact-code set compactly (sorted — the
-// fingerprint depends on this string being stable).
 func knownCodes(codes map[string]int) string {
 	out := make([]string, 0, len(codes))
 	for c := range codes {
@@ -191,8 +162,6 @@ func knownCodes(codes map[string]int) string {
 	return strings.Join(out, ",")
 }
 
-// shapeOf renders a field-path set compactly and deterministically (sorted,
-// capped): two records with the same restructured shape share a fingerprint.
 func shapeOf(sortedPaths []string) string {
 	if len(sortedPaths) > 8 {
 		sortedPaths = append(sortedPaths[:8:8], "…")
@@ -210,7 +179,6 @@ func dominantType(st *baseline.FieldStats) string {
 	return best
 }
 
-// knownValues renders the reference value set compactly (sorted, capped).
 func knownValues(st *baseline.FieldStats) string {
 	vals := make([]string, 0, len(st.Values))
 	for v := range st.Values {

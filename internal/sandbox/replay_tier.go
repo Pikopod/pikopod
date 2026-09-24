@@ -1,5 +1,3 @@
-// The engine's FINAL resolution tier, after spec routes and traffic-admitted
-// observed endpoints: traffic adds routes, it never hijacks declared ones.
 package sandbox
 
 import (
@@ -11,29 +9,19 @@ import (
 	"github.com/pikopod/pikopod/internal/replay"
 )
 
-// ReplayTierHeader names the recording tier that matched (exact/shape/sequence).
 const ReplayTierHeader = "x-pikopod-replay-tier"
 
-// ReplayMissedOnHeader explains a DEGRADED serve: a lower-fidelity serve always
-// says which fields kept the higher tier from matching.
 const ReplayMissedOnHeader = "x-pikopod-replay-missed-on"
 
-// ReplayClosestHeader names the nearest RECORDED endpoint on a full
-// recordings-tier miss — the tier the spec headers cannot see.
 const ReplayClosestHeader = "x-pikopod-replay-closest"
 
-// ReplaySequenceHeader shows exact-tier sequence progression ("2/3", then
-// "3/3 (holding last)") when one request was recorded with different responses.
 const ReplaySequenceHeader = "x-pikopod-replay-sequence"
 
-// serveRecording answers from the linked upstream's recordings, or nil on miss.
-// Sequence-tier consumption lives in the Set.
 func (e *Engine) serveRecording(req *ingressRequest, innerPath string) *RawResponse {
 	if e.recordings == nil {
 		return nil
 	}
-	// The recordings matcher hashes PLAIN decoded JSON; normalize first, or the
-	// exact/shape tiers can never match a request that carries a body.
+
 	reqBody := req.bodyValue
 	if reqBody != nil {
 		reqBody = plainJSON(reqBody)
@@ -50,7 +38,7 @@ func (e *Engine) serveRecording(req *ingressRequest, innerPath string) *RawRespo
 	}
 	headers := map[string]string{ReplayTierHeader: string(diag.Tier)}
 	if diag.SeqLen > 1 {
-		// The same request recorded N times replays as an ordered N-step behavior.
+
 		seq := fmt.Sprintf("%d/%d", diag.SeqPos, diag.SeqLen)
 		if diag.Held {
 			seq += " (holding last)"

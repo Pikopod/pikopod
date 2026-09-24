@@ -1,5 +1,3 @@
-// Forced responses, peek semantics: no store write, webhook, or idempotency
-// record. An undeclared status is REFUSED; auth is enforced BEFORE forcing.
 package sandbox
 
 import (
@@ -9,15 +7,10 @@ import (
 	"github.com/pikopod/pikopod/internal/ir"
 )
 
-// ForcedStatusHeader requests a specific declared response status.
 const ForcedStatusHeader = "x-pikopod-status"
 
-// forcedMarkerHeader keeps a forced response from ever being mistaken for
-// organic sandbox behavior.
 const forcedMarkerHeader = "x-pikopod-forced"
 
-// forcedResponse answers a request carrying ForcedStatusHeader, else nil.
-// Called after auth, before faults.
 func (e *Engine) forcedResponse(endpoint *ir.Endpoint, req *ingressRequest) *RawResponse {
 	raw := req.header(ForcedStatusHeader)
 	if raw == nil {
@@ -45,15 +38,13 @@ func (e *Engine) forcedResponse(endpoint *ir.Endpoint, req *ingressRequest) *Raw
 		}
 	}
 	if resp == nil {
-		// Declared but bodyless (204-style, or no JSON content): honest empty.
+
 		resp = &RawResponse{Status: status, Headers: map[string]string{}}
 	}
 	resp.Headers[forcedMarkerHeader] = "true"
 	return resp
 }
 
-// declaredResponseSchema never falls through to "default" as errorSchema does —
-// forcing must name a code the contract actually claims.
 func declaredResponseSchema(endpoint *ir.Endpoint, status int) (*ir.IrSchemaNode, bool) {
 	code := strconv.Itoa(status)
 	rangeCode := code[:1] + "XX"

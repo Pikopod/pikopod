@@ -1,5 +1,3 @@
-// Package bridge turns a detected DriftEvent into a runnable scenario that
-// pins the OLD contract, so the break happens locally and not in production.
 package bridge
 
 import (
@@ -15,8 +13,6 @@ import (
 	"github.com/pikopod/pikopod/internal/errfmt"
 )
 
-// FindEvent scans the local event log for a fingerprint. The last matching
-// line wins (occurrence counters only grow).
 func FindEvent(dataDir, fingerprint string) (*alert.DriftEvent, error) {
 	raw, err := os.ReadFile(filepath.Join(dataDir, "events.ndjson"))
 	if err != nil {
@@ -42,8 +38,6 @@ func FindEvent(dataDir, fingerprint string) (*alert.DriftEvent, error) {
 	return found, nil
 }
 
-// Build renders the pack for one event, named drift-<fp>. contractVersion is
-// the version AT PIN TIME (0 = none); later refinement can never move the pin.
 func Build(ev *alert.DriftEvent, contractVersion int) (name string, pack map[string]any, err error) {
 	def, err := definitionFor(ev)
 	if err != nil {
@@ -63,7 +57,6 @@ func Build(ev *alert.DriftEvent, contractVersion int) (name string, pack map[str
 	return name, pack, nil
 }
 
-// Save writes the pack under <data_dir>/scenarios and returns the path.
 func Save(dataDir string, name string, packYAML []byte) (string, error) {
 	dir := filepath.Join(dataDir, "scenarios")
 	if err := os.MkdirAll(dir, 0o700); err != nil {
@@ -98,7 +91,6 @@ func describe(ev *alert.DriftEvent) string {
 	return string(ev.Kind)
 }
 
-// probeKey is the deterministic resource key seeded for item endpoints.
 const probeKey = "drift_probe"
 
 func definitionFor(ev *alert.DriftEvent) (map[string]any, error) {
@@ -140,15 +132,12 @@ func definitionFor(ev *alert.DriftEvent) (map[string]any, error) {
 	return map[string]any{"steps": steps}, nil
 }
 
-// concretize turns a path template into a requestable path. Only a single
-// TRAILING parameter can be probed; anything else is an honest v1 limitation.
 func concretize(template string) (requestPath, seedType string, needsSeed bool, err error) {
 	segs := strings.Split(strings.TrimPrefix(template, "/"), "/")
 	paramIdx := -1
 	prefix := ""
 	for i, s := range segs {
-		// Both bare ({id}) and prefixed (tx_{id}) params count; the prefix is
-		// preserved so the probe key matches the template's shape.
+
 		if open := strings.Index(s, "{"); open != -1 && strings.HasSuffix(s, "}") {
 			if paramIdx != -1 || i != len(segs)-1 {
 				return "", "", false, errfmt.New(
@@ -168,8 +157,6 @@ func concretize(template string) (requestPath, seedType string, needsSeed bool, 
 	return collection + "/" + prefix + probeKey, collection, true, nil
 }
 
-// assertionsFor pins the baseline contract for the drift kind, plus the seed
-// attributes that make the assertion meaningful on an echoing item read.
 func assertionsFor(ev *alert.DriftEvent) (assertions []any, seedAttrs map[string]any, err error) {
 	seedAttrs = map[string]any{}
 	jsonPath, buildable := fieldToJSONPath(ev.Field)
@@ -180,8 +167,7 @@ func assertionsFor(ev *alert.DriftEvent) (assertions []any, seedAttrs map[string
 		if !buildable {
 			return nil, nil, errUnbuildable(ev)
 		}
-		// Baseline: the field does not exist. Fails once the sandbox model
-		// (or provider recording) carries it.
+
 		a(map[string]any{"target": "response.body", "path": jsonPath, "op": "absent"})
 	case drift.FieldRemoved:
 		if !buildable {
@@ -210,7 +196,7 @@ func assertionsFor(ev *alert.DriftEvent) (assertions []any, seedAttrs map[string
 		if len(known) > 0 && known[0] != "" {
 			setField(seedAttrs, ev.Field, known[0])
 		}
-		// Baseline: the value stays inside the known set.
+
 		vals := make([]any, 0, len(known))
 		for _, v := range known {
 			vals = append(vals, v)
@@ -226,8 +212,7 @@ func assertionsFor(ev *alert.DriftEvent) (assertions []any, seedAttrs map[string
 			a(map[string]any{"target": "response.status", "op": "gte", "expected": 200})
 		}
 	case drift.StatusCodeChanged:
-		// Pinnable when the baseline knew exactly ONE code: the scenario
-		// asserts the endpoint still answers it.
+
 		known := strings.Split(ev.Before, ",")
 		if len(known) != 1 || known[0] == "" {
 			return nil, nil, errfmt.New("cannot pin a multi-code baseline",
@@ -240,15 +225,13 @@ func assertionsFor(ev *alert.DriftEvent) (assertions []any, seedAttrs map[string
 		}
 		a(map[string]any{"target": "response.status", "op": "equals", "expected": code})
 	case drift.FieldNullable, drift.ErrorShapeChanged:
-		// Not pinnable yet: the assertion grammar has no not-null op, and
-		// error-shape pins need the sandbox to model a specific error body.
+
 		return nil, nil, errfmt.New("this drift kind is not pinnable as a scenario yet",
 			fmt.Sprintf("%s events alert and dedupe, but from-drift cannot derive a deterministic assertion for them", ev.Kind),
 			"write the scenario by hand from schema/scenario-pack.schema.json", "scenarios/README.md")
 	default:
 		if strings.HasPrefix(string(ev.Kind), "declared:") {
-			// Declared (spec-vs-spec) findings are documentation events, not
-			// wire behavior — there is no baseline response to pin.
+
 			return nil, nil, errfmt.New("declared drift is not replayable as a scenario",
 				"this fingerprint records a SPEC change (spec-diff), not observed traffic",
 				"review it with `pikopod spec-diff`, then accept via `pikopod import <upstream> --update`",
@@ -267,8 +250,6 @@ func errUnbuildable(ev *alert.DriftEvent) error {
 		"scenarios/README.md")
 }
 
-// fieldToJSONPath converts a baseline field path into the assertion JSONPath
-// dialect. Array elements pin index 0; nested arrays are refused.
 func fieldToJSONPath(field string) (string, bool) {
 	if field == "" {
 		return "", false
@@ -289,7 +270,6 @@ func fieldToJSONPath(field string) (string, bool) {
 	return out, true
 }
 
-// setField writes a nested sample value along a baseline field path.
 func setField(attrs map[string]any, field string, value any) {
 	segs := strings.Split(field, "/")
 	current := attrs
@@ -318,7 +298,6 @@ func setField(attrs map[string]any, field string, value any) {
 	}
 }
 
-// sampleOfType renders a stand-in value for a baseline dominant type.
 func sampleOfType(typ string) any {
 	switch typ {
 	case "number":
@@ -336,7 +315,6 @@ func sampleOfType(typ string) any {
 	}
 }
 
-// typeMatcher maps a baseline type to the assertion matcher dialect.
 func typeMatcher(typ string) (string, bool) {
 	switch typ {
 	case "string":

@@ -1,5 +1,3 @@
-// Derives the store operation from METHOD + PATH STRUCTURE only. Anything off the
-// collection/item shape is PASSTHROUGH: never invent unjustifiable behaviour.
 package sandbox
 
 import (
@@ -22,15 +20,12 @@ const (
 
 type operation struct {
 	kind operationKind
-	// typ is the resource type namespace: the collection path with parent
-	// path-params substituted by concrete values (item's trailing param removed).
+
 	typ string
-	// key is the item id for item operations (from the trailing path param).
+
 	key *string
 }
 
-// concretize substitutes parent params into the template segments; the result
-// is used as the type namespace.
 func concretize(templateSegments []string, pathParams map[string]string) string {
 	parts := make([]string, len(templateSegments))
 	for i, seg := range templateSegments {
@@ -59,7 +54,7 @@ func deriveOperation(endpoint *ir.Endpoint, pathParams map[string]string) operat
 
 	if isItem {
 		paramName := paramSegment.FindStringSubmatch(last)[1]
-		typ := concretize(segs[:len(segs)-1], pathParams) // collection = drop the id
+		typ := concretize(segs[:len(segs)-1], pathParams)
 		key, ok := pathParams[paramName]
 		if !ok {
 			return operation{kind: opPassthrough, typ: typ, key: nil}
@@ -78,7 +73,6 @@ func deriveOperation(endpoint *ir.Endpoint, pathParams map[string]string) operat
 		}
 	}
 
-	// Collection path (ends in a static segment).
 	typ := concretize(segs, pathParams)
 	switch method {
 	case "GET":

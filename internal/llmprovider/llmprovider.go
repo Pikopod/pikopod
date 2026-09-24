@@ -1,6 +1,3 @@
-// Package llmprovider names the LLM providers pikopod can talk to. config
-// validates against it and scenario/nl implements it; those two cannot import
-// each other (nl → scenario → sandbox → replay → proxy → config).
 package llmprovider
 
 import (
@@ -10,7 +7,6 @@ import (
 
 const Default = "openrouter"
 
-// Priority order within a provider. These rank below PIKOPOD_LLM_KEY.
 var keyEnvs = map[string][]string{
 	Default:  {"OPENROUTER_API_KEY", "PIKOPOD_OPENROUTER_KEY"},
 	"openai": {"OPENAI_API_KEY"},
@@ -38,7 +34,6 @@ func Names() []string {
 	return out
 }
 
-// Empty when the name is unknown.
 func KeyEnvs(name string) []string {
 	return append([]string(nil), keyEnvs[Normalize(name)]...)
 }

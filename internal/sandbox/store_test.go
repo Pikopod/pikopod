@@ -18,8 +18,6 @@ func mustStore(t *testing.T) *Store {
 
 func attrs(s string) json.RawMessage { return json.RawMessage(s) }
 
-// The parity unit for stateful engines is SEQUENCES, not single pairs:
-// create → read → list → read-your-write, with versions and cursors.
 func TestSequence_CreateReadListReadYourWrite(t *testing.T) {
 	s := mustStore(t)
 	const sbx = "sbx_test1"
@@ -60,8 +58,7 @@ func TestSequence_CreateReadListReadYourWrite(t *testing.T) {
 		t.Fatalf("keyset pagination broken: %+v", page2)
 	}
 
-	// read-your-write with optimistic locking
-	v1 := int64(0) // freshly created resources are version 0
+	v1 := int64(0)
 	updated, err := s.Update(sbx, "transaction", "tx_001", attrs(`{"amount":5000,"status":"success"}`), &v1, nil, false, 2000)
 	if err != nil {
 		t.Fatal(err)
@@ -103,7 +100,7 @@ func TestSandboxIsolation(t *testing.T) {
 
 func TestAllocateSeqMonotonicNeverReused(t *testing.T) {
 	s := mustStore(t)
-	// First allocated seq is 1.
+
 	for want := int64(1); want < 6; want++ {
 		got, err := s.AllocateSeq("sbx_seq")
 		if err != nil {
@@ -115,8 +112,6 @@ func TestAllocateSeqMonotonicNeverReused(t *testing.T) {
 	}
 }
 
-// Snapshot round-trip: serialize → clear (reset) → load (restore) must
-// reproduce identical state — the fork/reset substrate.
 func TestSnapshotRoundTrip(t *testing.T) {
 	s := mustStore(t)
 	const sbx = "sbx_snap"
@@ -128,7 +123,7 @@ func TestSnapshotRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(snap) != 2 || snap[0].Type != "customer" { // deterministic (type, key) order
+	if len(snap) != 2 || snap[0].Type != "customer" {
 		t.Fatalf("snapshot wrong: %+v", snap)
 	}
 	if err := s.Clear(sbx); err != nil {

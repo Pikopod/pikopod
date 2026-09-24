@@ -12,13 +12,8 @@ import (
 	"unicode/utf16"
 )
 
-// Canonical serialization must match ECMAScript JSON.stringify, not
-// encoding/json: sorted keys and arrays, volatile keys stripped, -0 → 0.
-
 var volatileKeys = map[string]bool{"sourcePointer": true, "evidence": true}
 
-// Canonicalize returns the canonical JSON string of an ApiDefinition, used
-// for hashing and byte-level equality checks.
 func Canonicalize(def *ApiDefinition) (string, error) {
 	raw, err := json.Marshal(def)
 	if err != nil {
@@ -31,16 +26,12 @@ func Canonicalize(def *ApiDefinition) (string, error) {
 	return CanonicalStringify(v), nil
 }
 
-// CanonicalStringify returns the canonical string of an arbitrary IR fragment,
-// with volatile back-pointers stripped and order normalized.
 func CanonicalStringify(value any) string {
 	var b strings.Builder
 	writeJSON(&b, canonicalValue(value))
 	return b.String()
 }
 
-// NormalizedHash is the sha256 of the canonical IR. Same bytes + same
-// normalizer generation → identical hash, always.
 func NormalizedHash(def *ApiDefinition) (string, error) {
 	canonical, err := Canonicalize(def)
 	if err != nil {
@@ -85,7 +76,7 @@ func canonicalValue(value any) any {
 		}
 		return out
 	case float64:
-		if v == 0 { // normalizes -0 to 0
+		if v == 0 {
 			return float64(0)
 		}
 		return v
@@ -94,14 +85,11 @@ func canonicalValue(value any) any {
 	}
 }
 
-// orderedObject preserves canonical key order through writeJSON.
 type orderedObject struct {
 	keys   []string
 	values []any
 }
 
-// writeJSON emits ECMAScript JSON.stringify-compatible JSON: no HTML escaping,
-// no   escaping, shortest-round-trip JS number formatting.
 func writeJSON(b *strings.Builder, value any) {
 	switch v := value.(type) {
 	case nil:
@@ -139,7 +127,7 @@ func writeJSON(b *strings.Builder, value any) {
 	case map[string]any:
 		writeJSON(b, canonicalValue(v))
 	default:
-		// Only JSON-round-trip value shapes reach here by construction.
+
 		panic(fmt.Sprintf("ir: unexpected canonical value type %T", value))
 	}
 }
@@ -173,11 +161,9 @@ func writeJSONString(b *strings.Builder, s string) {
 	b.WriteByte('"')
 }
 
-// FormatJSNumber renders a float64 exactly as ECMAScript Number::toString:
-// shortest round-trip digits, plain notation for exponents in (-7, 21].
 func FormatJSNumber(f float64) string {
 	if math.IsNaN(f) || math.IsInf(f, 0) {
-		return "null" // JSON.stringify(NaN/Infinity)
+		return "null"
 	}
 	if f == 0 {
 		return "0"
@@ -187,13 +173,13 @@ func FormatJSNumber(f float64) string {
 		neg = "-"
 		f = -f
 	}
-	// Shortest scientific representation: "d[.ddd]e±dd".
+
 	sci := strconv.FormatFloat(f, 'e', -1, 64)
 	ePos := strings.IndexByte(sci, 'e')
 	mantissa := strings.Replace(sci[:ePos], ".", "", 1)
 	exp10, _ := strconv.Atoi(sci[ePos+1:])
 	k := len(mantissa)
-	n := exp10 + 1 // decimal point position: value = 0.mantissa * 10^n
+	n := exp10 + 1
 
 	switch {
 	case k <= n && n <= 21:
@@ -214,8 +200,6 @@ func FormatJSNumber(f float64) string {
 	}
 }
 
-// jsLess compares strings the way ECMAScript relational operators do: by raw
-// UTF-16 code unit, which differs from byte or rune order outside the BMP.
 func jsLess(a, b string) bool {
 	if isASCII(a) && isASCII(b) {
 		return a < b
@@ -238,6 +222,4 @@ func isASCII(s string) bool {
 	return true
 }
 
-// JSLess is jsLess exported for the importer's deterministic sorts, which
-// must use UTF-16 string comparisons.
 func JSLess(a, b string) bool { return jsLess(a, b) }

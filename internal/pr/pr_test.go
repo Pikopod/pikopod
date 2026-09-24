@@ -9,7 +9,6 @@ import (
 	"testing"
 )
 
-// fakeGitHub is an in-memory GitHub issues-comments API.
 type fakeGitHub struct {
 	mu         []Comment
 	nextID     int64
@@ -106,7 +105,7 @@ func TestUpsertCreateThenUpdateThenUnchanged(t *testing.T) {
 	if err != nil || action != Unchanged {
 		t.Fatalf("unchanged: %v %s", err, action)
 	}
-	// A different SOURCE gets its own comment.
+
 	action, _ = UpsertComment(f, "conformance", "sha2", "other", nil)
 	if action != Created || len(fake.mu) != 2 {
 		t.Fatalf("per-source comments: %s n=%d", action, len(fake.mu))
@@ -122,7 +121,7 @@ func TestUpsertStaleSkip(t *testing.T) {
 	if _, err := UpsertComment(f, "spec-diff", "newsha", "newer body", nil); err != nil {
 		t.Fatal(err)
 	}
-	// An old commit's CI re-runs: oldsha is an ancestor of newsha.
+
 	isAncestor := func(a, b string) bool { return a == "oldsha" && b == "newsha" }
 	action, err := UpsertComment(f, "spec-diff", "oldsha", "older body", isAncestor)
 	if err != nil || action != StaleSkip {
@@ -135,7 +134,7 @@ func TestUpsertStaleSkip(t *testing.T) {
 
 func TestUpsertPagination(t *testing.T) {
 	fake := &fakeGitHub{userID: 42, perPage: 100}
-	// 250 unrelated comments, ours is the LAST — page 3.
+
 	for i := 0; i < 250; i++ {
 		fake.nextID++
 		fake.mu = append(fake.mu, Comment{ID: fake.nextID, Body: fmt.Sprintf("noise %d", i), AuthorID: 7})
@@ -153,7 +152,7 @@ func TestUpsertPagination(t *testing.T) {
 
 func TestUpsertAuthorshipFilter(t *testing.T) {
 	fake := &fakeGitHub{userID: 42}
-	// Another bot echoed our marker — author 99, not us.
+
 	fake.nextID++
 	fake.mu = append(fake.mu, Comment{ID: fake.nextID, Body: marker("spec-diff", "x") + "\nimpostor", AuthorID: 99})
 	srv := fake.server(t)
@@ -169,10 +168,7 @@ func TestUpsertAuthorshipFilter(t *testing.T) {
 }
 
 func TestUpsertUserLookupFailureUpdatesOwnEditableComment(t *testing.T) {
-	// GitHub Actions installation tokens cannot GET /user. Skipping the
-	// marker would post one fresh comment per CI run forever — the exact
-	// spam this package exists to prevent. Forges only let a token edit its
-	// OWN comments, so the update attempt IS the authorship check.
+
 	fake := &fakeGitHub{userID: 42, failUser: true}
 	fake.nextID++
 	fake.mu = append(fake.mu, Comment{ID: fake.nextID, Body: marker("spec-diff", "x") + "\nexisting", AuthorID: 42})
@@ -189,8 +185,7 @@ func TestUpsertUserLookupFailureUpdatesOwnEditableComment(t *testing.T) {
 }
 
 func TestUpsertUserLookupFailureForbiddenUpdateFallsToCreate(t *testing.T) {
-	// Same unverifiable-authorship case, but the forge refuses the edit
-	// (someone else's comment): fall through to create — never error out.
+
 	fake := &fakeGitHub{userID: 42, failUser: true, failUpdate: true}
 	fake.nextID++
 	fake.mu = append(fake.mu, Comment{ID: fake.nextID, Body: marker("spec-diff", "x") + "\nimpostor", AuthorID: 99})

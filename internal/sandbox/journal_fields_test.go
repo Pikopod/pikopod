@@ -14,7 +14,6 @@ func journalEngine(t *testing.T) *Engine {
 	return newEngine(t, loadWidgets(t), Config{ID: "sbx_journal", Seed: "journal-seed"})
 }
 
-// The journal now carries what the client sent, on the VIRTUAL clock.
 func TestJournalRecordsHeadersQueryAndVirtualTime(t *testing.T) {
 	e := journalEngine(t)
 	req := httptest.NewRequest(http.MethodGet, "/widgets?limit=5&cursor=abc", nil)
@@ -33,9 +32,7 @@ func TestJournalRecordsHeadersQueryAndVirtualTime(t *testing.T) {
 	if got.Headers["accept"] != "application/json" {
 		t.Errorf("accept header = %q, want it journaled", got.Headers["accept"])
 	}
-	// cursor=abc classifies ALLOW and survives verbatim. limit=5 classifies
-	// DROP, so it is removed rather than turned into a value the client never
-	// sent: an assertion on it must fail closed.
+
 	if len(got.Query["cursor"]) == 0 || got.Query["cursor"][0] != "abc" {
 		t.Errorf("query cursor = %v, want [abc]", got.Query["cursor"])
 	}
@@ -47,8 +44,6 @@ func TestJournalRecordsHeadersQueryAndVirtualTime(t *testing.T) {
 	}
 }
 
-// Redaction happens BEFORE the journal, not on read. A scenario driven by a
-// real client journals Authorization and signature headers.
 func TestJournalRedactsCredentialsBeforeStoring(t *testing.T) {
 	e := journalEngine(t)
 	const secret = "SUPERSECRETVALUE0123456789"
@@ -71,8 +66,6 @@ func TestJournalRedactsCredentialsBeforeStoring(t *testing.T) {
 	}
 }
 
-// Over-cap headers are journaled without content so assertions fail closed,
-// exactly as an over-cap body already does.
 func TestJournalFailsClosedOnTooManyHeaders(t *testing.T) {
 	e := journalEngine(t)
 	req := httptest.NewRequest(http.MethodGet, "/widgets", nil)

@@ -1,10 +1,3 @@
-// Package e2e drives the REAL pikopod binary as a subprocess through the
-// product's full loop — import → up → traffic → warmup → silent provider
-// change → one deduped Slack alert → CI gate exit codes → from-drift pin —
-// asserting the things in-process tests structurally cannot: CLI wiring,
-// config loading from disk, process lifecycle and SIGTERM persistence,
-// cross-restart state, real HTTP egress to the (fake) Slack webhook, and
-// the documented exit-code contract (0 clean / 1 drift / 2 error).
 package e2e
 
 import (
@@ -46,8 +39,6 @@ func TestMain(m *testing.M) {
 	os.Exit(code)
 }
 
-// run executes the binary to completion in dir and returns combined output
-// and the exit code.
 func run(t *testing.T, dir string, args ...string) (string, int) {
 	t.Helper()
 	cmd := exec.Command(binPath, args...)
@@ -56,10 +47,6 @@ func run(t *testing.T, dir string, args ...string) (string, int) {
 	return string(out), cmd.ProcessState.ExitCode()
 }
 
-// freePorts reserves n DISTINCT ephemeral ports. Every listener is held open
-// until all n are chosen — taking them one at a time lets the kernel hand back
-// the port it just reclaimed, which would silently collide the agent and
-// sandbox listeners.
 func freePorts(t *testing.T, n int) []int {
 	t.Helper()
 	ls := make([]net.Listener, 0, n)
@@ -107,7 +94,6 @@ const thingsSpec = `{
   }}}}
 }`
 
-// upProcess manages one `pikopod up` subprocess.
 type upProcess struct {
 	cmd *exec.Cmd
 	out *lockedBuffer
@@ -156,8 +142,6 @@ func startUp(t *testing.T, dir string, agentPort int) *upProcess {
 	return up
 }
 
-// stop SIGTERMs and asserts the documented clean-shutdown contract: exit 0,
-// state persisted.
 func (u *upProcess) stop(t *testing.T) {
 	t.Helper()
 	u.cmd.Process.Signal(syscall.SIGTERM)
@@ -188,7 +172,6 @@ func healthz(t *testing.T, agentPort int) map[string]any {
 func TestFullLoop(t *testing.T) {
 	dir := t.TempDir()
 
-	// The "provider": normal until mutated, then it silently ships fee_bearer.
 	var mutated atomic.Bool
 	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -200,7 +183,6 @@ func TestFullLoop(t *testing.T) {
 	}))
 	defer provider.Close()
 
-	// The "Slack channel": captures every webhook post.
 	var slackMu sync.Mutex
 	var slackTexts []string
 	slack := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -246,13 +228,11 @@ slack:
 		t.Fatal(err)
 	}
 
-	// ① import: spec → registered sandbox, auto-linked to the upstream.
 	out, code := run(t, dir, "import", "prov", "--spec", "spec.json", "--config", "pikopod.yaml")
 	if code != 0 || !strings.Contains(out, "sandbox prov registered") {
 		t.Fatalf("import failed (%d): %s", code, out)
 	}
 
-	// ② up + warm traffic until the baseline freezes; SIGTERM persists it.
 	up := startUp(t, dir, agentPort)
 	client := &http.Client{Timeout: 5 * time.Second}
 	hit := func(n int) {
@@ -278,7 +258,6 @@ slack:
 		return n >= 15
 	})
 
-	// The sandbox serves the SAME process: stateful create → read-your-write.
 	resp, err := client.Post(fmt.Sprintf("http://127.0.0.1:%d/prov/things", sbxPort), "application/json", strings.NewReader(`{"status":"pending","amount":5}`))
 	if err != nil || resp.StatusCode != 201 {
 		t.Fatalf("sandbox create: %v %v", err, resp)
@@ -303,14 +282,11 @@ slack:
 
 	up.stop(t)
 
-	// ③ CI gate on clean recordings: exit 0.
 	out, code = run(t, dir, "replay", "--ci", "prov")
 	if code != 0 || !strings.Contains(out, "clean") {
 		t.Fatalf("clean gate must exit 0 (got %d): %s", code, out)
 	}
 
-	// ④ restart (baselines load from disk), the provider silently ships a
-	// change, and EXACTLY ONE alert reaches Slack across 5 drifted requests.
 	up = startUp(t, dir, agentPort)
 	mutated.Store(true)
 	hit(5)
@@ -320,8 +296,6 @@ slack:
 		t.Fatalf("dedupe must hold across drifted requests: %d Slack posts", n)
 	}
 
-	// The alert's fingerprint is in the persisted event log — the handle the
-	// whole from-drift loop keys on.
 	evRaw, err := os.ReadFile(filepath.Join(dir, "data", "events.ndjson"))
 	if err != nil {
 		t.Fatalf("event log missing: %v", err)
@@ -343,15 +317,11 @@ slack:
 		slackMu.Unlock()
 	}
 
-	// ⑤ CI gate now fails the build: exit 1, naming the drift.
 	out, code = run(t, dir, "replay", "--ci", "prov")
 	if code != 1 || !strings.Contains(out, "field_added") || !strings.Contains(out, "fee_bearer") {
 		t.Fatalf("drifted gate must exit 1 naming the drift (got %d): %s", code, out)
 	}
 
-	// ⑥ from-drift: the fingerprint becomes a pinned scenario, replayed
-	// against the sandbox — green now, breaking the moment a re-import
-	// adopts the change.
 	out, code = run(t, dir, "scenario", "from-drift", fp)
 	if code != 0 || !strings.Contains(out, "baseline pinned and green") {
 		t.Fatalf("from-drift must pin and pass on the baseline sandbox (got %d): %s", code, out)
@@ -361,16 +331,13 @@ slack:
 	}
 }
 
-// The exit-code contract's error leg: a tool/config problem is exit 2,
-// never conflated with drift's exit 1.
 func TestConfigErrorExitsTwo(t *testing.T) {
 	dir := t.TempDir()
 	out, code := run(t, dir, "up", "--config", "does-not-exist.yaml")
 	if code != 2 {
 		t.Fatalf("config errors must exit 2, got %d: %s", code, out)
 	}
-	// Unknown config keys are startup errors too (dead-knob guarantee),
-	// through the real CLI surface.
+
 	os.WriteFile(filepath.Join(dir, "pikopod.yaml"), []byte("upstreams: {}\nnot_a_real_key: true\n"), 0o600)
 	out, code = run(t, dir, "up", "--config", "pikopod.yaml")
 	if code != 2 || !strings.Contains(out, "not_a_real_key") {

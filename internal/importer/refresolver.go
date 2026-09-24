@@ -7,8 +7,6 @@ import (
 	"strings"
 )
 
-// refResolver dereferences LOCAL non-schema $refs only — remote refs are never
-// fetched, and a budget plus cycle detection bounds recursive expansion.
 type refResolver struct {
 	document    *OrdMap
 	limits      ParseLimits
@@ -49,7 +47,6 @@ func (r *refResolver) isRef(node any) (string, bool) {
 	return s, ok
 }
 
-// resolve follows a possibly-chained local $ref to its concrete target.
 func (r *refResolver) resolve(node any) (any, error) {
 	return r.resolveSeen(node, map[string]bool{})
 }
@@ -92,8 +89,6 @@ func (r *refResolver) resolveSeen(node any, seen map[string]bool) (any, error) {
 	return r.resolveSeen(target, seen)
 }
 
-// getByPointer resolves a JSON pointer like #/components/parameters/Foo
-// against the document. The second result is false when the target is absent.
 func (r *refResolver) getByPointer(pointer string) (any, bool) {
 	parts := strings.Split(pointer[2:], "/")
 	var current any = r.document
@@ -101,8 +96,7 @@ func (r *refResolver) getByPointer(pointer string) (any, bool) {
 		part := jpunescape(raw)
 		m, ok := current.(*OrdMap)
 		if !ok {
-			// Mirror JS indexing semantics: arrays are objects whose index
-			// properties are their elements.
+
 			if arr, isArr := current.([]any); isArr {
 				idx, ok := arrayIndex(part, len(arr))
 				if !ok {
@@ -137,7 +131,7 @@ func arrayIndex(part string, length int) (int, bool) {
 		}
 	}
 	if len(part) > 1 && part[0] == '0' {
-		return 0, false // non-canonical index reads undefined in JS
+		return 0, false
 	}
 	if n >= length {
 		return 0, false
@@ -147,8 +141,6 @@ func arrayIndex(part string, length int) (int, bool) {
 
 var schemaRefRe = regexp.MustCompile(`^#/components/schemas/([^/]+)$`)
 
-// schemaRefName returns the component name a local schema pointer targets,
-// else "".
 func (r *refResolver) schemaRefName(pointer string) string {
 	m := schemaRefRe.FindStringSubmatch(pointer)
 	if m == nil {

@@ -11,15 +11,11 @@ import (
 	"github.com/pikopod/pikopod/internal/ir"
 )
 
-// Swagger 2.0 → OpenAPI 3.0 pre-normalizer, a behavioural port of
-// swagger2openapi@7.0.8 scoped to what the IR normalizer can observe.
 const (
 	swagger2ConverterName    = "swagger2openapi"
 	swagger2ConverterVersion = "7.0.8"
 )
 
-// isSwagger2Document reports whether a parsed document is Swagger 2.0 — the
-// only thing this converts.
 func isSwagger2Document(doc any) bool {
 	m, ok := doc.(*OrdMap)
 	if !ok {
@@ -48,14 +44,13 @@ type s2o struct {
 	orig           *OrdMap
 	openapi        *OrdMap
 	limits         ParseLimits
-	componentNames map[string]string // original schema name → sanitised name
+	componentNames map[string]string
 }
 
 func convFail(format string, args ...any) error {
 	return specErr(SpecConversionFailed, fmt.Sprintf("Swagger 2.0 conversion failed: "+format, args...))
 }
 
-// truthy mirrors JS truthiness for the parsed value model.
 func truthy(v any) bool {
 	switch x := v.(type) {
 	case nil:
@@ -65,9 +60,9 @@ func truthy(v any) bool {
 	case string:
 		return x != ""
 	case float64:
-		return x != 0 && x == x // 0 and NaN are falsy
+		return x != 0 && x == x
 	default:
-		return true // objects and arrays, even empty
+		return true
 	}
 }
 
@@ -91,8 +86,6 @@ func isHTTPMethodLower(s string) bool {
 
 var sanitiseBadChars = regexp.MustCompile(`[^A-Za-z0-9_\-\.]+|\s+`)
 
-// sanitise ports oas-kit-common sanitise: the first "[]" becomes "Array" and
-// the first path segment is reduced to component-name-safe characters.
 func sanitise(s string) string {
 	s = strings.Replace(s, "[]", "Array", 1)
 	components := strings.Split(s, "/")
@@ -104,8 +97,6 @@ func sanitiseAll(s string) string {
 	return sanitise(strings.Join(strings.Split(s, "/"), "_"))
 }
 
-// decodeURIComponent approximates JS decodeURIComponent; malformed escapes
-// return the input unchanged (the JS original throws).
 func decodeURIComponent(s string) string {
 	if decoded, err := url.PathUnescape(s); err == nil {
 		return decoded
@@ -114,7 +105,7 @@ func decodeURIComponent(s string) string {
 }
 
 func (c *s2o) convert() (*OrdMap, error) {
-	// openapi = { openapi: '3.0.0', ...clone(swagger) }, minus `swagger`.
+
 	c.openapi = NewOrdMap()
 	c.openapi.Set("openapi", "3.0.0")
 	for _, k := range c.orig.Keys() {
@@ -122,8 +113,6 @@ func (c *s2o) convert() (*OrdMap, error) {
 	}
 	c.openapi.Delete("swagger")
 
-	// Delete null-valued object properties, except x- extensions, `default`, and
-	// paths containing '/example'. Array elements keep their holes (JSON → null).
 	deleteNulls(c.openapi, "#")
 
 	c.buildServers()
@@ -133,7 +122,6 @@ func (c *s2o) convert() (*OrdMap, error) {
 		c.openapi.Set("servers", xs)
 		c.openapi.Delete("x-servers")
 	}
-	// x-ms-parameterized-host: not ported (Azure-only; see package comment).
 
 	if err := c.fixInfo(); err != nil {
 		return nil, err
@@ -213,7 +201,7 @@ func deleteNulls(node any, path string) {
 func (c *s2o) buildServers() {
 	host, _ := c.orig.GetOr("host").(string)
 	basePath, _ := c.orig.GetOr("basePath").(string)
-	basePath = strings.TrimSuffix(basePath, "/") // trailing slashes shouldn't be included
+	basePath = strings.TrimSuffix(basePath, "/")
 	if host != "" {
 		schemes := []any{""}
 		if arr, ok := c.orig.GetOr("schemes").([]any); ok {
@@ -309,8 +297,6 @@ func (c *s2o) fixInfo() error {
 	return nil
 }
 
-// jsURLValid approximates `new URL(x)` validity: absolute URL with a scheme,
-// and a host for the special schemes.
 func jsURLValid(v any) bool {
 	s, ok := v.(string)
 	if !ok {
@@ -372,7 +358,7 @@ func (c *s2o) main() error {
 		c.fixUpSchema(schemas.GetOr(sname + suffix))
 	}
 
-	if err := c.fixupRefs(c.openapi, func(v any) { /* root never replaced */ }); err != nil {
+	if err := c.fixupRefs(c.openapi, func(v any) {}); err != nil {
 		return err
 	}
 
@@ -404,8 +390,7 @@ func (c *s2o) main() error {
 		if err := c.processResponse(responses.GetOr(sname), nil); err != nil {
 			return err
 		}
-		// Response header conversion is skipped: headers are invisible to
-		// the IR normalizer.
+
 	}
 
 	if paths, ok := c.openapi.GetOr("paths").(*OrdMap); ok {
@@ -425,8 +410,6 @@ func (c *s2o) main() error {
 	c.openapi.Delete("schemes")
 
 	components.Set("requestBodies", NewOrdMap())
-	// Shared requestBody extraction is skipped: the normalizer dereferences
-	// requestBody $refs, so inline bodies produce an identical IR.
 
 	for _, key := range []string{"responses", "parameters", "examples", "requestBodies", "securitySchemes", "headers", "schemas"} {
 		if m, ok := components.GetOr(key).(*OrdMap); ok && m.Len() == 0 {
@@ -464,7 +447,7 @@ func (c *s2o) processSecurityScheme(scheme *OrdMap) {
 		flow := NewOrdMap()
 		flowName, hasFlowName := scheme.GetOr("flow").(string)
 		if !hasFlowName {
-			flowName = "undefined" // JS: flows[undefined] stringifies the key
+			flowName = "undefined"
 		}
 		switch flowName {
 		case "application":
@@ -493,7 +476,7 @@ func (c *s2o) processSecurityScheme(scheme *OrdMap) {
 		scheme.Delete("tokenUrl")
 		scheme.Delete("scopes")
 		if scheme.Has("name") {
-			scheme.Delete("name") // patch: oauth2 schemes should not have name
+			scheme.Delete("name")
 		}
 	}
 }
@@ -513,11 +496,10 @@ func (c *s2o) fixUpSchema(schema any) {
 func (c *s2o) walkSchema(schema any, parent *OrdMap, seen map[*OrdMap]bool) {
 	m, isMap := schema.(*OrdMap)
 	if !isMap {
-		return // scalars have no walkable children and the fixups no-op
+		return
 	}
 	if m.Has("$ref") {
-		// The reference walks a {$ref} copy: mutations are discarded and
-		// siblings/children are never visited.
+
 		return
 	}
 	c.fixUpSubSchemaExtensions(m)
@@ -610,7 +592,7 @@ func (c *s2o) fixUpSubSchema(schema *OrdMap, parent *OrdMap) {
 	}
 
 	if types, ok := schema.GetOr("type").([]any); ok {
-		// patch:true path of the reference's array-type fixup.
+
 		if len(types) == 0 {
 			schema.Delete("type")
 		} else {
@@ -687,8 +669,7 @@ func (c *s2o) fixupRefs(node any, setSelf func(any)) error {
 			if err := c.rewriteRef(m, ref, setSelf); err != nil {
 				return err
 			}
-			// Siblings of a $ref are stripped (refSiblings: remove); their
-			// subtrees become unreachable, so they are not walked.
+
 			return nil
 		}
 		for _, key := range append([]string(nil), m.Keys()...) {
@@ -711,7 +692,7 @@ func (c *s2o) fixupRefs(node any, setSelf func(any)) error {
 func (c *s2o) rewriteRef(m *OrdMap, ref string, setSelf func(any)) error {
 	switch {
 	case strings.HasPrefix(ref, "#/components/"):
-		// no-op
+
 	case ref == "#/consumes":
 		setSelf(deepClone(c.openapi.GetOr("consumes")))
 		return nil
@@ -722,17 +703,16 @@ func (c *s2o) rewriteRef(m *OrdMap, ref string, setSelf func(any)) error {
 		keys := strings.Split(strings.Replace(ref, "#/definitions/", "", 1), "/")
 		if newKey, ok := c.componentNames[decodeURIComponent(jpunescape(keys[0]))]; ok {
 			keys[0] = newKey
-		} // else: warnOnly — reference left pointing at the unsanitised name
+		}
 		m.Set("$ref", "#/components/schemas/"+strings.Join(keys, "/"))
 	case strings.HasPrefix(ref, "#/parameters/"):
 		m.Set("$ref", "#/components/parameters/"+sanitise(strings.Replace(ref, "#/parameters/", "", 1)))
 	case strings.HasPrefix(ref, "#/responses/"):
 		m.Set("$ref", "#/components/responses/"+sanitise(strings.Replace(ref, "#/responses/", "", 1)))
 	case strings.HasPrefix(ref, "#"):
-		// Generic same-document ref relocation is not ported: such refs are
-		// left untouched and fail normalization as unresolvable.
+
 	default:
-		// Remote/external ref: left for the normalizer to reject.
+
 	}
 	if m.Len() > 1 {
 		stripped := NewOrdMap()
@@ -742,14 +722,12 @@ func (c *s2o) rewriteRef(m *OrdMap, ref string, setSelf func(any)) error {
 	return nil
 }
 
-// jptrGet ports reftools jptr (read-only): '#' pointers are URI decoded with
-// '+' as space, segments ~-unescaped, arrays indexed by canonical integers.
 func (c *s2o) jptrGet(pointer string) (any, bool) {
 	prop := pointer
 	if strings.Contains(prop, "#") {
 		parts := strings.SplitN(prop, "#", 2)
 		if parts[0] != "" {
-			return nil, false // internal resolution only
+			return nil, false
 		}
 		prop = parts[1]
 		prop = decodeURIComponent(strings.ReplaceAll(strings.TrimPrefix(prop, "/"), "+", " "))
@@ -784,7 +762,7 @@ func fixParamRef(param *OrdMap) {
 		rest := ref[idx+len("#/parameters/"):]
 		param.Set("$ref", ref[:idx]+"#/components/parameters/"+sanitise(rest))
 	}
-	// '#/definitions/' used as a parameter → warnOnly in the reference.
+
 }
 
 func attachRequestBody(op *OrdMap) *OrdMap {
@@ -795,16 +773,14 @@ func attachRequestBody(op *OrdMap) *OrdMap {
 			newOp.Set("requestBody", NewOrdMap())
 		}
 	}
-	newOp.Set("requestBody", NewOrdMap()) // just in case there are no parameters
+	newOp.Set("requestBody", NewOrdMap())
 	return newOp
 }
 
-// consumesFor mirrors the converter's consumes computation, including its
-// side effects on op and the document.
 func (c *s2o) consumesFor(op *OrdMap) []string {
 	if op != nil {
 		if s, ok := op.GetOr("consumes").(string); ok {
-			op.Set("consumes", []any{s}) // patch
+			op.Set("consumes", []any{s})
 		}
 	}
 	if _, ok := c.openapi.GetOr("consumes").([]any); !ok {
@@ -836,8 +812,6 @@ func uniqueStrings(raw []any) []string {
 	return out
 }
 
-// processParameter returns op, as it may have been replaced (requestBody
-// attachment rebuilds the operation object).
 func (c *s2o) processParameter(paramAny any, op *OrdMap, path *OrdMap, method string, index string) (*OrdMap, error) {
 	result := NewOrdMap()
 	singularRequestBody := true
@@ -849,7 +823,7 @@ func (c *s2o) processParameter(paramAny any, op *OrdMap, path *OrdMap, method st
 
 	if paramIsMap {
 		if ref, ok := param.GetOr("$ref").(string); ok {
-			// If we still have a ref here, it must be an internal one.
+
 			fixParamRef(param)
 			ref, _ = param.GetOr("$ref").(string)
 			ptr := decodeURIComponent(strings.Replace(ref, "#/components/parameters/", "", 1))
@@ -860,14 +834,14 @@ func (c *s2o) processParameter(paramAny any, op *OrdMap, path *OrdMap, method st
 				targetDeleted = true
 			}
 			if (!hasTarget || !truthy(target) || targetDeleted) && strings.HasPrefix(ref, "#/") {
-				// If it's gone, chances are it's a requestBody component now.
+
 				param.Set("x-s2o-delete", true)
 				rbody = true
 			}
 			if rbody {
 				newParam, found := c.jptrGet(ref)
 				if !found && strings.HasPrefix(ref, "#/") {
-					// warnOnly: could not resolve reference
+
 				} else if found && newParam != nil {
 					if np, ok := newParam.(*OrdMap); ok {
 						param = np
@@ -889,7 +863,7 @@ func (c *s2o) processParameter(paramAny any, op *OrdMap, path *OrdMap, method st
 
 		in, _ := param.GetOr("in").(string)
 		if in != "body" && !truthy(param.GetOr("type")) {
-			param.Set("type", "string") // patch: type is mandatory for non-body
+			param.Set("type", "string")
 		}
 		if tm, ok := param.GetOr("type").(*OrdMap); ok {
 			if tref, ok := tm.GetOr("$ref").(string); ok {
@@ -920,7 +894,7 @@ func (c *s2o) processParameter(paramAny any, op *OrdMap, path *OrdMap, method st
 		}
 		if oldCollectionFormat != "" {
 			if paramType != "array" {
-				param.Delete("collectionFormat") // patch
+				param.Delete("collectionFormat")
 			}
 			if oldCollectionFormat == "csv" && (in == "query" || in == "cookie") {
 				param.Set("style", "form")
@@ -939,14 +913,14 @@ func (c *s2o) processParameter(paramAny any, op *OrdMap, path *OrdMap, method st
 				param.Set("explode", true)
 			}
 			if oldCollectionFormat == "tsv" {
-				param.Set("x-collectionFormat", "tsv") // warnOnly: not lossless
+				param.Set("x-collectionFormat", "tsv")
 			}
 			param.Delete("collectionFormat")
 		}
 
 		if truthy(param.GetOr("type")) && paramType != "body" && in != "formData" {
 			if truthy(param.GetOr("items")) && truthy(param.GetOr("schema")) {
-				// warnOnly: parameter has array, items and schema
+
 			} else {
 				schema, ok := param.GetOr("schema").(*OrdMap)
 				if !ok {
@@ -987,7 +961,7 @@ func (c *s2o) processParameter(paramAny any, op *OrdMap, path *OrdMap, method st
 	}
 
 	if param != nil && in == "formData" {
-		// Convert to requestBody component.
+
 		singularRequestBody = false
 		content := NewOrdMap()
 		result.Set("content", content)
@@ -1048,7 +1022,7 @@ func (c *s2o) processParameter(paramAny any, op *OrdMap, path *OrdMap, method st
 			copyExtensions(param, target)
 		}
 	} else if param != nil && paramType == "file" {
-		// Convert to requestBody.
+
 		if r := param.GetOr("required"); truthy(r) {
 			result.Set("required", r)
 		}
@@ -1091,13 +1065,13 @@ func (c *s2o) processParameter(paramAny any, op *OrdMap, path *OrdMap, method st
 		if param != nil {
 			param.Set("x-s2o-delete", true)
 		}
-		// Work out where to attach the requestBody.
+
 		if op != nil {
 			if truthy(op.GetOr("requestBody")) && singularRequestBody {
 				if rb, ok := op.GetOr("requestBody").(*OrdMap); ok {
 					rb.Set("x-s2o-overloaded", true)
 				}
-				// warnOnly: operation has multiple requestBodies
+
 			} else {
 				if !truthy(op.GetOr("requestBody")) {
 					op = attachRequestBody(op)
@@ -1118,7 +1092,6 @@ func (c *s2o) processParameter(paramAny any, op *OrdMap, path *OrdMap, method st
 		}
 	}
 
-	// Tidy up.
 	if param != nil && !truthy(param.GetOr("x-s2o-delete")) {
 		param.Delete("type")
 		for _, prop := range parameterTypeProperties {
@@ -1126,7 +1099,7 @@ func (c *s2o) processParameter(paramAny any, op *OrdMap, path *OrdMap, method st
 		}
 		if in == "path" {
 			if r, ok := param.GetOr("required").(bool); !ok || !r {
-				param.Set("required", true) // patch: path parameters must be required
+				param.Set("required", true)
 			}
 		}
 	}
@@ -1134,8 +1107,6 @@ func (c *s2o) processParameter(paramAny any, op *OrdMap, path *OrdMap, method st
 	return op, nil
 }
 
-// mergeFormContent merges a second formData-derived body of the same content
-// type into an existing one (properties + required), mirroring the reference.
 func mergeFormContent(opRB *OrdMap, resultContent *OrdMap, contentType string) bool {
 	if opRB == nil || resultContent == nil {
 		return false
@@ -1188,7 +1159,7 @@ func stripNestedCollectionFormats(node any) {
 		for _, key := range append([]string(nil), m.Keys()...) {
 			if key == "collectionFormat" {
 				if _, ok := m.GetOr(key).(string); ok {
-					m.Delete(key) // not lossless
+					m.Delete(key)
 					continue
 				}
 			}
@@ -1216,7 +1187,7 @@ func (c *s2o) processResponse(responseAny any, op *OrdMap) error {
 	}
 	if ref, ok := response.GetOr("$ref").(string); ok {
 		if strings.Contains(ref, "#/definitions/") {
-			// warnOnly: definition used as response
+
 		} else if strings.HasPrefix(ref, "#/responses/") {
 			response.Set("$ref", "#/components/responses/"+sanitise(decodeURIComponent(strings.Replace(ref, "#/responses/", "", 1))))
 		}
@@ -1224,8 +1195,7 @@ func (c *s2o) processResponse(responseAny any, op *OrdMap) error {
 	}
 
 	if d, present := response.Get("description"); !present || d == nil || d == "" {
-		// patch. The reference computes `statusCodes[response] || ''`, which
-		// indexes the table by the response OBJECT — always '' in practice.
+
 		response.Set("description", "")
 	}
 
@@ -1238,7 +1208,7 @@ func (c *s2o) processResponse(responseAny any, op *OrdMap) error {
 		}
 		if op != nil {
 			if s, ok := op.GetOr("produces").(string); ok {
-				op.Set("produces", []any{s}) // patch
+				op.Set("produces", []any{s})
 			}
 		}
 		if p, present := c.openapi.Get("produces"); present && truthy(p) {
@@ -1259,7 +1229,7 @@ func (c *s2o) processResponse(responseAny any, op *OrdMap) error {
 		}
 		produces := uniqueStrings(producesRaw)
 		if len(produces) == 0 {
-			produces = []string{"*/*"} // upstream converter's default
+			produces = []string{"*/*"}
 		}
 
 		content := NewOrdMap()
@@ -1291,7 +1261,6 @@ func (c *s2o) processResponse(responseAny any, op *OrdMap) error {
 		response.Delete("schema")
 	}
 
-	// Examples for content-types not listed in produces.
 	if examples, ok := response.GetOr("examples").(*OrdMap); ok {
 		for _, mimetype := range examples.Keys() {
 			content, ok := response.GetOr("content").(*OrdMap)
@@ -1313,8 +1282,6 @@ func (c *s2o) processResponse(responseAny any, op *OrdMap) error {
 	}
 	response.Delete("examples")
 
-	// Response headers ('Status Code' removal, processHeader) are skipped:
-	// invisible to the IR normalizer.
 	return nil
 }
 
@@ -1341,8 +1308,7 @@ func (c *s2o) processPaths(container *OrdMap) error {
 			path.Delete("x-servers")
 		}
 		for _, method := range append([]string(nil), path.Keys()...) {
-			// 'x-amazon-apigateway-any-method' is treated as an operation by
-			// the reference; not ported (invisible to the normalizer).
+
 			if !isHTTPMethodLower(method) {
 				continue
 			}
@@ -1425,15 +1391,14 @@ func (c *s2o) processPaths(container *OrdMap) error {
 					}
 				}
 
-				// op.schemes → op.servers is skipped (invisible to the IR).
 				op.Delete("consumes")
 				op.Delete("produces")
 				op.Delete("schemes")
-				// x-ms-examples: not ported (Azure-only).
+
 				if params, ok := op.GetOr("parameters").([]any); ok && len(params) == 0 {
 					op.Delete("parameters")
 				}
-				// Shared requestBody cache/pointer bookkeeping skipped.
+
 			}
 		}
 		if pathParams := path.GetOr("parameters"); truthy(pathParams) {
@@ -1450,8 +1415,6 @@ func (c *s2o) processPaths(container *OrdMap) error {
 	return nil
 }
 
-// jsEqual compares SCALAR JS values only; a raw `a == b` panics on []any or
-// *OrdMap, reachable from param dedupe on a malformed-but-parseable doc.
 func jsEqual(a, b any) bool {
 	switch a.(type) {
 	case nil, bool, float64, string, int:

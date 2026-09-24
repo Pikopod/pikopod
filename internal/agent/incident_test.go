@@ -15,8 +15,6 @@ import (
 	"github.com/pikopod/pikopod/internal/config"
 )
 
-// incidentAgent fronts a scripted upstream. Sampling is pinned to 0 so every
-// test also proves incidents survive the sampling gate.
 func incidentAgent(t *testing.T, target string, tune func(*config.Upstream)) (*Agent, *httptest.Server, string) {
 	t.Helper()
 	dir := t.TempDir()
@@ -67,9 +65,6 @@ func readEvents(t *testing.T, dir string) []alert.DriftEvent {
 	return out
 }
 
-// drained blocks until the recorder has finished observing want records.
-// Report, and the synchronous event-log append inside it, both complete
-// before either counter moves, so the log is readable once this returns.
 func drained(t *testing.T, a *Agent, want int64) {
 	t.Helper()
 	waitFor(t, func() bool {
@@ -77,10 +72,6 @@ func drained(t *testing.T, a *Agent, want int64) {
 	})
 }
 
-// eventsOfKind waits until at least one event of a kind is on disk. It must
-// NOT call Alerter.Flush: that waits on the delivery WaitGroup while the
-// recorder goroutine can still Add to it, which is a race, and the event log
-// is written synchronously anyway.
 func eventsOfKind(t *testing.T, a *Agent, kind string) []alert.DriftEvent {
 	t.Helper()
 	var got []alert.DriftEvent
@@ -105,9 +96,6 @@ func post(t *testing.T, url, body string) {
 	resp.Body.Close()
 }
 
-// A 503 must become an incident on the FIRST request, with no warmup and no
-// frozen family. Gating incidents on obs.Ready would reintroduce the 48-hour
-// blind window on the one path that must never have it.
 func TestIncidentFiresOnFirstRequestWithoutWarmup(t *testing.T) {
 	target := scriptedUpstream(t, func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -130,8 +118,6 @@ func TestIncidentFiresOnFirstRequestWithoutWarmup(t *testing.T) {
 	}
 }
 
-// The recording IS the reproduction. An incident must force the record past the
-// sampling gate, or `scenario from-recording` has nothing to read.
 func TestIncidentRecordSurvivesZeroSampling(t *testing.T) {
 	target := scriptedUpstream(t, func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -153,7 +139,6 @@ func TestIncidentRecordSurvivesZeroSampling(t *testing.T) {
 	}
 }
 
-// Concrete identifiers must never egress; the event carries a path template.
 func TestIncidentEventCarriesTemplateNotConcretePath(t *testing.T) {
 	target := scriptedUpstream(t, func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(500)
@@ -174,7 +159,6 @@ func TestIncidentEventCarriesTemplateNotConcretePath(t *testing.T) {
 	}
 }
 
-// A storm on one endpoint is one fingerprint with a rising count, not N events.
 func TestIncidentStormIsOneFingerprint(t *testing.T) {
 	target := scriptedUpstream(t, func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(503)
@@ -193,7 +177,6 @@ func TestIncidentStormIsOneFingerprint(t *testing.T) {
 	}
 }
 
-// 4xx is opt-in: usually our own bug, and routine wherever a 401 is normal.
 func TestClientErrorsOffByDefault(t *testing.T) {
 	target := scriptedUpstream(t, func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(400)
@@ -211,7 +194,6 @@ func TestClientErrorsOffByDefault(t *testing.T) {
 	}
 }
 
-// Below the sample floor no rate is claimed: the first 4xx is a rate of 1.0.
 func TestClientErrorNotClaimedBelowSampleFloor(t *testing.T) {
 	target := scriptedUpstream(t, func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(400)
@@ -248,8 +230,6 @@ func TestClientErrorFiresAboveFloorAndRate(t *testing.T) {
 	}
 }
 
-// 429 is its own kind: being throttled is a different fix from the upstream
-// failing, and a different fix from our payload being rejected.
 func TestRateLimitedIsItsOwnKind(t *testing.T) {
 	target := scriptedUpstream(t, func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(429)
@@ -263,8 +243,6 @@ func TestRateLimitedIsItsOwnKind(t *testing.T) {
 	}
 }
 
-// An unreachable upstream is pikopod's own 502, a different problem from the
-// upstream answering 502 itself. Different kind, different fix.
 func TestUnreachableUpstreamIsItsOwnKind(t *testing.T) {
 	dead := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
 	dead.Close()
@@ -274,7 +252,6 @@ func TestUnreachableUpstreamIsItsOwnKind(t *testing.T) {
 	eventsOfKind(t, a, "upstream_unreachable")
 }
 
-// A healthy upstream produces no incidents at all, or the signal is noise.
 func TestHealthyUpstreamProducesNoIncidents(t *testing.T) {
 	target := scriptedUpstream(t, func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")

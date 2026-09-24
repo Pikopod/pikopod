@@ -1,5 +1,3 @@
-// The shipped archetype catalogue — data, not code. The raw JSON keeps the
-// expander's output structurally identical to the expansion goldens.
 package archetype
 
 import "encoding/json"
@@ -150,8 +148,6 @@ const catalogueJSON = `[
   }
 ]`
 
-// Catalogue is the shipped archetype catalogue, parsed at load (panics on a
-// malformed literal — a build-time bug, not a runtime condition).
 var Catalogue = func() []Archetype {
 	var out []Archetype
 	if err := json.Unmarshal([]byte(catalogueJSON), &out); err != nil {
@@ -160,7 +156,6 @@ var Catalogue = func() []Archetype {
 	return out
 }()
 
-// Find returns the archetype with the given id, or nil.
 func Find(id string) *Archetype {
 	for i := range Catalogue {
 		if Catalogue[i].ID == id {

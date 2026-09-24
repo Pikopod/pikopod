@@ -1,5 +1,3 @@
-// Deterministic route matching: candidates rank by specificity with a lexical
-// tiebreak, so the result never depends on declaration order.
 package sandbox
 
 import (
@@ -23,7 +21,7 @@ type matchResult struct {
 	kind       matchKind
 	endpoint   *ir.Endpoint
 	pathParams map[string]string
-	allow      []string // for method-not-allowed: methods that DO serve the path, sorted
+	allow      []string
 }
 
 var paramSegment = regexp.MustCompile(`^\{(.+)\}$`)
@@ -38,8 +36,6 @@ func pathSegments(path string) []string {
 	return out
 }
 
-// matchPathTemplate matches one template against concrete segments. On a
-// malformed %-escape the raw segment is used rather than erroring.
 func matchPathTemplate(template string, target []string) (map[string]string, bool) {
 	tpl := pathSegments(template)
 	if len(tpl) != len(target) {
@@ -49,7 +45,7 @@ func matchPathTemplate(template string, target []string) (map[string]string, boo
 	for i, seg := range tpl {
 		if m := paramSegment.FindStringSubmatch(seg); m != nil {
 			if len(target[i]) == 0 {
-				return nil, false // a path parameter cannot be empty
+				return nil, false
 			}
 			decoded, err := url.PathUnescape(target[i])
 			if err != nil {
@@ -107,11 +103,10 @@ func matchRoute(endpoints []ir.Endpoint, method, innerPath string) *matchResult 
 				allow = append(allow, m)
 			}
 		}
-		sort.Strings(allow) // code-point order (ASCII methods)
+		sort.Strings(allow)
 		return &matchResult{kind: matchMethodNotAllowed, allow: allow}
 	}
 
-	// Most specific wins: fewest params, then lexical path for stability.
 	sort.SliceStable(methodMatches, func(a, b int) bool {
 		pa := templateParamCount(methodMatches[a].endpoint.PathTemplate.Value)
 		pb := templateParamCount(methodMatches[b].endpoint.PathTemplate.Value)

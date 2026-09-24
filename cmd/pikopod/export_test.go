@@ -22,8 +22,6 @@ func exportRecord() *proxy.Record {
 	}
 }
 
-// curl export: replayable against the real upstream, headers and body
-// quoted safely (single quotes in values must not break the shell).
 func TestRenderCurl(t *testing.T) {
 	var out bytes.Buffer
 	renderCurl(&out, "https://api.pay.example/", exportRecord())
@@ -43,7 +41,6 @@ func TestRenderCurl(t *testing.T) {
 	}
 }
 
-// HAR export: a structurally valid 1.2 archive with request+response pairs.
 func TestHarArchive(t *testing.T) {
 	doc := harArchive("https://api.pay.example", []*proxy.Record{exportRecord()})
 	raw, err := json.Marshal(doc)

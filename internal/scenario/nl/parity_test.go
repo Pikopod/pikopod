@@ -11,9 +11,6 @@ import (
 	"github.com/pikopod/pikopod/internal/scenario/archetype"
 )
 
-// The inventory golden covers APPLICABLE archetypes only: an inapplicable
-// archetype cannot bind, so offering it to the model would only invite an
-// intent that fails validation.
 func inventoryParity(t *testing.T, name, specFile string) {
 	root := filepath.Join("..", "..", "..", "testdata", "parity")
 	rawGolden, err := os.ReadFile(filepath.Join(root, "scenario", name+".golden.json"))

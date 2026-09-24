@@ -1,6 +1,3 @@
-// The resource store runs on pure-Go SQLite; virtual timestamps
-// only, never the wall clock.
-
 package sandbox
 
 import (
@@ -12,7 +9,7 @@ import (
 	"path/filepath"
 	"strconv"
 
-	_ "modernc.org/sqlite" // pure Go — zero-cgo constraint holds
+	_ "modernc.org/sqlite"
 )
 
 type StoredResource struct {
@@ -25,7 +22,6 @@ type StoredResource struct {
 	SizeBytes   int64           `json:"sizeBytes"`
 }
 
-// ResourceRecord is the snapshot-blob shape (virtual times as strings).
 type ResourceRecord struct {
 	Type             string          `json:"type"`
 	ResourceKey      string          `json:"resourceKey"`
@@ -77,14 +73,12 @@ CREATE TABLE IF NOT EXISTS resources (
 CREATE INDEX IF NOT EXISTS idx_resources_list ON resources (sandbox_id, type, resource_key);
 `
 
-// OpenStore opens (creating if needed) the sandbox store at dataDir/sandbox.db.
 func OpenStore(dataDir string) (*Store, error) {
 	if err := os.MkdirAll(dataDir, 0o700); err != nil {
 		return nil, err
 	}
 	dbPath := filepath.Join(dataDir, "sandbox.db")
-	// Pre-create 0600: the driver's umask-derived default (~0644) would leave
-	// sandbox contents readable by other local users.
+
 	if f, err := os.OpenFile(dbPath, os.O_CREATE, 0o600); err == nil {
 		f.Close()
 	}
@@ -92,7 +86,7 @@ func OpenStore(dataDir string) (*Store, error) {
 	if err != nil {
 		return nil, err
 	}
-	// Single writer keeps SQLite happy under goroutine load.
+
 	db.SetMaxOpenConns(1)
 	if _, err := db.Exec(schema); err != nil {
 		db.Close()
@@ -101,7 +95,6 @@ func OpenStore(dataDir string) (*Store, error) {
 	return &Store{db: db}, nil
 }
 
-// OpenMemoryStore is for tests and ephemeral demo sandboxes.
 func OpenMemoryStore() (*Store, error) {
 	db, err := sql.Open("sqlite", ":memory:")
 	if err != nil {
@@ -119,13 +112,11 @@ func (s *Store) Close() error { return s.db.Close() }
 
 func attributeSize(attributes json.RawMessage) int64 { return int64(len(attributes)) }
 
-// EnsureSandbox registers a sandbox id (no-op if present).
 func (s *Store) EnsureSandbox(sandboxID string) error {
 	_, err := s.db.Exec(`INSERT INTO sandboxes (id) VALUES (?) ON CONFLICT (id) DO NOTHING`, sandboxID)
 	return err
 }
 
-// AllocateSeq returns the next monotonic sequence value (0-based, never reused).
 func (s *Store) AllocateSeq(sandboxID string) (int64, error) {
 	tx, err := s.db.Begin()
 	if err != nil {
@@ -142,10 +133,9 @@ func (s *Store) AllocateSeq(sandboxID string) (int64, error) {
 	if err := tx.Commit(); err != nil {
 		return 0, err
 	}
-	return next - 1, nil // value before the increment
+	return next - 1, nil
 }
 
-// Put creates-or-replaces by (type, resourceKey) — idempotent seeding.
 func (s *Store) Put(sandboxID, typ, key string, attributes json.RawMessage, state *string, virtualNow int64) (int64, error) {
 	size := attributeSize(attributes)
 	_, err := s.db.Exec(`
@@ -160,7 +150,6 @@ ON CONFLICT (sandbox_id, type, resource_key) DO UPDATE SET
 	return size, err
 }
 
-// Insert creates a brand-new resource; the key is expected to be unique.
 func (s *Store) Insert(sandboxID, typ, key string, attributes json.RawMessage, state *string, virtualNow int64) (*StoredResource, error) {
 	id := newResourceID()
 	size := attributeSize(attributes)
@@ -179,7 +168,6 @@ func (s *Store) GetOne(sandboxID, typ, key string) (*StoredResource, error) {
 	return scanResource(row)
 }
 
-// List pages deterministically by resourceKey (keyset pagination).
 func (s *Store) List(sandboxID, typ string, limit int, cursorKey *string) (*Page, error) {
 	if limit <= 0 {
 		limit = 20
@@ -213,7 +201,6 @@ ORDER BY resource_key ASC LIMIT ?`, sandboxID, typ, after, limit+1)
 	return page, rows.Err()
 }
 
-// Update replaces attributes with an optimistic version check.
 func (s *Store) Update(sandboxID, typ, key string, attributes json.RawMessage, expectedVersion *int64, state *string, stateSet bool, virtualNow int64) (*StoredResource, error) {
 	tx, err := s.db.Begin()
 	if err != nil {
@@ -242,8 +229,7 @@ func (s *Store) Update(sandboxID, typ, key string, attributes json.RawMessage, e
 	if err != nil {
 		return nil, err
 	}
-	// Re-read INSIDE the transaction: after commit, a concurrent Remove or second
-	// Update could make a successful write look like a 404 or return another row.
+
 	updated, err := scanResource(tx.QueryRow(`SELECT id, type, resource_key, attributes, state, version, size_bytes FROM resources WHERE sandbox_id = ? AND type = ? AND resource_key = ?`, sandboxID, typ, key))
 	if err != nil {
 		return nil, err
@@ -263,14 +249,12 @@ func (s *Store) Remove(sandboxID, typ, key string) (bool, error) {
 	return n > 0, nil
 }
 
-// Totals recomputes from rows — never a drifting counter.
 func (s *Store) Totals(sandboxID string) (*StoreTotals, error) {
 	t := &StoreTotals{}
 	err := s.db.QueryRow(`SELECT COUNT(*), COALESCE(SUM(size_bytes), 0) FROM resources WHERE sandbox_id = ?`, sandboxID).Scan(&t.Count, &t.Bytes)
 	return t, err
 }
 
-// Serialize dumps a sandbox's state deterministically (type, key ordering).
 func (s *Store) Serialize(sandboxID string) ([]ResourceRecord, error) {
 	rows, err := s.db.Query(`SELECT type, resource_key, attributes, state, created_at_virtual, updated_at_virtual FROM resources WHERE sandbox_id = ? ORDER BY type ASC, resource_key ASC`, sandboxID)
 	if err != nil {
@@ -293,14 +277,11 @@ func (s *Store) Serialize(sandboxID string) ([]ResourceRecord, error) {
 	return out, rows.Err()
 }
 
-// Clear removes every resource in a sandbox. Panic recovery uses it: a restarted
-// sandbox resumes from committed rows or fresh, never from half-written state.
 func (s *Store) Clear(sandboxID string) error {
 	_, err := s.db.Exec(`DELETE FROM resources WHERE sandbox_id = ?`, sandboxID)
 	return err
 }
 
-// Load bulk-restores records (restore / fork). Assumes the sandbox is empty.
 func (s *Store) Load(sandboxID string, records []ResourceRecord) (*StoreTotals, error) {
 	tx, err := s.db.Begin()
 	if err != nil {
@@ -312,8 +293,7 @@ func (s *Store) Load(sandboxID string, records []ResourceRecord) (*StoreTotals, 
 		size := attributeSize(r.Attributes)
 		totals.Count++
 		totals.Bytes += size
-		// Corrupt timestamps must fail the restore, not load silently at epoch 0
-		// (ParseInt's whole-string rule also refuses Sscan's "12x"→12).
+
 		created, cerr := strconv.ParseInt(r.CreatedAtVirtual, 10, 64)
 		updated, uerr := strconv.ParseInt(r.UpdatedAtVirtual, 10, 64)
 		if cerr != nil || uerr != nil {

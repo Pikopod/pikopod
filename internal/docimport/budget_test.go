@@ -18,8 +18,6 @@ type sized struct {
 func (s sized) size() int    { return s.n }
 func (s sized) name() string { return s.url }
 
-// The observed failure: a large reference section filled the budget before
-// the webhook pages, which carry the only event facts.
 func TestPlanCorpusKeepsWebhookPagesUnderReferencePressure(t *testing.T) {
 	hooks := []sized{{8000, "hooks/overview"}, {40000, "hooks/event-types"}}
 	var api []sized
@@ -60,8 +58,6 @@ func TestPlanCorpusSpendsLeftoverInGroupOrder(t *testing.T) {
 	}
 }
 
-// Rung 3b: a platform that publishes its spec at a well-known path needs no
-// model at all.
 func TestLadderWellKnownSpecPath(t *testing.T) {
 	prose := []byte(`<html><body><p>just words</p></body></html>`)
 	spec := []byte(`{"openapi":"3.0.0","info":{"title":"api","version":"1"},"paths":{}}`)
@@ -91,9 +87,8 @@ func TestLadderWellKnownSpecFromLlmsTxt(t *testing.T) {
 	}
 }
 
-// Skipped pages reach the result so the CLI can say the spec is partial.
 func TestLLMExtractionReportsSkippedPages(t *testing.T) {
-	big := strings.Repeat("reference text ", 20000) // ~300 KB, over the whole budget
+	big := strings.Repeat("reference text ", 20000)
 	pages := map[string][]byte{
 		"https://docs.x.test/llms.txt":          []byte("- [A](https://docs.x.test/api-reference/a)\n- [B](https://docs.x.test/api-reference/b)\n- [W](https://docs.x.test/webhooks/overview)\n"),
 		"https://docs.x.test/api-reference/a":   []byte(big),

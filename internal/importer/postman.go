@@ -1,5 +1,3 @@
-// Postman collection (v2.0/v2.1) → OpenAPI 3.0, natively: the converters we
-// evaluated dropped the auth scheme and documented error responses.
 package importer
 
 import (
@@ -14,8 +12,6 @@ const (
 	postmanConverterVersion = "1"
 )
 
-// NormalizePostman converts a Postman collection into the IR via the OpenAPI
-// pipeline (one normalize path for every source kind).
 func NormalizePostman(raw []byte) (*ir.ApiDefinition, error) {
 	doc, err := parseJSONSafely(string(raw), DefaultParseLimits)
 	if err != nil {
@@ -39,7 +35,7 @@ func NormalizePostman(raw []byte) (*ir.ApiDefinition, error) {
 
 type p2oState struct {
 	paths       *OrdMap
-	authScheme  *OrdMap // components.securitySchemes.<name>
+	authScheme  *OrdMap
 	authName    string
 	serverURL   string
 	sawRequests int
@@ -58,7 +54,6 @@ func convertPostmanToOpenAPI(root *OrdMap) (*OrdMap, error) {
 	info.Set("title", title)
 	info.Set("version", "postman")
 
-	// Collection-level auth applies to every operation unless overridden.
 	if auth, ok := root.GetOr("auth").(*OrdMap); ok {
 		st.applyAuth(auth)
 	}
@@ -93,8 +88,6 @@ func convertPostmanToOpenAPI(root *OrdMap) (*OrdMap, error) {
 	return oas, nil
 }
 
-// applyAuth maps Postman auth blocks to a securityScheme; first one wins
-// (collection-level, or the first authenticated request).
 func (st *p2oState) applyAuth(auth *OrdMap) {
 	if st.authScheme != nil {
 		return
@@ -129,15 +122,13 @@ func (st *p2oState) applyAuth(auth *OrdMap) {
 		scheme.Set("in", in)
 		st.authName = "apiKeyAuth"
 	default:
-		return // noauth / oauth flows: nothing enforceable to model
+		return
 	}
 	st.authScheme = scheme
 }
 
 type postmanKV struct{ key, value string }
 
-// authParams reads auth.<type> in both shapes: v2.1 array of {key,value} and
-// v2.0 object.
 func authParams(auth *OrdMap, typ string) []postmanKV {
 	var out []postmanKV
 	switch block := auth.GetOr(typ).(type) {
@@ -256,7 +247,6 @@ func (st *p2oState) addRequest(item, req *OrdMap, name string, folders []string)
 		}
 	}
 
-	// Responses merge across duplicate documentation of the same operation.
 	responses, _ := op.GetOr("responses").(*OrdMap)
 	if responses == nil {
 		responses = NewOrdMap()
@@ -264,16 +254,13 @@ func (st *p2oState) addRequest(item, req *OrdMap, name string, folders []string)
 	}
 	addPostmanResponses(responses, item.GetOr("response"))
 	if responses.Len() == 0 {
-		// OpenAPI requires at least one response; an example-less request is
-		// still an operation worth modelling.
+
 		def := NewOrdMap()
 		def.Set("description", "OK")
 		responses.Set("200", def)
 	}
 }
 
-// parsePostmanURL handles both URL shapes and returns the templated path,
-// its parameters, and the server base (scheme://host) when present.
 func parsePostmanURL(u any) (path string, params []string, server string) {
 	var rawURL string
 	switch v := u.(type) {
@@ -292,7 +279,7 @@ func parsePostmanURL(u any) (path string, params []string, server string) {
 	if i := strings.IndexAny(rawURL, "?#"); i >= 0 {
 		rawURL = rawURL[:i]
 	}
-	// Split scheme://host from the path. `{{baseUrl}}/x` counts as a host.
+
 	rest := rawURL
 	if i := strings.Index(rest, "://"); i >= 0 {
 		rest = rest[i+3:]
@@ -323,8 +310,7 @@ func parsePostmanURL(u any) (path string, params []string, server string) {
 		}
 		if pname != "" {
 			pname = sanitiseParamName(pname)
-			// LOOP: a third occurrence (or two names sanitizing to empty) must
-			// still get a unique name, or one template binds two positions.
+
 			for pname == "" || seen[pname] {
 				pname = pname + "_"
 			}
@@ -372,8 +358,6 @@ func queryParamsOf(u any) []string {
 	return out
 }
 
-// requestBodyOf turns a raw JSON example body into a requestBody with an
-// inferred schema. Malformed examples are tolerated (no body, no crash).
 func requestBodyOf(req *OrdMap) *OrdMap {
 	bm, ok := req.GetOr("body").(*OrdMap)
 	if !ok {
@@ -387,8 +371,7 @@ func requestBodyOf(req *OrdMap) *OrdMap {
 	if schema == nil {
 		return nil
 	}
-	// Request example fields become REQUIRED at the top level: an example is the
-	// only evidence Postman offers, and providers reject creates missing them.
+
 	markTopLevelRequired(schema)
 	media := NewOrdMap()
 	media.Set("schema", schema)
@@ -432,7 +415,7 @@ func addPostmanResponses(responses *OrdMap, rs any) {
 			responses.Set(code, entry)
 		}
 		if entry.Has("content") {
-			continue // first documented body per status wins
+			continue
 		}
 		if raw, ok := rm.GetOr("body").(string); ok && strings.TrimSpace(raw) != "" {
 			if schema := inferSchemaFromExample(raw); schema != nil {
@@ -453,8 +436,6 @@ func itoaCode(c int) string {
 	return strconv.Itoa(c)
 }
 
-// markTopLevelRequired lists every top-level property as required (request
-// bodies only; responses keep no requiredness claims).
 func markTopLevelRequired(schema *OrdMap) {
 	props, ok := schema.GetOr("properties").(*OrdMap)
 	if !ok || props.Len() == 0 {
@@ -467,8 +448,6 @@ func markTopLevelRequired(schema *OrdMap) {
 	schema.Set("required", required)
 }
 
-// inferSchemaFromExample derives a schema from a JSON example — shapes only, no
-// requiredness (an example cannot prove it); nil when the example is invalid.
 func inferSchemaFromExample(raw string) *OrdMap {
 	doc, err := parseJSONSafely(raw, detectLimits)
 	if err != nil {

@@ -1,5 +1,3 @@
-// GraphQL (SDL or introspection JSON) → OpenAPI 3.0 → IR natively, so the
-// existing sandbox machinery serves GraphQL unchanged. No auth is invented.
 package importer
 
 import (
@@ -19,8 +17,6 @@ const (
 	graphqlMaxTokens = 1_000_000
 )
 
-// NormalizeGraphQLSDL converts GraphQL SDL into the IR via the OpenAPI
-// pipeline (one normalize path for every source kind).
 func NormalizeGraphQLSDL(raw []byte) (*ir.ApiDefinition, error) {
 	if len(raw) > graphqlMaxBytes {
 		return nil, userFacing(specErr(SpecTooLarge, fmt.Sprintf("GraphQL SDL exceeds the %d-byte limit", graphqlMaxBytes)))
@@ -32,8 +28,6 @@ func NormalizeGraphQLSDL(raw []byte) (*ir.ApiDefinition, error) {
 	return normalizeGraphQL(schema)
 }
 
-// NormalizeGraphQLIntrospection converts a GraphQL introspection result
-// (`{"__schema": ...}` or `{"data": {"__schema": ...}}`) into the IR.
 func NormalizeGraphQLIntrospection(raw []byte) (*ir.ApiDefinition, error) {
 	if len(raw) > graphqlMaxBytes {
 		return nil, userFacing(specErr(SpecTooLarge, fmt.Sprintf("GraphQL introspection JSON exceeds the %d-byte limit", graphqlMaxBytes)))
@@ -72,8 +66,7 @@ func normalizeGraphQL(schema *gqlSchema) (*ir.ApiDefinition, error) {
 	if err != nil {
 		return nil, userFacing(err)
 	}
-	// The converter version participates in normalizerVersion and therefore in
-	// the normalized hash, exactly like the Swagger 2.0 and Postman paths.
+
 	def.SourceKind = "graphql"
 	def.NormalizerVersion = ir.NormalizerVersion + "+" + graphqlConverterName + "@" + graphqlConverterVersion
 	return def, nil
@@ -90,12 +83,10 @@ const (
 	gqlScalar
 )
 
-// gqlTypeRef is a GraphQL type reference: a leaf named type or a list wrapper,
-// either optionally non-null.
 type gqlTypeRef struct {
 	nonNull bool
-	name    string      // leaf when elem == nil
-	elem    *gqlTypeRef // list wrapper when non-nil
+	name    string
+	elem    *gqlTypeRef
 }
 
 type gqlArg struct {
@@ -114,9 +105,9 @@ type gqlType struct {
 	kind        gqlKind
 	name        string
 	description string
-	fields      []gqlField // object | interface | input
-	enumValues  []string   // enum
-	members     []string   // union
+	fields      []gqlField
+	enumValues  []string
+	members     []string
 }
 
 type gqlSchema struct {
@@ -124,7 +115,7 @@ type gqlSchema struct {
 	queryType        string
 	mutationType     string
 	subscriptionType string
-	types            []*gqlType // declaration order
+	types            []*gqlType
 	byName           map[string]*gqlType
 }
 
@@ -136,8 +127,6 @@ var gqlBuiltinScalars = map[string]string{
 	"Boolean": "boolean",
 }
 
-// rootFields resolves a root operation type name to its fields, defaulting to
-// the conventional Query/Mutation/Subscription names.
 func (s *gqlSchema) rootFields(declared, conventional string) []gqlField {
 	name := declared
 	if name == "" {
@@ -254,8 +243,6 @@ func lexGraphQL(src string) ([]gqlToken, *SpecError) {
 	return toks, nil
 }
 
-// lexGqlString lexes a `"..."` or `"""..."""` string starting at src[i] and
-// returns the token plus the next index/line.
 func lexGqlString(src string, i, line int) (gqlToken, int, int, *SpecError) {
 	n := len(src)
 	startLine := line
@@ -396,8 +383,6 @@ func (p *gqlParser) expectName() (string, int, *SpecError) {
 	return t.val, t.line, nil
 }
 
-// acceptDescription consumes a leading string token (a description) if
-// present.
 func (p *gqlParser) acceptDescription() string {
 	if p.peek().kind == gqlTokString {
 		return p.next().val
@@ -419,8 +404,6 @@ func (p *gqlParser) parseDocument() *SpecError {
 	return nil
 }
 
-// parseDefinition parses one type-system definition; extend merges into an
-// existing type instead of declaring a new one.
 func (p *gqlParser) parseDefinition(desc string, extend bool) *SpecError {
 	t := p.peek()
 	if t.kind != gqlTokName {
@@ -462,8 +445,6 @@ func (p *gqlParser) parseDefinition(desc string, extend bool) *SpecError {
 	}
 }
 
-// register adds a type or merges an extend into the existing one. An extend of
-// an undefined type declares it: federated SDL ships extensions without bases.
 func (p *gqlParser) register(t *gqlType, line int, extend bool) *SpecError {
 	existing, exists := p.schema.byName[t.name]
 	if !exists {
@@ -491,7 +472,7 @@ func (p *gqlParser) parseSchemaDef() *SpecError {
 		return err
 	}
 	if !p.isPunct("{") {
-		return nil // `extend schema @dir` — directives only
+		return nil
 	}
 	if err := p.expectPunct("{"); err != nil {
 		return err
@@ -529,7 +510,7 @@ func (p *gqlParser) parseCompositeDef(kind gqlKind, desc string, extend bool) *S
 	}
 	if kind != gqlInput && p.peek().kind == gqlTokName && p.peek().val == "implements" {
 		p.next()
-		p.acceptPunct("&") // optional leading &
+		p.acceptPunct("&")
 		for {
 			if _, _, err := p.expectName(); err != nil {
 				return err
@@ -649,19 +630,17 @@ func (p *gqlParser) parseTypeRef(depth int) (*gqlTypeRef, *SpecError) {
 	return ref, nil
 }
 
-// skipValue consumes one GraphQL value literal (default values); the content
-// is validated for shape and discarded.
 func (p *gqlParser) skipValue(depth int) *SpecError {
 	if depth > graphqlMaxDepth {
 		return specErr(SpecDepthExceeded, fmt.Sprintf("GraphQL value nesting exceeds %d", graphqlMaxDepth))
 	}
 	t := p.next()
 	switch t.kind {
-	case gqlTokNumber, gqlTokString, gqlTokName: // numbers, strings, enum/bool/null names
+	case gqlTokNumber, gqlTokString, gqlTokName:
 		return nil
 	case gqlTokPunct:
 		switch t.val {
-		case "$": // variables cannot appear in SDL defaults, but tolerate the shape
+		case "$":
 			_, _, err := p.expectName()
 			return err
 		case "[":
@@ -692,7 +671,6 @@ func (p *gqlParser) skipValue(depth int) *SpecError {
 	return gqlErr(t.line, "expected a value, found %s %q", t.kind, t.val)
 }
 
-// skipDirectives consumes zero or more directive applications (@name(args)).
 func (p *gqlParser) skipDirectives() *SpecError {
 	for p.isPunct("@") {
 		p.next()
@@ -783,13 +761,11 @@ func (p *gqlParser) parseScalarDef(desc string, extend bool) *SpecError {
 		return e
 	}
 	if _, builtin := gqlBuiltinScalars[name]; builtin {
-		return nil // redeclaring a builtin scalar is a no-op
+		return nil
 	}
 	return p.register(&gqlType{kind: gqlScalar, name: name, description: desc}, line, extend)
 }
 
-// parseDirectiveDef consumes `directive @name(args) repeatable? on LOC|LOC`.
-// Directive definitions are not modelled.
 func (p *gqlParser) parseDirectiveDef() *SpecError {
 	if err := p.expectPunct("@"); err != nil {
 		return err
@@ -917,7 +893,6 @@ func schemaFromIntrospection(m *OrdMap) (*gqlSchema, *SpecError) {
 	return s, nil
 }
 
-// introspectionFields maps __Field[] (withArgs) or __InputValue[].
 func introspectionFields(raw any, withArgs bool) ([]gqlField, *SpecError) {
 	list, ok := raw.([]any)
 	if !ok {
@@ -1041,8 +1016,7 @@ func graphqlToOpenAPI(s *gqlSchema) (*OrdMap, *SpecError) {
 		components.Set("schemas", schemas)
 		oas.Set("components", components)
 	}
-	// No security schemes on purpose: GraphQL SDL carries no auth information
-	// and pikopod never invents an auth scheme it cannot justify.
+
 	return oas, nil
 }
 
@@ -1169,8 +1143,7 @@ func gqlMutationOperation(s *gqlSchema, f *gqlField) *OrdMap {
 		var schema *OrdMap
 		bodyRequired := false
 		if input, ok := gqlSingleInputObjectArg(s, f.args); ok {
-			// `createUser(input: CreateUserInput!)` → the body IS the input
-			// type; its required list comes from the input's non-null fields.
+
 			schema = gqlRefSchema(input)
 			bodyRequired = f.args[0].typ.nonNull
 		} else {
@@ -1228,8 +1201,6 @@ func gqlSubscriptionWebhook(s *gqlSchema, f *gqlField) *OrdMap {
 	return item
 }
 
-// gqlSingleInputObjectArg reports the input-object type name when the field
-// has exactly one argument and it is an input object.
 func gqlSingleInputObjectArg(s *gqlSchema, args []gqlArg) (string, bool) {
 	if len(args) != 1 || args[0].typ.elem != nil {
 		return "", false
@@ -1247,8 +1218,6 @@ func gqlRefSchema(name string) *OrdMap {
 	return ref
 }
 
-// gqlTypeRefSchema maps a GraphQL type reference to an OAS schema. Named types
-// always become $refs, so recursive types terminate by construction.
 func gqlTypeRefSchema(s *gqlSchema, ref *gqlTypeRef) *OrdMap {
 	if ref == nil {
 		obj := NewOrdMap()
@@ -1269,16 +1238,13 @@ func gqlTypeRefSchema(s *gqlSchema, ref *gqlTypeRef) *OrdMap {
 	if _, ok := s.byName[ref.name]; ok {
 		return gqlRefSchema(ref.name)
 	}
-	// Reference to an undefined type: tolerate as an opaque string carrying
-	// the name as its format (same shape custom scalars get).
+
 	sch := NewOrdMap()
 	sch.Set("type", "string")
 	sch.Set("format", ref.name)
 	return sch
 }
 
-// gqlParamSchema returns a query-parameter schema when the arg type is
-// parameter-able: a scalar, enum, or custom scalar — not a list or object-ish.
 func gqlParamSchema(s *gqlSchema, ref *gqlTypeRef) (*OrdMap, bool) {
 	if ref == nil || ref.elem != nil {
 		return nil, false
@@ -1294,15 +1260,13 @@ func gqlParamSchema(s *gqlSchema, ref *gqlTypeRef) (*OrdMap, bool) {
 		}
 		return nil, false
 	}
-	// Undefined type: opaque string, same tolerance as gqlTypeRefSchema.
+
 	sch := NewOrdMap()
 	sch.Set("type", "string")
 	sch.Set("format", ref.name)
 	return sch, true
 }
 
-// gqlTypeRefString reconstructs the SDL spelling of a type reference for
-// human-readable notes ("[User!]!").
 func gqlTypeRefString(ref *gqlTypeRef) string {
 	if ref == nil {
 		return ""
@@ -1319,8 +1283,6 @@ func gqlTypeRefString(ref *gqlTypeRef) string {
 	return out
 }
 
-// gqlComponentSchema builds the components/schemas entry for a named type.
-// Only INPUT types get a required list; non-null is ignored for responses.
 func gqlComponentSchema(s *gqlSchema, t *gqlType) *OrdMap {
 	sch := NewOrdMap()
 	switch t.kind {

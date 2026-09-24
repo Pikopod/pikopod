@@ -1,5 +1,3 @@
-// Package baseline learns per-endpoint-family "normal" and freezes a reference
-// at warmup: LEARN → FREEZE → DIFF, so new shapes never silently become normal.
 package baseline
 
 import (
@@ -17,23 +15,19 @@ import (
 	"github.com/pikopod/pikopod/internal/pathtmpl"
 )
 
-// Under the cap a field is enum-ish and value drift is detectable; past it
-// only shape is compared (high-cardinality: ids, tokens).
 const valueTrackCap = 24
 
-// Past the latch, only known paths keep updating.
 const fieldTrackCap = 2000
 
 type FieldStats struct {
 	Count  int            `json:"count"`
 	Types  map[string]int `json:"types"`
 	Values map[string]int `json:"values,omitempty"`
-	// HighCardinality latches once distinct values exceed the cap.
+
 	HighCardinality bool `json:"high_cardinality,omitempty"`
-	// Churned latches when a value-suppressed field showed two distinct
-	// values: the evidence that the suppression is silencing something real.
+
 	Churned bool `json:"churned,omitempty"`
-	// lastValue is in-memory only: enough to notice churn, never persisted.
+
 	lastValue string
 	seenValue bool
 }
@@ -46,21 +40,17 @@ type Family struct {
 	FirstSeen   time.Time              `json:"first_seen"`
 	LastSeen    time.Time              `json:"last_seen"`
 	Fields      map[string]*FieldStats `json:"fields"`
-	// Exact codes (the class alone hides 200 vs 201). RefStatusCodes is nil on
-	// older baselines, where exact-status drift is not claimed, never guessed.
+
 	StatusCodes    map[string]int `json:"status_codes,omitempty"`
 	RefStatusCodes map[string]int `json:"ref_status_codes,omitempty"`
-	// Reference holds the frozen copy diffs run against while Fields keeps
-	// accumulating live stats.
+
 	Frozen    bool                   `json:"frozen"`
 	Reference map[string]*FieldStats `json:"reference,omitempty"`
 	FrozenAt  time.Time              `json:"frozen_at,omitempty"`
-	// Samples at freeze time: the denominator every Reference count is a ratio
-	// of. Zero on older baselines, where presence is not claimed, never guessed.
+
 	FrozenSamples int `json:"frozen_samples,omitempty"`
 }
 
-// PresenceRatio of a field in the reference (0 when unknown).
 func (f *Family) PresenceRatio(field string) float64 {
 	ref := f.Reference
 	if ref == nil {
@@ -71,10 +61,9 @@ func (f *Family) PresenceRatio(field string) float64 {
 		return 0
 	}
 	if f.Frozen {
-		// Denominator must be samples at freeze time: using the max count would
-		// make an all-optional family read ~1.0 and manufacture FieldRemoved.
+
 		if f.FrozenSamples == 0 {
-			return 0 // frozen by an older pikopod: not claimed, never guessed
+			return 0
 		}
 		return float64(st.Count) / float64(f.FrozenSamples)
 	}
@@ -86,25 +75,20 @@ type Warmup struct {
 	MinAge     time.Duration
 }
 
-// Learner owns families for one upstream, plus the cardinality guard.
 type Learner struct {
 	mu       sync.Mutex
 	upstream string
 	guard    *pathtmpl.Guard
 	warmup   Warmup
 	families map[string]*Family
-	path     string // persistence file
+	path     string
 	now      func() time.Time
-	// matcher is the user's volatile_fields, injected by the agent; a match
-	// suppresses VALUE tracking only, so presence and type stay asserted.
+
 	matcher VolatileMatcher
-	// Value tracking suppressed while presence and type stay asserted:
-	// silencing these wholesale would delete coverage.
+
 	valueVolatile map[string]bool
 }
 
-// VolatileMatcher decides whether a flattened field path is user-configured
-// volatile. Injected by the agent; baseline never imports internal/volatile.
 type VolatileMatcher interface {
 	Match(path string) (entry string, ok bool)
 	RecordDrop(path string)
@@ -140,24 +124,20 @@ func NewLearner(upstream, dataDir string, warmup Warmup) *Learner {
 	return l
 }
 
-// Observation is what the differ needs about one record, computed while the
-// learner holds its lock.
 type Observation struct {
 	Family   *Family
 	Ready    bool
 	Fields   map[string]FieldValue
 	Template string
-	// The record's exact code, 0 when unknown; compared against RefStatusCodes.
+
 	Status int
 }
 
 type FieldValue struct {
 	Type  string
-	Value string // string values only (post-sanitize); "" otherwise
+	Value string
 }
 
-// Observe folds one sanitized record in and returns the observation for
-// diffing. Diff-then-absorb: the returned Family reflects the FROZEN state.
 func (l *Learner) Observe(method, path string, status int, body any, ts time.Time) Observation {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -175,8 +155,6 @@ func (l *Learner) Observe(method, path string, status int, body any, ts time.Tim
 
 	fields := Flatten(body)
 
-	// Freeze check BEFORE absorbing this record: the record that crosses the
-	// warmup threshold is the first one diffed against the frozen reference.
 	if !fam.Frozen && fam.Samples >= l.warmup.MinSamples && ts.Sub(fam.FirstSeen) >= l.warmup.MinAge {
 		fam.freeze(l.now())
 	}
@@ -192,8 +170,7 @@ func (l *Learner) Observe(method, path string, status int, body any, ts time.Tim
 	for path, fv := range fields {
 		st, ok := fam.Fields[path]
 		if !ok {
-			// A hostile upstream minting fresh keys per response must not grow
-			// memory/disk without bound.
+
 			if len(fam.Fields) >= fieldTrackCap {
 				continue
 			}
@@ -203,8 +180,7 @@ func (l *Learner) Observe(method, path string, status int, body any, ts time.Tim
 		st.Count++
 		st.Types[fv.Type]++
 		if !st.HighCardinality && l.valueVolatile[strings.ToLower(lastFieldSegment(path))] {
-			// Curated value-volatile field: never track values (they churn by
-			// nature), but keep counting presence and types above.
+
 			st.Values, st.HighCardinality = nil, true
 		}
 		if l.matcher != nil {
@@ -232,16 +208,12 @@ func (l *Learner) Observe(method, path string, status int, body any, ts time.Tim
 	return obs
 }
 
-// SetVolatileMatcher installs the user's compiled volatile_fields. Call
-// before observing; the matcher is shared with the agent for Drops().
 func (l *Learner) SetVolatileMatcher(m VolatileMatcher) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	l.matcher = m
 }
 
-// SetValueVolatile installs the curated value-volatile names (the agent
-// wires internal/volatile's response list). Call before observing.
 func (l *Learner) SetValueVolatile(names []string) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -251,7 +223,6 @@ func (l *Learner) SetValueVolatile(names []string) {
 	}
 }
 
-// lastFieldSegment: "a/b[]/request_ref" → "request_ref".
 func lastFieldSegment(path string) string {
 	if i := strings.LastIndexByte(path, '/'); i >= 0 {
 		path = path[i+1:]
@@ -259,8 +230,6 @@ func lastFieldSegment(path string) string {
 	return strings.TrimSuffix(path, "[]")
 }
 
-// HasFrozen reports whether any family for (method, template) has frozen.
-// Dedicated accessor: Families() copies and sorts, too costly per record.
 func (l *Learner) HasFrozen(method, template string) bool {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -272,8 +241,6 @@ func (l *Learner) HasFrozen(method, template string) bool {
 	return false
 }
 
-// Refreeze re-snapshots families from LIVE stats — the "accept this drift"
-// primitive, so accepted changes stop alerting rather than relying on dedupe.
 func (l *Learner) Refreeze(method, template string) int {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -311,8 +278,6 @@ func (f *Family) freeze(at time.Time) {
 	f.FrozenSamples = f.Samples
 }
 
-// mergeFamiliesLocked re-keys families after a guard promotion so old
-// concrete-path families collapse into the parameterized one.
 func (l *Learner) mergeFamiliesLocked() {
 	merged := map[string]*Family{}
 	for _, fam := range l.families {
@@ -363,12 +328,10 @@ func (f *Family) absorb(other *Family) {
 			}
 		}
 	}
-	// Merged families re-learn their freeze: safer than pretending two
-	// references were one.
+
 	f.Frozen, f.Reference = false, nil
 }
 
-// Families returns a deterministic snapshot for status/report.
 func (l *Learner) Families() []*Family {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -388,8 +351,6 @@ func (l *Learner) Families() []*Family {
 	return out
 }
 
-// Reset drops learned state for one template ("" = whole upstream) — the
-// atomic-swap re-learn.
 func (l *Learner) Reset(template string) int {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -403,10 +364,8 @@ func (l *Learner) Reset(template string) int {
 	return n
 }
 
-// Persist writes atomically (tmp + rename).
 func (l *Learner) Persist() error {
-	// Snapshot under the lock, marshal + write OUTSIDE it: MarshalIndent over
-	// thousands of families stalled Observe for the whole encode.
+
 	l.mu.Lock()
 	snap := make(map[string]*Family, len(l.families))
 	for k, fam := range l.families {
@@ -461,8 +420,6 @@ func (l *Learner) load() {
 	}
 }
 
-// Flatten maps a sanitized JSON tree to fieldPath → FieldValue. Array
-// elements collapse to "[]" so lists of objects share field paths.
 func Flatten(body any) map[string]FieldValue {
 	out := map[string]FieldValue{}
 	var walk func(node any, path string)

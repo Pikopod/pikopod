@@ -97,7 +97,6 @@ func TestFirstFetchSeedsPinWithoutFindings(t *testing.T) {
 		t.Fatalf("first sight must seed silently: %+v findings=%d", res[0], len(rep.findings))
 	}
 
-	// Advance past the interval, change the spec: the seeded pin catches it.
 	w.SetClock(func() time.Time { return time.Now().Add(2 * time.Hour) })
 	*body = specV2
 	res = w.Check()
@@ -119,7 +118,6 @@ func TestPinnedIRDiffAndHashGate(t *testing.T) {
 	}
 	n := len(rep.findings)
 
-	// Same bytes, past the interval: hash gate skips diff — nothing re-reported.
 	w.SetClock(func() time.Time { return time.Now().Add(2 * time.Hour) })
 	res = w.Check()
 	if !res[0].Checked || res[0].Changed {
@@ -134,7 +132,7 @@ func TestIntervalGating(t *testing.T) {
 	rep := &reports{}
 	w, _, _ := newTestWatcher(t, rep, true)
 	w.Check()
-	res := w.Check() // immediately again — not due
+	res := w.Check()
 	if res[0].Checked {
 		t.Fatal("second immediate check must be interval-gated")
 	}
@@ -171,12 +169,12 @@ func TestResetPinReseeds(t *testing.T) {
 	body, notMod := specV1, false
 	w := New(dir, []Source{{Upstream: "pay", SpecSource: "x"}}, time.Hour, rep.report)
 	w.SetFetch(stubFetch(&body, nil, &notMod))
-	w.Check() // seeds pin at v1
+	w.Check()
 
 	if err := ResetPin(dir, "pay"); err != nil {
 		t.Fatal(err)
 	}
-	// Fresh watcher (state cleared for pay): v2 becomes the NEW pin silently.
+
 	w2 := New(dir, []Source{{Upstream: "pay", SpecSource: "x"}}, time.Hour, rep.report)
 	body = specV2
 	w2.SetFetch(stubFetch(&body, nil, &notMod))
@@ -200,7 +198,6 @@ func TestStateSurvivesRestart(t *testing.T) {
 		t.Fatal("setup: expected findings")
 	}
 
-	// A restarted watcher sees the persisted hash: same bytes → no re-diff.
 	w2 := New(dir, []Source{src}, time.Hour, rep.report)
 	w2.SetFetch(stubFetch(&body, nil, &notMod))
 	w2.SetClock(func() time.Time { return time.Now().Add(2 * time.Hour) })
@@ -258,7 +255,7 @@ func TestDocumentedJournalRoundTrip(t *testing.T) {
 	def, _ := importer.NormalizeOpenAPI([]byte(specV1))
 	w := New(dir, []Source{{Upstream: "pay", SpecSource: "x", Pinned: def}}, time.Hour, rep.report)
 	w.SetFetch(stubFetch(&body, nil, &notMod))
-	w.Check() // v1→v2 adds the "note" property
+	w.Check()
 
 	doc := LoadDocumented(dir, "pay")
 	if !doc.HasFieldAdded("GET", "/widgets", "note") {
@@ -267,8 +264,7 @@ func TestDocumentedJournalRoundTrip(t *testing.T) {
 	if doc.HasFieldAdded("GET", "/widgets", "other") {
 		t.Fatal("journal must not over-claim")
 	}
-	// Canonical-template tolerance: traffic spelling with a different param
-	// name still matches.
+
 	if !doc.HasFieldAdded("GET", "/widgets", "note") {
 		t.Fatal("canonical match")
 	}
@@ -283,8 +279,6 @@ func TestCanonicalTemplate(t *testing.T) {
 	}
 }
 
-// Fetch negative paths — non-200, redirect cap, size cap, and the
-// error-path interval stamp (a broken source must not be hammered).
 func TestFetchNegativePaths(t *testing.T) {
 	bad := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "boom", http.StatusInternalServerError)
@@ -312,7 +306,7 @@ func TestFetchNegativePaths(t *testing.T) {
 	huge := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		chunk := make([]byte, 1<<20)
 		var written int64
-		for written <= maxSpecBytes { // one chunk past the cap
+		for written <= maxSpecBytes {
 			n, err := w.Write(chunk)
 			if err != nil {
 				return
@@ -335,13 +329,12 @@ func TestFetchErrorStampsIntervalAndLastError(t *testing.T) {
 	if res[0].Err == nil {
 		t.Fatal("expected fetch error")
 	}
-	// Immediately again: interval-gated even after a FAILURE — a broken
-	// source must not be re-fetched every agent tick.
+
 	res = w.Check()
 	if res[0].Checked {
 		t.Fatal("failed check must still consume its interval slot")
 	}
-	// The failure is visible in persisted state.
+
 	raw, err := os.ReadFile(filepath.Join(dir, "specwatch", "state.json"))
 	if err != nil || !strings.Contains(string(raw), "last_error") {
 		t.Fatalf("state must record the failure: %v %s", err, raw)
@@ -355,13 +348,13 @@ func TestDocumentedJournalCapAndDedupe(t *testing.T) {
 		return specdiff.Finding{ID: "response-property-added", Method: "GET", Template: "/w",
 			Args: []string{"200 application/json", path}}
 	}
-	// Duplicate appends collapse.
+
 	w.journalDocumented("pay", []specdiff.Finding{find("data.a"), find("data.a")}, time.Now())
 	w.journalDocumented("pay", []specdiff.Finding{find("data.a")}, time.Now())
 	if n := len(LoadDocumented(dir, "pay").Changes); n != 1 {
 		t.Fatalf("dedupe: %d entries", n)
 	}
-	// A churny spec cannot grow the journal past the cap; newest survive.
+
 	var storm []specdiff.Finding
 	for i := 0; i < documentedCap+50; i++ {
 		storm = append(storm, find(fmt.Sprintf("data.f%05d", i)))
@@ -376,11 +369,6 @@ func TestDocumentedJournalCapAndDedupe(t *testing.T) {
 	}
 }
 
-// A spec that fetches cleanly but fails to NORMALIZE must not silently
-// retire the source. ETag and Hash are processed-successfully markers: if
-// either advances past an unparseable document, the next check short-circuits
-// (304 via ETag, sameBytes via Hash) and the source goes dark permanently
-// while /healthz reports it healthy.
 func TestUnparseableSpecDoesNotRetireTheSource(t *testing.T) {
 	rep := &reports{}
 	dir := t.TempDir()
@@ -392,8 +380,7 @@ func TestUnparseableSpecDoesNotRetireTheSource(t *testing.T) {
 	body := []byte("this is not a spec at all")
 	w.SetFetch(func(src, etag string) ([]byte, string, bool, error) {
 		fetches++
-		// A real server 304s only when the caller's ETag is current. Ours
-		// must not have advanced past the document that failed to parse.
+
 		if etag == "etag-broken" {
 			return nil, etag, true, nil
 		}
@@ -408,7 +395,6 @@ func TestUnparseableSpecDoesNotRetireTheSource(t *testing.T) {
 		t.Fatal("LastError must be recorded, or /healthz reports a dark source as healthy")
 	}
 
-	// Next interval: the source must be re-fetched AND re-parsed, not skipped.
 	clock = clock.Add(2 * time.Hour)
 	res = w.Check()
 	if !res[0].Checked {
@@ -421,7 +407,6 @@ func TestUnparseableSpecDoesNotRetireTheSource(t *testing.T) {
 		t.Fatalf("fetches = %d, want 2 — the second check short-circuited instead of retrying", fetches)
 	}
 
-	// The provider fixes their document: the watcher recovers on its own.
 	body = []byte(specV1)
 	clock = clock.Add(2 * time.Hour)
 	res = w.Check()

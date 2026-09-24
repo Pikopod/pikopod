@@ -14,9 +14,6 @@ func newTestLearner(t *testing.T, minSamples int) *Learner {
 	return NewLearner("prov", t.TempDir(), Warmup{MinSamples: minSamples, MinAge: 0})
 }
 
-// Freeze-before-absorb: the record that crosses the warmup threshold is the
-// FIRST one diffed against the frozen reference — its own fields must not be
-// in that reference, or the crossing record could never drift.
 func TestFreezeBeforeAbsorbOrdering(t *testing.T) {
 	l := newTestLearner(t, 3)
 	warm := map[string]any{"id": "t1", "state": "active"}
@@ -36,8 +33,7 @@ func TestFreezeBeforeAbsorbOrdering(t *testing.T) {
 	if _, ok := obs.Family.Reference["state"]; !ok {
 		t.Fatal("warmup fields missing from the reference")
 	}
-	// Same ordering for exact status codes: 201 arrived WITH the crossing
-	// record, so the frozen code set must be {200} only.
+
 	if _, leaked := obs.Family.RefStatusCodes["201"]; leaked {
 		t.Fatalf("the crossing record's status leaked into RefStatusCodes: %v", obs.Family.RefStatusCodes)
 	}
@@ -46,8 +42,6 @@ func TestFreezeBeforeAbsorbOrdering(t *testing.T) {
 	}
 }
 
-// MinSamples=1 is the degenerate warmup: the first record IS the whole
-// reference, and the second is already diffed against it.
 func TestSingleSampleWarmup(t *testing.T) {
 	l := newTestLearner(t, 1)
 	if obs := l.Observe("GET", "/a", 200, map[string]any{"x": "1"}, t0); obs.Ready {
@@ -59,8 +53,6 @@ func TestSingleSampleWarmup(t *testing.T) {
 	}
 }
 
-// MinAge gates freezing on wall time, not just sample count: a burst of
-// samples inside the age window must not freeze a reference.
 func TestWarmupMinAge(t *testing.T) {
 	l := NewLearner("prov", t.TempDir(), Warmup{MinSamples: 1, MinAge: time.Hour})
 	body := map[string]any{"x": "1"}
@@ -73,9 +65,6 @@ func TestWarmupMinAge(t *testing.T) {
 	}
 }
 
-// The 24-distinct-value cap latches a field as high-cardinality: value
-// tracking stops, the latch survives absorbing more values, and it persists
-// across a save/load cycle (a restart must not un-latch id-like fields).
 func TestValueTrackCapLatch(t *testing.T) {
 	dir := t.TempDir()
 	l := NewLearner("prov", dir, Warmup{MinSamples: 1000, MinAge: 0})
@@ -95,7 +84,7 @@ func TestValueTrackCapLatch(t *testing.T) {
 	if !st2.HighCardinality || st2.Values != nil {
 		t.Fatalf("the latch must survive restart: %+v", st2)
 	}
-	// Exactly at the cap: still enum-ish, values still tracked.
+
 	l3 := newTestLearner(t, 1000)
 	for i := 0; i < valueTrackCap; i++ {
 		l3.Observe("GET", "/a", 200, map[string]any{"ref": fmt.Sprintf("r_%03d", i)}, t0)
@@ -105,9 +94,6 @@ func TestValueTrackCapLatch(t *testing.T) {
 	}
 }
 
-// The 2000-field cap: new paths past the latch are ignored, known paths
-// keep updating — a hostile upstream minting fresh keys per response cannot
-// grow memory without bound.
 func TestFieldTrackCap(t *testing.T) {
 	l := newTestLearner(t, 100000)
 	big := map[string]any{}
@@ -129,9 +115,6 @@ func TestFieldTrackCap(t *testing.T) {
 	}
 }
 
-// A frozen reference survives a restart byte-for-byte enough to diff: the
-// re-loaded learner is immediately Ready with the same reference and the
-// same frozen exact-code set.
 func TestPersistLoadRoundTrip(t *testing.T) {
 	dir := t.TempDir()
 	l := NewLearner("prov", dir, Warmup{MinSamples: 2, MinAge: 0})
@@ -159,8 +142,6 @@ func TestPersistLoadRoundTrip(t *testing.T) {
 	}
 }
 
-// An empty-body baseline is legal (204-style responses): it freezes with an
-// empty reference and does not crash observing or diffing richer records.
 func TestEmptyBodyBaseline(t *testing.T) {
 	l := newTestLearner(t, 2)
 	for i := 0; i < 3; i++ {
@@ -175,22 +156,14 @@ func TestEmptyBodyBaseline(t *testing.T) {
 	}
 }
 
-// Guard promotion collapses the one-off concrete paths into ONE
-// parameterized family whose reference is rebuilt from the merged live
-// stats — no single pre-merge family's frozen reference survives the merge
-// (that would diff the whole route against one path's history). A literal
-// seen repeatedly BEFORE the blowup is frequency-pinned as a real static
-// route and keeps its own family (the "/users/me vs /users/<id>" split).
 func TestGuardPromotionMergesFamilies(t *testing.T) {
 	l := newTestLearner(t, 2)
 	body := map[string]any{"name": "x"}
-	// Seen >= pinCount times pre-promotion → pinned static route (frozen:
-	// 3 observes over MinSamples 2).
+
 	for i := 0; i < 3; i++ {
 		l.Observe("GET", "/users/alphaaa", 200, body, t0)
 	}
-	// Spray one-off static segments past the cardinality threshold. Each
-	// pre-promotion one-off family holds ONE sample and never froze.
+
 	for i := 1; i <= 40; i++ {
 		seg := fmt.Sprintf("alpha%c%c", 'a'+i/26, 'a'+i%26)
 		l.Observe("GET", "/users/"+seg, 200, body, t0)
@@ -215,17 +188,13 @@ func TestGuardPromotionMergesFamilies(t *testing.T) {
 	if merged.Samples < 39 {
 		t.Fatalf("merge must sum the one-off samples, got %d", merged.Samples)
 	}
-	// The re-frozen reference is built from the UNION of merged live stats
-	// (Count spans the absorbed one-offs), never a carried-over single
-	// pre-merge reference (which would hold Count 1).
+
 	st := merged.Reference["name"]
 	if st == nil || st.Count < 30 {
 		t.Fatalf("merged reference must be rebuilt from union stats: %+v", st)
 	}
 }
 
-// Refreeze is the accept-this-drift primitive: current LIVE behavior
-// becomes the reference, so the accepted change stops diffing as drift.
 func TestRefreezeAdoptsLiveBehavior(t *testing.T) {
 	l := newTestLearner(t, 2)
 	old := map[string]any{"id": "t1", "status": "success"}
@@ -236,7 +205,7 @@ func TestRefreezeAdoptsLiveBehavior(t *testing.T) {
 	if _, inRef := fam.Reference["fee_bearer"]; inRef {
 		t.Fatal("setup: reference must predate the drift")
 	}
-	// The provider drifts; live stats absorb it while the reference stands.
+
 	drifted := map[string]any{"id": "t1", "status": "success", "fee_bearer": "merchant"}
 	l.Observe("GET", "/things/t1", 200, drifted, t0)
 	if n := l.Refreeze("GET", fam.Template); n != 1 {
@@ -245,7 +214,7 @@ func TestRefreezeAdoptsLiveBehavior(t *testing.T) {
 	if _, inRef := fam.Reference["fee_bearer"]; !inRef {
 		t.Fatal("after refreeze the drifted field IS the baseline")
 	}
-	// And the crossing status codes follow the same adoption.
+
 	l.Observe("GET", "/things/t1", 201, drifted, t0)
 	l.Refreeze("GET", fam.Template)
 	if fam.RefStatusCodes["201"] == 0 {
@@ -253,8 +222,6 @@ func TestRefreezeAdoptsLiveBehavior(t *testing.T) {
 	}
 }
 
-// Reset drops exactly the asked-for template ("" = whole upstream) so
-// re-learning is scoped, not scorched-earth.
 func TestResetScope(t *testing.T) {
 	l := newTestLearner(t, 100)
 	l.Observe("GET", "/a", 200, map[string]any{"x": "1"}, t0)
@@ -273,9 +240,6 @@ func TestResetScope(t *testing.T) {
 	}
 }
 
-// Flatten is the differ's input: array elements collapse to one "[]" path
-// (lists of objects share field stats), and "/" inside a key is escaped so
-// a quirky key cannot forge another field's path.
 func TestFlattenShapes(t *testing.T) {
 	fields := Flatten(map[string]any{
 		"items": []any{
@@ -296,15 +260,12 @@ func TestFlattenShapes(t *testing.T) {
 	if fields["a~1b"].Value != "escaped" {
 		t.Fatalf("escaped key lost: %+v", fields)
 	}
-	// The last element's type wins the shared path in one record — both
-	// types were still absorbed into stats across records (not asserted
-	// here); what matters is no panic and a stable path set.
+
 	if len(Flatten(nil)) != 0 {
 		t.Fatal("nil body must flatten to nothing")
 	}
 }
 
-// leafMatcher is the test stand-in for the injected volatile matcher.
 type leafMatcher struct {
 	names map[string]bool
 	drops []string
@@ -327,8 +288,6 @@ func stub(names ...string) *leafMatcher {
 	return m
 }
 
-// A configured name suppresses VALUES only: the field stays learned, so its
-// absence, type and nullability still assert at any depth.
 func TestVolatileMatchesNestedSegments(t *testing.T) {
 	l := newTestLearner(t, 100)
 	l.SetVolatileMatcher(stub("Request_Ref"))
@@ -345,8 +304,6 @@ func TestVolatileMatchesNestedSegments(t *testing.T) {
 	}
 }
 
-// LoadFamilies/Find is the replay --ci foundation: a persisted learner's
-// families are findable offline by (method, template, class).
 func TestLoadFamiliesFind(t *testing.T) {
 	dir := t.TempDir()
 	l := NewLearner("prov", dir, Warmup{MinSamples: 1, MinAge: 0})
@@ -393,17 +350,12 @@ func TestValueVolatileSuppressesValuesKeepsPresence(t *testing.T) {
 	if st.Values != nil || !st.HighCardinality {
 		t.Fatalf("values must not be tracked for a curated volatile field: %+v", st)
 	}
-	// The stable sibling still tracks values normally.
+
 	if sib := fams[0].Fields["status"]; sib == nil || sib.Values["active"] != 5 {
 		t.Fatalf("sibling value tracking broken: %+v", fams[0].Fields["status"])
 	}
 }
 
-// An ALL-OPTIONAL family: no field is present in every sample. The frozen
-// denominator must be samples-at-freeze, not the max field count — with the
-// max, the most-common field of such a family reads as 1.0 and its neighbours
-// as ~0.98, both clearing drift's presenceFloor and manufacturing a
-// FieldRemoved for a field that was never reliably present.
 func TestPresenceRatioAllOptionalFamilyDoesNotReadAsAlwaysPresent(t *testing.T) {
 	l := newTestLearner(t, 10)
 	for i := 0; i < 10; i++ {
@@ -415,7 +367,7 @@ func TestPresenceRatioAllOptionalFamilyDoesNotReadAsAlwaysPresent(t *testing.T) 
 			t.Fatalf("observation %d must be pre-warmup", i)
 		}
 	}
-	// The 11th record crosses the threshold and freezes records 1-10.
+
 	obs := l.Observe("GET", "/things", 200, map[string]any{"a": "x"}, t0.Add(time.Second))
 	if !obs.Ready {
 		t.Fatal("the crossing record must be diffed (Ready)")
@@ -424,7 +376,7 @@ func TestPresenceRatioAllOptionalFamilyDoesNotReadAsAlwaysPresent(t *testing.T) 
 	if fam.FrozenSamples != 10 {
 		t.Fatalf("FrozenSamples = %d, want 10 (samples at freeze time)", fam.FrozenSamples)
 	}
-	// "a" appeared in 5 of 10 samples. Max-count arithmetic would call that 1.0.
+
 	if got := fam.PresenceRatio("a"); got != 0.5 {
 		t.Fatalf("PresenceRatio(a) = %v, want 0.5 — a field seen in 5 of 10 samples is not always-present", got)
 	}
@@ -433,9 +385,6 @@ func TestPresenceRatioAllOptionalFamilyDoesNotReadAsAlwaysPresent(t *testing.T) 
 	}
 }
 
-// Baselines frozen by older pikopods carry no FrozenSamples. Presence is then
-// not claimed at all rather than approximated — the same doctrine as
-// RefStatusCodes. Refreezing restores it.
 func TestPresenceRatioLegacyFrozenBaselineIsNotClaimed(t *testing.T) {
 	fam := &Family{
 		Method: "GET", Template: "/things", StatusClass: "2xx",

@@ -1,5 +1,3 @@
-// `pikopod ack <fingerprint>` — silences a drift alert until its diff changes
-// (a changed diff is a new fingerprint by construction).
 package main
 
 import (
@@ -58,7 +56,6 @@ func newAckCmd() *cobra.Command {
 			fp := args[0]
 			out := cmd.OutOrStdout()
 
-			// Live path: the running agent owns the state.
 			addr := fmt.Sprintf("%s://%s/ack?fp=%s", cfg.Scheme(), net.JoinHostPort(cfg.Listen, fmt.Sprint(cfg.AgentPort)), url.QueryEscape(fp))
 			req, _ := http.NewRequest(http.MethodPost, addr, nil)
 			if token := cfg.Token(); token != "" {
@@ -79,7 +76,6 @@ func newAckCmd() *cobra.Command {
 				}
 			}
 
-			// Offline path: mutate the persisted state; the agent loads it on next start.
 			statePath := filepath.Join(cfg.DataDir, "alerts", "state.json")
 			raw, rerr := os.ReadFile(statePath)
 			if rerr != nil {

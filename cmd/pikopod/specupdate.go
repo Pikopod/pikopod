@@ -1,5 +1,3 @@
-// `pikopod spec-update <upstream>` — traffic findings become RFC-6902 patches.
-// Additive ones are applied in place; narrowings are suggested, never applied.
 package main
 
 import (
@@ -34,12 +32,11 @@ func newSpecUpdateCmd() *cobra.Command {
 				return err
 			}
 
-			// Evidence stream 1: conformance over recordings (absent → empty).
 			var report *conformance.Report
 			if records, _ := readRecordings(cfg.DataDir, upstream); len(records) > 0 {
 				report = conformance.Check(def, records)
 			}
-			// Evidence stream 2: the traffic overlay's matured admissions.
+
 			overlay, _ := contract.LoadOverlay(cfg.DataDir, upstream)
 
 			changes := specupdate.DeriveChanges(report, overlay)
@@ -48,7 +45,6 @@ func newSpecUpdateCmd() *cobra.Command {
 				return nil
 			}
 
-			// The document to patch: --spec override, else the registered source.
 			specSource := specOverride
 			if specSource == "" {
 				entries, rErr := loadRegistry(cfg.DataDir)
@@ -113,7 +109,7 @@ func newSpecUpdateCmd() *cobra.Command {
 				fmt.Fprintf(stderr, "patched spec written to %s — diff it against the original before committing\n", outPath)
 				return nil
 			}
-			// Patched document to stdout (report went to stderr, so piping works).
+
 			_, err = cmd.OutOrStdout().Write(res.Out)
 			return err
 		}}

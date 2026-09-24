@@ -11,8 +11,6 @@ import (
 	"github.com/pikopod/pikopod/internal/specwatch"
 )
 
-// ------------------------------------------- declared ← observed evidence
-
 func fam(method, template, class string, samples int) *baseline.Family {
 	return &baseline.Family{
 		Method: method, Template: template, StatusClass: class,
@@ -23,9 +21,9 @@ func fam(method, template, class string, samples int) *baseline.Family {
 }
 
 func TestEnrichEndpointRemovedWithLiveTraffic(t *testing.T) {
-	f := specdiff.Finding{ID: "endpoint-removed", Level: specdiff.Warn, // deprecated-honored guard had softened it
+	f := specdiff.Finding{ID: "endpoint-removed", Level: specdiff.Warn,
 		Method: "GET", Template: "/tx/{txId}", Detail: "endpoint removed from the spec"}
-	// Traffic template spelling differs ({id} vs {txId}) — canonical match.
+
 	fams := []*baseline.Family{fam("GET", "/tx/{id}", "2xx", 120)}
 	EnrichDeclaredFinding(&f, fams)
 	if f.Level != specdiff.Err {
@@ -48,9 +46,9 @@ func TestEnrichEndpointRemovedNoTrafficUntouched(t *testing.T) {
 func TestEnrichPropertyRemovedWithPresence(t *testing.T) {
 	f := specdiff.Finding{ID: "response-property-removed", Level: specdiff.Warn,
 		Method: "GET", Template: "/tx/{id}", Detail: "field removed",
-		Args: []string{"200 application/json", "data.fee"}} // declared: dot-joined
+		Args: []string{"200 application/json", "data.fee"}}
 	fm := fam("GET", "/tx/{id}", "2xx", 100)
-	// The learner slash-joins — the join must bridge the two spellings.
+
 	fm.Fields["data/fee"] = &baseline.FieldStats{Count: 100, Types: map[string]int{"string": 100}}
 	EnrichDeclaredFinding(&f, []*baseline.Family{fm})
 	if f.Level != specdiff.Err {
@@ -108,8 +106,6 @@ func TestEnrichNeverLowersLevel(t *testing.T) {
 	}
 }
 
-// ------------------------------------------- observed ← declared journal
-
 func docJournal(changes ...specwatch.DocumentedChange) *specwatch.Documented {
 	return &specwatch.Documented{Changes: changes}
 }
@@ -117,11 +113,11 @@ func docJournal(changes ...specwatch.DocumentedChange) *specwatch.Documented {
 func TestAnnotateDocumentedFieldAdded(t *testing.T) {
 	fs := []drift.Finding{{
 		Upstream: "pay", Method: "GET", Template: "/tx/{id}", StatusClass: "2xx",
-		Kind: drift.FieldAdded, Field: "data/fee", After: "string", // observed: slash-joined
+		Kind: drift.FieldAdded, Field: "data/fee", After: "string",
 	}}
 	fp := fs[0].Fingerprint()
 	AnnotateDocumented(fs, docJournal(specwatch.DocumentedChange{
-		ID: "response-property-added", Method: "GET", Template: "/tx/{txId}", Path: "data.fee", // declared: dot-joined
+		ID: "response-property-added", Method: "GET", Template: "/tx/{txId}", Path: "data.fee",
 	}))
 	if !fs[0].Documented || fs[0].Note == "" {
 		t.Fatalf("documented field add must annotate: %+v", fs[0])
@@ -143,7 +139,7 @@ func TestAnnotateDocumentedEnumValue(t *testing.T) {
 	if !fs[0].Documented {
 		t.Fatalf("%+v", fs[0])
 	}
-	// A DIFFERENT value is not covered by the journal entry.
+
 	fs2 := []drift.Finding{{Method: "GET", Template: "/tx/{id}", Kind: drift.EnumValueNew,
 		Field: "data.status", After: "other"}}
 	AnnotateDocumented(fs2, docJournal(specwatch.DocumentedChange{
@@ -156,7 +152,7 @@ func TestAnnotateDocumentedEnumValue(t *testing.T) {
 }
 
 func TestAnnotateDocumentedStatusClass(t *testing.T) {
-	// Declared exact "429" documents the observed CLASS "4xx".
+
 	fs := []drift.Finding{{Method: "GET", Template: "/tx/{id}", Kind: drift.StatusNew, After: "4xx"}}
 	AnnotateDocumented(fs, docJournal(specwatch.DocumentedChange{
 		ID: "response-status-added", Method: "GET", Template: "/tx/{id}", Value: "429",
@@ -164,7 +160,7 @@ func TestAnnotateDocumentedStatusClass(t *testing.T) {
 	if !fs[0].Documented {
 		t.Fatalf("%+v", fs[0])
 	}
-	// Exact-code observed finding matches directly.
+
 	fs2 := []drift.Finding{{Method: "GET", Template: "/tx/{id}", Kind: drift.StatusCodeChanged, After: "429"}}
 	AnnotateDocumented(fs2, docJournal(specwatch.DocumentedChange{
 		ID: "response-status-added", Method: "GET", Template: "/tx/{id}", Value: "429",
@@ -172,7 +168,7 @@ func TestAnnotateDocumentedStatusClass(t *testing.T) {
 	if !fs2[0].Documented {
 		t.Fatalf("%+v", fs2[0])
 	}
-	// A 5xx is NOT documented by a 429.
+
 	fs3 := []drift.Finding{{Method: "GET", Template: "/tx/{id}", Kind: drift.StatusNew, After: "5xx"}}
 	AnnotateDocumented(fs3, docJournal(specwatch.DocumentedChange{
 		ID: "response-status-added", Method: "GET", Template: "/tx/{id}", Value: "429",
@@ -183,9 +179,7 @@ func TestAnnotateDocumentedStatusClass(t *testing.T) {
 }
 
 func TestAnnotateRemovalsNeverDowngraded(t *testing.T) {
-	// Only ADDITIVE kinds can be "documented" — a removal observed on the
-	// wire is a live break even if the spec also removed it (consumers still
-	// parse the old shape).
+
 	fs := []drift.Finding{{Method: "GET", Template: "/tx/{id}", Kind: drift.FieldRemoved, Field: "data.fee"}}
 	AnnotateDocumented(fs, docJournal(specwatch.DocumentedChange{
 		ID: "response-property-added", Method: "GET", Template: "/tx/{id}", Path: "data.fee",

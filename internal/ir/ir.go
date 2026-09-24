@@ -1,18 +1,11 @@
-// Package ir is the golden-pinned IR contract. Collections are unordered sets
-// keyed by stable ids; sourcePointer is debug-only and stripped before hashing.
 package ir
 
-// HttpMethod is one of GET POST PUT PATCH DELETE HEAD OPTIONS TRACE.
 type HttpMethod = string
 
-// ParameterLocation is one of path, query, header, cookie.
 type ParameterLocation = string
 
-// ScalarType is one of string number integer boolean object array null unknown.
 type ScalarType = string
 
-// IrSchemaNode is a normalized schema node: `nullable` is always a boolean
-// flag and `$ref` is expanded or carried as a `ref` to a NamedSchema id.
 type IrSchemaNode struct {
 	ID            string             `json:"id"`
 	Type          Prov[ScalarType]   `json:"type"`
@@ -34,12 +27,12 @@ type PropertySchema struct {
 }
 
 type SchemaConstraint struct {
-	Key   string    `json:"key"` // minLength, maxLength, pattern, minimum, ...
+	Key   string    `json:"key"`
 	Value Prov[any] `json:"value"`
 }
 
 type SchemaComposition struct {
-	Kind    string         `json:"kind"` // allOf | oneOf | anyOf
+	Kind    string         `json:"kind"`
 	Members []IrSchemaNode `json:"members"`
 }
 
@@ -69,7 +62,7 @@ type RequestBody struct {
 
 type ResponseDef struct {
 	ID            string        `json:"id"`
-	StatusCode    string        `json:"statusCode"` // "200", "4XX", "default"
+	StatusCode    string        `json:"statusCode"`
 	Description   *Prov[string] `json:"description"`
 	Content       []MediaType   `json:"content"`
 	SourcePointer string        `json:"sourcePointer"`
@@ -84,7 +77,7 @@ type Endpoint struct {
 	ID           string           `json:"id"`
 	Method       Prov[HttpMethod] `json:"method"`
 	PathTemplate Prov[string]     `json:"pathTemplate"`
-	// CanonicalPath is the positional template (`/users/{}`) used for identity.
+
 	CanonicalPath string                `json:"canonicalPath"`
 	OperationID   *Prov[string]         `json:"operationId"`
 	Summary       *Prov[string]         `json:"summary"`
@@ -123,10 +116,10 @@ type Server struct {
 type AuthScheme struct {
 	ID       string        `json:"id"`
 	Name     string        `json:"name"`
-	Kind     Prov[string]  `json:"kind"`     // apiKey|http|oauth2|openIdConnect|mutualTLS|unknown
-	Location *Prov[string] `json:"location"` // header|query|cookie|n/a
-	Scheme   *Prov[string] `json:"scheme"`   // bearer, basic, ...
-	// ParameterName is, for apiKey schemes, the header/query/cookie name.
+	Kind     Prov[string]  `json:"kind"`
+	Location *Prov[string] `json:"location"`
+	Scheme   *Prov[string] `json:"scheme"`
+
 	ParameterName *Prov[string] `json:"parameterName"`
 	Description   *Prov[string] `json:"description"`
 	SourcePointer string        `json:"sourcePointer"`
@@ -146,14 +139,12 @@ type Webhook struct {
 	PayloadSchema *IrSchemaNode     `json:"payloadSchema"`
 	Description   *Prov[string]     `json:"description"`
 	SourcePointer string            `json:"sourcePointer"`
-	// Trigger comes from the x-pikopod-trigger extension; absent on sources
-	// that predate it, so goldens stay byte-identical.
+
 	Trigger *WebhookTrigger `json:"trigger,omitempty"`
-	// EmitOnly marks an event no API call causes; it fires only on demand.
+
 	EmitOnly bool `json:"emitOnly,omitempty"`
 }
 
-// WebhookTrigger names the operation whose success fires a webhook event.
 type WebhookTrigger struct {
 	Method       string `json:"method"`
 	PathTemplate string `json:"pathTemplate"`
@@ -167,17 +158,12 @@ type Example struct {
 	SourcePointer string    `json:"sourcePointer"`
 }
 
-// SourceKind is one of openapi, graphql, postman, documentation.
 type SourceKind = string
 
-// SourceTier: A structured, B semi-structured, C unstructured.
 type SourceTier = string
 
-// IrStatus: Tier C imports land DRAFT and require explicit human confirmation.
 type IrStatus = string
 
-// ApiDefinition is the normalized internal representation — the versioned
-// contract between ingestion and every phase after it.
 type ApiDefinition struct {
 	IrVersion         string           `json:"irVersion"`
 	NormalizerVersion string           `json:"normalizerVersion"`

@@ -1,5 +1,3 @@
-// Package fix turns a drift event into a verified code change on a PR:
-// deterministic scan → BYOK-LLM patch (untrusted, validated) → optional check.
 package fix
 
 import (
@@ -14,8 +12,6 @@ import (
 	"github.com/pikopod/pikopod/internal/errfmt"
 )
 
-// Bounds: everything the scan and apply stages touch is capped — a fix run
-// over a monorepo must stay interactive and the LLM payload must stay small.
 const (
 	maxWalkFiles      = 20000
 	maxFileBytes      = 1 << 20
@@ -26,7 +22,6 @@ const (
 	maxEditBytes      = 8 << 10
 )
 
-// skipDirs are never descended into (generated/vendored/tool trees).
 var skipDirs = map[string]bool{
 	"node_modules": true, "vendor": true, "dist": true, "build": true,
 	"out": true, "target": true, "venv": true, "__pycache__": true,
@@ -40,15 +35,11 @@ var sourceExts = map[string]bool{
 	".scala": true, ".ex": true, ".exs": true, ".dart": true,
 }
 
-// Impact is one file the drift plausibly touches, with the matching excerpt
-// the LLM sees (never the whole file — bounded payload, bounded blast radius).
 type Impact struct {
-	File    string `json:"file"` // relative to the scan root, slash-separated
+	File    string `json:"file"`
 	Excerpt string `json:"excerpt"`
 }
 
-// Terms derives deterministic search terms from a drift event: the drifted
-// field's leaf name first (highest signal), then literal path segments.
 func Terms(ev *alert.DriftEvent) []string {
 	var terms []string
 	if ev.Field != "" {
@@ -70,8 +61,6 @@ func Terms(ev *alert.DriftEvent) []string {
 	return terms
 }
 
-// Scan walks root for source files containing any term and returns bounded
-// impacts with excerpt context. Deterministic: sorted by path, capped.
 func Scan(root string, terms []string) ([]Impact, error) {
 	if len(terms) == 0 {
 		return nil, nil
@@ -80,7 +69,7 @@ func Scan(root string, terms []string) ([]Impact, error) {
 	walked := 0
 	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
-			return nil // unreadable entries are skipped, not fatal
+			return nil
 		}
 		name := d.Name()
 		if d.IsDir() {
@@ -139,8 +128,6 @@ func Scan(root string, terms []string) ([]Impact, error) {
 	return impacts, nil
 }
 
-// excerpt collects up to maxMatchesPerFile matching lines with ±contextLines
-// of surrounding code, separated by "…" markers between disjoint regions.
 func excerpt(content string, terms []string) string {
 	lines := strings.Split(content, "\n")
 	var regions [][2]int
@@ -159,7 +146,7 @@ func excerpt(content string, terms []string) string {
 					hi = len(lines) - 1
 				}
 				if n := len(regions); n > 0 && lo <= regions[n-1][1]+1 {
-					regions[n-1][1] = hi // merge overlapping regions
+					regions[n-1][1] = hi
 				} else {
 					regions = append(regions, [2]int{lo, hi})
 				}
@@ -180,22 +167,17 @@ func excerpt(content string, terms []string) string {
 	return b.String()
 }
 
-// Edit is one exact-string replacement the model proposed. Find must be
-// copied verbatim from the excerpt and appear exactly once in its file.
 type Edit struct {
 	File    string `json:"file"`
 	Find    string `json:"find"`
 	Replace string `json:"replace"`
 }
 
-// Proposal is the model's full answer.
 type Proposal struct {
 	Edits   []Edit `json:"edits"`
 	Summary string `json:"summary"`
 }
 
-// Instruction is the system-prompt registry entry for the patch stage
-// (delimiter-hardened by the nl client's shared prompt pipeline).
 const Instruction = "You repair a developer's client code after a third-party API contract drift. " +
 	"The payload contains the drift event (what changed in the provider's API) and numbered " +
 	"excerpts from the impacted source files. Propose the SMALLEST code change that adapts the " +
@@ -205,8 +187,6 @@ const Instruction = "You repair a developer's client code after a third-party AP
 	"unique within its file; each file must be one of the listed impacted files. If no safe " +
 	"change exists, return {\"edits\": [], \"summary\": \"<why>\"}."
 
-// ParseProposal validates the model's raw JSON against the impact set. The
-// model is untrusted: unknown files and bad edits are refusals, not warnings.
 func ParseProposal(v any, impacts []Impact) (*Proposal, error) {
 	obj, ok := v.(map[string]any)
 	if !ok {
@@ -247,8 +227,6 @@ func ParseProposal(v any, impacts []Impact) (*Proposal, error) {
 	return p, nil
 }
 
-// Apply edits under root; every Find must occur EXACTLY once in its file
-// (ambiguity is refused). Returns changed files and a byte-exact revert func.
 func Apply(root string, edits []Edit) (changed []string, revert func() error, err error) {
 	type backup struct {
 		path string
@@ -266,7 +244,7 @@ func Apply(root string, edits []Edit) (changed []string, revert func() error, er
 		return first
 	}
 
-	files := map[string]string{} // abs path -> working content
+	files := map[string]string{}
 	order := []string{}
 	for _, e := range edits {
 		abs := filepath.Join(root, filepath.FromSlash(e.File))

@@ -123,8 +123,6 @@ func TestPROpenDryRun(t *testing.T) {
 	}
 }
 
-// The LAST rung of the degradation ladder: read-only token AND no job
-// summary — the report lands on stdout, exit stays 0.
 func TestPRCommentDegradesToStdout(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/user" {
@@ -142,7 +140,7 @@ func TestPRCommentDegradesToStdout(t *testing.T) {
 	handoff := filepath.Join(t.TempDir(), "h.json")
 	os.WriteFile(handoff, []byte(`{"source":"replay-ci","records":2,"findings":[]}`), 0o600)
 	t.Setenv("GITHUB_TOKEN", "t")
-	t.Setenv("GITHUB_STEP_SUMMARY", "") // no job summary available
+	t.Setenv("GITHUB_STEP_SUMMARY", "")
 
 	cmd := newPRCommentCmd()
 	var out, errOut bytes.Buffer
@@ -162,7 +160,6 @@ func TestPRCommentDegradesToStdout(t *testing.T) {
 	}
 }
 
-// argv discipline on pr open: option-like branch names never reach git.
 func TestPROpenRefusesDashBranch(t *testing.T) {
 	handoff := filepath.Join(t.TempDir(), "h.json")
 	os.WriteFile(handoff, []byte(`{"source":"replay-ci","records":0,"findings":[]}`), 0o600)

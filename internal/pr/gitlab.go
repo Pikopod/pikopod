@@ -1,5 +1,3 @@
-// GitLab forge over the REST API (merge-request notes). Pagination follows
-// pages to the end, not just the first page of notes.
 package pr
 
 import (
@@ -14,9 +12,9 @@ import (
 )
 
 type GitLab struct {
-	BaseURL string // default https://gitlab.com/api/v4
-	Project string // numeric id or url-encoded path
-	Number  int    // MR iid
+	BaseURL string
+	Project string
+	Number  int
 	Token   string
 	Client  *http.Client
 }

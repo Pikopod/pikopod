@@ -25,8 +25,7 @@ func TestFlattenAllOfMergesProperties(t *testing.T) {
 }
 
 func TestFlattenAllOfRequiredIsSticky(t *testing.T) {
-	// A property required by an EARLIER member stays required when a later
-	// member re-declares it optional — allOf constraints intersect.
+
 	n := IrSchemaNode{Composition: &SchemaComposition{Kind: "allOf", Members: []IrSchemaNode{
 		node("object", p("id", true)),
 		node("object", p("id", false)),

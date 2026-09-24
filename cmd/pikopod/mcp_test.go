@@ -86,8 +86,6 @@ func TestMCPToolListIsReadersAndFakeControlsOnly(t *testing.T) {
 	}
 }
 
-// The single most important property: a warmup-incomplete upstream is
-// UNVERIFIABLE on the wire, distinguishable from CLEAN.
 func TestDriftEventsBeforeWarmupIsNotClean(t *testing.T) {
 	cfg := testConfig(t, "https://example.invalid")
 	res, wire := callTool(t, cfg, "drift_events", map[string]any{"upstream": "fake"})

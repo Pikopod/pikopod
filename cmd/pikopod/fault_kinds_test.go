@@ -35,14 +35,12 @@ func armFault(t *testing.T, srv *httptest.Server, body string) *http.Response {
 	return res
 }
 
-// Every kind the authoring vocabulary accepts must be armable on a RUNNING
-// sandbox. A kind reachable only from a scenario step cannot reach a user's app.
 func TestAdminArmsEveryFaultKind(t *testing.T) {
 	srv := faultServer(t, "kinds-seed")
 	for _, kind := range sandbox.FaultKinds() {
 		body := `{"kind":"` + kind + `","probability":1`
 		if !sandbox.IsWebhookFaultKind(kind) {
-			// Webhook rules match on the event, never method/path.
+
 			body += `,"method":"POST","path":"/widgets"`
 		}
 		body += `}`
@@ -54,8 +52,6 @@ func TestAdminArmsEveryFaultKind(t *testing.T) {
 	}
 }
 
-// The rejection message is built from the registry, so it cannot name a
-// smaller set than the server accepts.
 func TestAdminUnknownKindNamesEveryValidKind(t *testing.T) {
 	srv := faultServer(t, "kinds-seed-2")
 	res := armFault(t, srv, `{"method":"POST","path":"/widgets","kind":"not_a_kind"}`)
@@ -70,8 +66,6 @@ func TestAdminUnknownKindNamesEveryValidKind(t *testing.T) {
 	}
 }
 
-// rate_limit is authoring sugar: the engine never sees that name, so the
-// control plane must translate it the way the runner and chaos already do.
 func TestAdminRateLimitArmsA429Error(t *testing.T) {
 	srv := faultServer(t, "kinds-seed-3")
 	if res := armFault(t, srv, `{"method":"POST","path":"/widgets","kind":"rate_limit","probability":1}`); res.StatusCode != http.StatusCreated {
@@ -94,8 +88,6 @@ func TestAdminRateLimitArmsA429Error(t *testing.T) {
 	}
 }
 
-// A webhook fault needs no method or path: it matches on the event, and an
-// empty event deliberately matches every delivery.
 func TestAdminWebhookFaultNeedsNoMethodOrPath(t *testing.T) {
 	srv := faultServer(t, "kinds-seed-4")
 	if res := armFault(t, srv, `{"kind":"duplicate_webhook","probability":1}`); res.StatusCode != http.StatusCreated {
@@ -103,7 +95,6 @@ func TestAdminWebhookFaultNeedsNoMethodOrPath(t *testing.T) {
 	}
 }
 
-// A response-shaped fault still needs a target operation.
 func TestAdminResponseFaultStillNeedsMethodAndPath(t *testing.T) {
 	srv := faultServer(t, "kinds-seed-5")
 	res := armFault(t, srv, `{"kind":"error","status":503}`)

@@ -1,5 +1,3 @@
-// Remote targets: run a scenario's REQUEST steps against a REAL endpoint and
-// hold responses to the same assertions. Other steps are refused up front.
 package scenario
 
 import (
@@ -30,12 +28,8 @@ type Target interface {
 	EmitWebhook(event string, data json.RawMessage) error
 }
 
-// remoteAllowedSteps is the step subset that is meaningful against a real
-// endpoint.
 var remoteAllowedSteps = map[string]bool{"REQUEST": true, "NOTE": true, "SNAPSHOT": true}
 
-// RefuseUnsupportedSteps rejects a definition containing steps a remote
-// target cannot honor — loudly, before anything runs.
 func RefuseUnsupportedSteps(def *ScenarioDefinition) error {
 	for i := range def.Steps {
 		if !remoteAllowedSteps[def.Steps[i].Type] {
@@ -49,18 +43,15 @@ func RefuseUnsupportedSteps(def *ScenarioDefinition) error {
 	return nil
 }
 
-// RemoteTarget drives scenario requests at a real base URL.
 type RemoteTarget struct {
 	BaseURL string
-	// Headers are sent on every request (e.g. Authorization) — values are
-	// never logged by the runner.
+
 	Headers map[string]string
 	Client  *http.Client
 
 	virtualClockMs int64
 }
 
-// NewRemoteTarget validates the base URL and applies defaults.
 func NewRemoteTarget(baseURL string, headers map[string]string) (*RemoteTarget, error) {
 	if !strings.HasPrefix(baseURL, "http://") && !strings.HasPrefix(baseURL, "https://") {
 		return nil, errfmt.New("target must be an http(s) URL", strconv.Quote(baseURL)+" is not", "e.g. --target https://api.sandbox.provider.com", "")
@@ -90,8 +81,7 @@ func (t *RemoteTarget) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	started := time.Now()
 	resp, err := t.Client.Do(req)
 	if err != nil {
-		// Transport failure is a real result at a real endpoint — surface
-		// it as a 599 the assertions can see rather than aborting the run.
+
 		writeRemoteError(w, "request to "+t.BaseURL+" failed: "+err.Error())
 		return
 	}
@@ -115,13 +105,10 @@ func writeRemoteError(w http.ResponseWriter, message string) {
 	w.Write(raw)
 }
 
-// Target methods a real endpoint cannot honor. RefuseUnsupportedSteps keeps
-// these unreachable in practice; they answer honestly if reached.
-
 func (t *RemoteTarget) VirtualClockMs() int64      { return t.virtualClockMs }
 func (t *RemoteTarget) SetVirtualClockMs(ms int64) { t.virtualClockMs = ms }
 func (t *RemoteTarget) AuthHeader() (string, string, bool) {
-	return "", "", false // auth comes from --target-header, sent on every request
+	return "", "", false
 }
 func (t *RemoteTarget) ArmFault(sandbox.FaultRule)          {}
 func (t *RemoteTarget) ClearFaults(method, path string) int { return 0 }
@@ -136,8 +123,6 @@ func (t *RemoteTarget) DeliveriesDueBy(string, int64) ([]sandbox.WebhookDelivery
 }
 func (t *RemoteTarget) JournalCount(string, string) (int, bool) { return 0, false }
 
-// A real endpoint keeps no journal; VERIFY_SEQUENCE is refused before a run
-// reaches here (remoteAllowedSteps).
 func (t *RemoteTarget) JournalEntries(int) ([]sandbox.JournalEntry, int64) { return nil, 0 }
 
 func (t *RemoteTarget) EmitWebhook(event string, _ json.RawMessage) error {

@@ -1,5 +1,3 @@
-// Package specdiff is pikopod's DECLARED-drift engine: a typed diff over two
-// IRs, keyed on method+CanonicalPath, with severity derived by law.
 package specdiff
 
 import (
@@ -12,8 +10,6 @@ import (
 	"github.com/pikopod/pikopod/internal/ir"
 )
 
-// Level is a finding's severity: ERR breaks existing consumers, WARN can
-// break some or was properly sunset, INFO is additive/compatible.
 type Level string
 
 const (
@@ -22,7 +18,6 @@ const (
 	Err  Level = "ERR"
 )
 
-// Rank orders levels for --fail-on floors (higher = more severe).
 func (l Level) Rank() int {
 	switch l {
 	case Err:
@@ -34,7 +29,6 @@ func (l Level) Rank() int {
 	}
 }
 
-// Direction is which side of the exchange the changed element sits on.
 type Direction string
 
 const (
@@ -110,8 +104,6 @@ func DeriveLevel(effect Effect, dir Direction, scope Scope, g Guards) Level {
 	return l
 }
 
-// Finding is one declared-drift divergence. Args are the check-specific
-// identity components that feed the fingerprint.
 type Finding struct {
 	ID            string   `json:"id"`
 	Level         Level    `json:"level"`
@@ -146,16 +138,12 @@ func (mk mkFn) at(newPtr, oldPtr string) mkFn {
 	}
 }
 
-// Fingerprint is stable across runs and re-fetches: same divergence → same
-// value. NUL-joined so arg content cannot shift component boundaries.
 func (f Finding) Fingerprint() string {
 	parts := append([]string{f.ID, f.Method, f.Template}, f.Args...)
 	h := sha256.Sum256([]byte(strings.Join(parts, "\x00")))
 	return "fp_" + hex.EncodeToString(h[:])[:12]
 }
 
-// Diff compares the pinned oldDef against the incoming newDef, returning
-// findings sorted deterministically by template, method, id, args.
 func Diff(oldDef, newDef *ir.ApiDefinition) []Finding {
 	d := &differ{
 		oldSchemas: namedSchemas(oldDef),
@@ -205,7 +193,6 @@ func Diff(oldDef, newDef *ir.ApiDefinition) []Finding {
 	return d.out
 }
 
-// Breaking reports whether any finding is at or above the level floor.
 func Breaking(findings []Finding, floor Level) bool {
 	for _, f := range findings {
 		if f.Level.Rank() >= floor.Rank() {
@@ -256,8 +243,6 @@ func (d *differ) diffEndpoint(oe, ne *ir.Endpoint) {
 	d.diffEndpointSecurity(oe, ne, mk)
 }
 
-// paramCounterpart matches path params positionally (rename-tolerant — the
-// canonical path already proved the shapes align), everything else by name.
 func paramCounterpart(p *ir.Parameter, oldPathOrder []string, side []ir.Parameter, sidePathOrder []string) *ir.Parameter {
 	if p.Location == "path" {
 		pos := -1
@@ -285,7 +270,6 @@ func paramCounterpart(p *ir.Parameter, oldPathOrder []string, side []ir.Paramete
 	return nil
 }
 
-// pathParamOrder extracts {param} names from a template in order.
 func pathParamOrder(template string) []string {
 	var out []string
 	for _, seg := range strings.Split(template, "/") {
@@ -305,8 +289,7 @@ func (d *differ) diffParams(oe, ne *ir.Endpoint, mk mkFn) {
 		np := paramCounterpart(op, oldOrder, ne.Parameters, newOrder)
 		label := op.Location + " param `" + op.Name + "`"
 		if np == nil {
-			// Removed request param: clients still sending it are usually
-			// ignored by servers — a narrowing softened by convention.
+
 			d.emit(mk.at("", op.SourcePointer)("param-removed",
 				DeriveLevel(Narrows, Request, Optional, Guards{DeprecatedHonored: op.Deprecated.Value}),
 				label+" removed", op.Location, op.Name))
@@ -400,13 +383,12 @@ func (d *differ) diffResponses(oe, ne *ir.Endpoint, mk mkFn) {
 		if !ok {
 			mk := mk.at("", or.SourcePointer)
 			if isSuccessStatus(status) {
-				// The documented happy path disappeared — consumers read it.
+
 				d.emit(mk("response-status-removed",
 					DeriveLevel(Narrows, Response, Guaranteed, Guards{DeprecatedHonored: oe.Deprecated.Value}),
 					"response status "+status+" removed — the documented success shape is gone", status))
 			} else {
-				// An error status that stops occurring is output the client
-				// tolerates by construction.
+
 				d.emit(mk("response-status-removed", DeriveLevel(Narrows, Response, Guaranteed, Guards{Tolerated: true}),
 					"response status "+status+" removed", status))
 			}
@@ -469,7 +451,7 @@ func (d *differ) diffEndpointSecurity(oe, ne *ir.Endpoint, mk mkFn) {
 	}
 	for id := range oldIDs {
 		if !newIDs[id] && len(newIDs) > 0 {
-			// One accepted auth option withdrawn (others remain).
+
 			d.emit(mk("endpoint-security-scheme-removed",
 				DeriveLevel(Narrows, Request, Guaranteed, Guards{}),
 				"auth scheme `"+id+"` no longer accepted on this endpoint", id))

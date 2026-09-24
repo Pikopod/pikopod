@@ -1,5 +1,3 @@
-// JSON value model for the ingress pipeline: bodies serialize in JS insertion
-// order, because Go maps would sort keys and break byte parity.
 package sandbox
 
 import (
@@ -10,7 +8,6 @@ import (
 	"strings"
 )
 
-// JSONObject is an insertion-ordered JSON object with JS assignment semantics.
 type JSONObject struct {
 	keys []string
 	vals map[string]any
@@ -20,7 +17,6 @@ func NewJSONObject() *JSONObject {
 	return &JSONObject{vals: map[string]any{}}
 }
 
-// Set appends a new key; an existing key keeps its position (JS semantics).
 func (o *JSONObject) Set(key string, value any) {
 	if _, ok := o.vals[key]; !ok {
 		o.keys = append(o.keys, key)
@@ -40,10 +36,8 @@ func (o *JSONObject) Has(key string) bool {
 
 func (o *JSONObject) Len() int { return len(o.keys) }
 
-// Keys returns the insertion-ordered key list (do not mutate).
 func (o *JSONObject) Keys() []string { return o.keys }
 
-// Clone returns a shallow copy (like a JS object spread `{...o}`).
 func (o *JSONObject) Clone() *JSONObject {
 	out := NewJSONObject()
 	for _, k := range o.keys {
@@ -56,8 +50,6 @@ func (o *JSONObject) MarshalJSON() ([]byte, error) {
 	return marshalJSValue(o)
 }
 
-// marshalJSValue serializes like JSON.stringify: insertion-ordered objects,
-// no HTML escaping, raw json.Number passthrough.
 func marshalJSValue(v any) ([]byte, error) {
 	var buf bytes.Buffer
 	if err := writeJSValue(&buf, v); err != nil {
@@ -109,7 +101,7 @@ func writeJSValue(buf *bytes.Buffer, v any) error {
 		}
 		buf.WriteByte(']')
 	case map[string]string:
-		// Deterministic fallback for plain maps: sorted keys.
+
 		keys := make([]string, 0, len(t))
 		for k := range t {
 			keys = append(keys, k)
@@ -126,7 +118,7 @@ func writeJSValue(buf *bytes.Buffer, v any) error {
 		}
 		buf.WriteByte('}')
 	default:
-		// Scalars from Go code and anything else: stdlib, no HTML escaping.
+
 		enc, err := encodeNoHTMLEscape(v)
 		if err != nil {
 			return err
@@ -155,8 +147,6 @@ func encodeNoHTMLEscape(v any) ([]byte, error) {
 	return bytes.TrimRight(b.Bytes(), "\n"), nil
 }
 
-// parseJSONValue parses like JSON.parse: order-preserving objects, numbers as
-// json.Number so client values re-serialize byte-identically, one value only.
 func parseJSONValue(text string) (any, error) {
 	dec := json.NewDecoder(strings.NewReader(text))
 	dec.UseNumber()
@@ -200,7 +190,7 @@ func decodeJSValue(dec *json.Decoder, depth int) (any, error) {
 				}
 				obj.Set(key, val)
 			}
-			if _, err := dec.Token(); err != nil { // consume '}'
+			if _, err := dec.Token(); err != nil {
 				return nil, err
 			}
 			return obj, nil
@@ -213,13 +203,13 @@ func decodeJSValue(dec *json.Decoder, depth int) (any, error) {
 				}
 				arr = append(arr, item)
 			}
-			if _, err := dec.Token(); err != nil { // consume ']'
+			if _, err := dec.Token(); err != nil {
 				return nil, err
 			}
 			return arr, nil
 		}
 		return nil, fmt.Errorf("unexpected delimiter %v", t)
 	default:
-		return tok, nil // string, json.Number, bool, nil
+		return tok, nil
 	}
 }

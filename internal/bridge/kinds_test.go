@@ -8,13 +8,11 @@ import (
 	"github.com/pikopod/pikopod/internal/drift"
 )
 
-// Every drift kind either pins deterministically or refuses with a typed
-// reason — none may fall through silently (the enum-completeness contract).
 func TestAssertionsForEveryKind(t *testing.T) {
 	cases := []struct {
 		name    string
 		ev      alert.DriftEvent
-		wantErr string // "" = expect assertions
+		wantErr string
 		wantOp  string
 	}{
 		{"type-changed", alert.DriftEvent{Kind: drift.TypeChanged, Field: "fee", Before: "number", After: "string"}, "", "equals"},
@@ -50,7 +48,6 @@ func TestAssertionsForEveryKind(t *testing.T) {
 		})
 	}
 
-	// EnumValueNew trims the "…" truncation marker before pinning the set.
 	as, _, err := assertionsFor(&alert.DriftEvent{Kind: drift.EnumValueNew, Field: "s", Before: "a,b,…", After: "c"})
 	if err != nil {
 		t.Fatal(err)
