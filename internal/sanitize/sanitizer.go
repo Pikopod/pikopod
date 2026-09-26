@@ -102,6 +102,13 @@ func Classify(key string, value any, isHeader bool) Mode {
 		return ModeAllow
 	}
 
+	if shortEnumishRE.MatchString(v) && plainSafeKey(k) {
+		return ModeAllow
+	}
+	return classifySlow(k, v)
+}
+
+func classifySlow(k, v string) Mode {
 	switch {
 	case secretKeyRE.MatchString(k):
 		return ModeSubstitute
@@ -126,7 +133,6 @@ func Classify(key string, value any, isHeader bool) Mode {
 	case httpMethodRE.MatchString(v):
 		return ModeAllow
 	case enumishRE.MatchString(v):
-
 		return ModeAllow
 	case longDigitsRE.MatchString(v):
 		return ModeTokenize
@@ -135,6 +141,26 @@ func Classify(key string, value any, isHeader bool) Mode {
 	default:
 		return ModeDrop
 	}
+}
+
+var shortEnumishRE = regexp.MustCompile(`^[a-z][a-z._/+-]{0,14}$`)
+
+func plainSafeKey(k string) bool {
+	if k == "" {
+		return false
+	}
+	for _, c := range k {
+		if c < 'a' || c > 'z' {
+			return false
+		}
+	}
+	return !secretKeyRE.MatchString(k) &&
+		!secretNumberKeyRE.MatchString(k) &&
+		!idKeyRE.MatchString(k) &&
+		!nameKeyRE.MatchString(k) &&
+		!phoneKeyRE.MatchString(k) &&
+		!cardKeyRE.MatchString(k) &&
+		!expiryKeyRE.MatchString(k)
 }
 
 func KeyLooksLikeIdentifier(k string) bool { return keyLooksLikeIdentifier(k) }
