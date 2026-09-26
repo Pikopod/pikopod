@@ -184,7 +184,8 @@ type-specific lives under `config`:
 | `NOTE` | `text` |
 
 Fault `kind` is one of `error`, `latency`, `hang`, `slow_body`,
-`connection_reset`, `malformed_response`, `wrong_content_length`, `rate_limit`,
+`connection_reset`, `empty_response`, `random_data_then_close`,
+`malformed_response`, `wrong_content_length`, `rate_limit`,
 `duplicate_webhook`, `drop_webhook`, `reorder_webhook`, `delay_webhook`. Every
 one of them is also armable on a running sandbox with `pikopod chaos`; the
 webhook kinds match on the event (`--event`, default any) rather than on a

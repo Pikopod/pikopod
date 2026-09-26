@@ -293,6 +293,27 @@ func (e *Engine) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
+	if wf.emptyResponse {
+		// An immediate clean close after accept: no status line, headers, or body.
+		if hj, ok := w.(http.Hijacker); ok {
+			if conn, _, err := hj.Hijack(); err == nil {
+				conn.Close()
+				return
+			}
+		}
+		return
+	}
+	if wf.randomData {
+		// Bytes that cannot be parsed as an HTTP response, then a clean close.
+		if hj, ok := w.(http.Hijacker); ok {
+			if conn, _, err := hj.Hijack(); err == nil {
+				_, _ = conn.Write([]byte("not-http-response-7f3a9c\x00\xff"))
+				conn.Close()
+				return
+			}
+		}
+		return
+	}
 	if wf.malformed {
 
 		if hj, ok := w.(http.Hijacker); ok {

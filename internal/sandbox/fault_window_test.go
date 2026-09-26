@@ -53,9 +53,9 @@ func TestFaultTimesWindow(t *testing.T) {
 }
 
 func TestTransportFaultsOnTheWire(t *testing.T) {
-	serve := func(kind string) (*http.Response, error) {
+	serve := func(kind string, delayMs int64) (*http.Response, error) {
 		e := newEngine(t, loadWidgets(t), Config{ID: "sbx_" + kind, Seed: "wire-1", WallclockFaults: true})
-		e.ArmFault(FaultRule{Method: "POST", Path: "/widgets", Kind: kind, Probability: 1})
+		e.ArmFault(FaultRule{Method: "POST", Path: "/widgets", Kind: kind, DelayMs: delayMs, Probability: 1})
 		srv := httptest.NewServer(e)
 		t.Cleanup(srv.Close)
 		client := &http.Client{Timeout: 5 * time.Second}
@@ -66,36 +66,65 @@ func TestTransportFaultsOnTheWire(t *testing.T) {
 		return resp, err
 	}
 
-	if _, err := serve(FaultConnectionReset); err == nil {
+	if _, err := serve(FaultConnectionReset, 0); err == nil {
 		t.Fatal("connection_reset must surface as a client-side connection error")
 	}
 
-	if resp, err := serve(FaultMalformedResponse); err == nil {
-
+	if resp, err := serve(FaultMalformedResponse, 0); err == nil {
 		body, readErr := io.ReadAll(resp.Body)
 		if readErr == nil && !strings.Contains(string(body), "lskdu") {
 			t.Fatalf("malformed_response must not produce a clean response: %q", body)
 		}
 	}
 
-	resp, err := serve(FaultWrongContentLength)
+	resp, err := serve(FaultWrongContentLength, 0)
 	if err != nil {
 		t.Fatalf("wrong_content_length must deliver headers: %v", err)
 	}
 	if _, readErr := io.ReadAll(resp.Body); !errors.Is(readErr, io.ErrUnexpectedEOF) {
 		t.Fatalf("declared-longer body must end in unexpected EOF, got %v", readErr)
 	}
+
+	started := time.Now()
+	if _, err := serve(FaultEmptyResponse, 500); err == nil {
+		t.Fatal("empty_response must close without producing an HTTP response")
+	}
+	if elapsed := time.Since(started); elapsed >= 250*time.Millisecond {
+		t.Fatalf("empty_response waited before closing: %v", elapsed)
+	}
+
+	started = time.Now()
+	if _, err := serve("hang", 500); err == nil {
+		t.Fatal("hang must close without producing an HTTP response")
+	}
+	if elapsed := time.Since(started); elapsed < 400*time.Millisecond {
+		t.Fatalf("hang closed before its delay elapsed: %v", elapsed)
+	}
+
+	if _, err := serve(FaultRandomDataThenClose, 0); err == nil {
+		t.Fatal("random_data_then_close must not produce a parseable HTTP response")
+	}
 }
 
 func TestTransportFaultsVirtualizedAnnotation(t *testing.T) {
-	e := newEngine(t, loadWidgets(t), Config{ID: "sbx_virt", Seed: "virt-1"})
-	e.ArmFault(FaultRule{Method: "POST", Path: "/widgets", Kind: FaultConnectionReset, Probability: 1})
-	got := do(t, e, "POST", "/widgets", `{"name":"g"}`, nil)
-	if got.status != 201 {
-		t.Fatalf("virtualized transport fault must not break the response: %d", got.status)
-	}
-	if !strings.Contains(got.headers[FaultAppliedHeader], FaultConnectionReset) {
-		t.Fatalf("the would-be fault must be annotated: %v", got.headers)
+	for _, kind := range []string{
+		FaultConnectionReset,
+		FaultMalformedResponse,
+		FaultEmptyResponse,
+		FaultRandomDataThenClose,
+		FaultWrongContentLength,
+	} {
+		t.Run(kind, func(t *testing.T) {
+			e := newEngine(t, loadWidgets(t), Config{ID: "sbx_virt_" + kind, Seed: "virt-1"})
+			e.ArmFault(FaultRule{Method: "POST", Path: "/widgets", Kind: kind, Probability: 1})
+			got := do(t, e, "POST", "/widgets", `{"name":"g"}`, nil)
+			if got.status != 201 {
+				t.Fatalf("virtualized transport fault must not break the response: %d", got.status)
+			}
+			if !strings.Contains(got.headers[FaultAppliedHeader], kind) {
+				t.Fatalf("the would-be fault must be annotated: %v", got.headers)
+			}
+		})
 	}
 }
 
