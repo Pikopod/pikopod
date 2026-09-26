@@ -1,0 +1,3 @@
+reproduced fp_14835fa32dfb (examplepay answered 503 on POST /charges) as pikopod-data/scenarios/incident-14835fa32dfb.yaml
+PASSED — 1 assertion(s) passed; 0 not evaluated
+the failure now happens locally — fix it, then re-run: pikopod scenario run examplepay incident-14835fa32dfb

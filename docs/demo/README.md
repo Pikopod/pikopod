@@ -6,11 +6,12 @@ rather than a binary nobody can check.
 
 | File | What |
 | --- | --- |
-| `demo.gif` | The recording the README embeds (~113 KB) |
+| `demo.gif` | The recording the README embeds (~259 KB) |
 | `demo.cast` | The [asciicast v2](https://docs.asciinema.org/manual/asciicast/v2/) source — plain text, diffs in review |
 | `mkcast.py` | Builds `demo.cast` from captured output |
+| `seed_incident.py` | Writes one recorded incident into `pikopod-data` so the recording can show `incidents` and `reproduce` without a live provider |
 | `examplepay.spec.json` | The spec the recording runs against |
-| `out_list.txt`, `out_run.txt` | Captured output, regenerated each time |
+| `out_import.txt`, `out_list.txt`, `out_run.txt`, `out_incidents.txt`, `out_reproduce.txt` | Captured output, regenerated each time |
 
 ## What is real in it
 
@@ -30,14 +31,17 @@ Python 3.
 
 ```bash
 cd "$(mktemp -d)"
-cp <repo>/docs/demo/{examplepay.spec.json,mkcast.py} .
+cp <repo>/docs/demo/{examplepay.spec.json,mkcast.py,seed_incident.py} .
 go build -o pikopod <repo>/cmd/pikopod
 export PATH="$PWD:$PATH"
 
 pikopod init
-pikopod import examplepay --spec ./examplepay.spec.json
+pikopod import examplepay --spec ./examplepay.spec.json > out_import.txt
 pikopod scenario list examplepay             > out_list.txt
 pikopod scenario run examplepay declines retry_storm > out_run.txt
+python3 seed_incident.py
+pikopod incidents                            > out_incidents.txt
+pikopod scenario reproduce fp_14835fa32dfb   > out_reproduce.txt
 
 python3 mkcast.py
 agg --theme asciinema --font-size 15 demo.cast demo.gif

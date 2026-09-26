@@ -1,12 +1,29 @@
-# pikopod
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/pikopod-mark-dark.svg">
+    <img src="docs/assets/pikopod-mark-light.svg" width="96" height="96" alt="pikopod">
+  </picture>
+</p>
 
-[![CI](https://github.com/Pikopod/pikopod/actions/workflows/ci.yml/badge.svg)](https://github.com/Pikopod/pikopod/actions/workflows/ci.yml)
-[![Release](https://img.shields.io/github/v/release/Pikopod/pikopod)](https://github.com/Pikopod/pikopod/releases)
-[![Go Reference](https://pkg.go.dev/badge/github.com/pikopod/pikopod.svg)](https://pkg.go.dev/github.com/pikopod/pikopod)
-[![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
+<h1 align="center">pikopod</h1>
 
-A sandbox for the third-party APIs you depend on. Built from the provider's
-spec, it fails on purpose, and it replays the exact failure production hit.
+<p align="center">
+  A sandbox for the third-party APIs you depend on. Built from the provider's spec,<br>
+  it fails on purpose, and it replays the exact failure production hit.
+</p>
+
+<p align="center">
+  <a href="https://github.com/Pikopod/pikopod/actions/workflows/ci.yml"><img src="https://github.com/Pikopod/pikopod/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://github.com/Pikopod/pikopod/releases"><img src="https://img.shields.io/github/v/release/Pikopod/pikopod" alt="Release"></a>
+  <a href="https://pkg.go.dev/github.com/pikopod/pikopod"><img src="https://pkg.go.dev/badge/github.com/pikopod/pikopod.svg" alt="Go Reference"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-blue.svg" alt="License: Apache-2.0"></a>
+</p>
+
+<p align="center">
+  <a href="https://docs.pikopod.com">Docs</a> ·
+  <a href="https://docs.pikopod.com/getting-started/quickstart">Quickstart</a> ·
+  <a href="https://pikopod.com">pikopod.com</a>
+</p>
 
 **Their sandbox only knows how to succeed.** It has never declined a charge in
 a way you didn't ask for, never timed out halfway through, never delivered the
@@ -17,7 +34,7 @@ failure back into it so you fix it on a laptop and keep the fix as a test.
 
 One Go binary. Runs locally. No accounts, no telemetry, no cloud.
 
-![pikopod: which failure modes does my integration have?](docs/demo/demo.gif)
+![pikopod: import a spec, see which failures bind, make it fail, and reproduce a production incident](docs/demo/demo.gif)
 
 ## Install
 
@@ -92,6 +109,8 @@ pikopod import examplepay --spec ./examplepay.spec.json
 pikopod scenario list examplepay
 ```
 
+`--spec` also takes your provider's spec URL, or its documentation page.
+
 ```
 archetypes vs examplepay (4 endpoints):
   ✓ happy_path                 Happy path  (1 candidate binding(s))
@@ -114,8 +133,6 @@ not says which fact the spec is missing.
 ```bash
 pikopod scenario run examplepay declines retry_storm
 ```
-
-`--spec` also takes your provider's spec URL, or its documentation page.
 
 ```
 ✓ declines — PASSED (4 assertion(s) passed; 0 not evaluated)
