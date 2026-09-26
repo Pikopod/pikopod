@@ -10,7 +10,7 @@ ESC = chr(27)
 GREEN = ESC + "[38;5;114m"
 RESET = ESC + "[0m"
 
-W, H = 92, 30
+W, H = 120, 42
 events = []
 t = 0.0
 
@@ -44,6 +44,11 @@ def emit_file(path, per_line=0.035):
 
 pause(0.6)
 prompt()
+typed("pikopod import examplepay --spec ./examplepay.spec.json")
+emit_file("out_import.txt")
+pause(1.6)
+
+prompt()
 typed("pikopod scenario list examplepay")
 emit_file("out_list.txt")
 pause(2.4)
@@ -52,6 +57,16 @@ prompt()
 typed("pikopod scenario run examplepay declines retry_storm")
 emit_file("out_run.txt", 0.05)
 pause(2.6)
+
+prompt()
+typed("pikopod incidents")
+emit_file("out_incidents.txt")
+pause(2.0)
+
+prompt()
+typed("pikopod scenario reproduce fp_14835fa32dfb")
+emit_file("out_reproduce.txt", 0.06)
+pause(3.0)
 prompt()
 pause(1.2)
 
@@ -61,7 +76,7 @@ header = {
     "height": H,
     "timestamp": int(time.time()),
     "env": {"SHELL": "/bin/bash", "TERM": "xterm-256color"},
-    "title": "pikopod - which failure modes does my integration have?",
+    "title": "pikopod - rehearse the failures, reproduce the ones you missed",
 }
 with open("demo.cast", "w") as f:
     f.write(json.dumps(header) + "\n")

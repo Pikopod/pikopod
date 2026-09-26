@@ -1,0 +1,4 @@
+[ERR] incident upstream_error         POST /charges (examplepay) · 4 occurrence(s) · last 2026-09-19T10:00:00Z
+  fp_14835fa32dfb
+  reproduce: pikopod scenario reproduce fp_14835fa32dfb
+  export: pikopod incidents export fp_14835fa32dfb
