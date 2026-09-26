@@ -8,8 +8,9 @@ import (
 const Default = "openrouter"
 
 var keyEnvs = map[string][]string{
-	Default:  {"OPENROUTER_API_KEY", "PIKOPOD_OPENROUTER_KEY"},
-	"openai": {"OPENAI_API_KEY"},
+	Default:     {"OPENROUTER_API_KEY", "PIKOPOD_OPENROUTER_KEY"},
+	"openai":    {"OPENAI_API_KEY"},
+	"anthropic": {"ANTHROPIC_API_KEY"},
 }
 
 func Normalize(name string) string {
