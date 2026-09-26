@@ -102,13 +102,18 @@ func Classify(key string, value any, isHeader bool) Mode {
 		return ModeAllow
 	}
 
+	if shortEnumishRE.MatchString(v) && plainSafeKey(k) {
+		return ModeAllow
+	}
+	return classifySlow(k, v)
+}
+
+func classifySlow(k, v string) Mode {
 	switch {
 	case secretKeyRE.MatchString(k):
 		return ModeSubstitute
 	case secretNumberKeyRE.MatchString(k):
 		return ModeSubstitute
-	case shortEnumishRE.MatchString(v) && plainSafeKey(k):
-		return ModeAllow
 	case jwtRE.MatchString(v):
 		return ModeSubstitute
 	case expiryKeyRE.MatchString(k):
@@ -128,7 +133,6 @@ func Classify(key string, value any, isHeader bool) Mode {
 	case httpMethodRE.MatchString(v):
 		return ModeAllow
 	case enumishRE.MatchString(v):
-
 		return ModeAllow
 	case longDigitsRE.MatchString(v):
 		return ModeTokenize

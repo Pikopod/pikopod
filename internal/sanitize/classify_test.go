@@ -24,3 +24,26 @@ func TestClassifyShortEnumFastPathPreservesKeyGuards(t *testing.T) {
 		})
 	}
 }
+
+func TestClassifyShortEnumFastPathMatchesSlowClassifier(t *testing.T) {
+	keys := []string{
+		"api_key", "secret", "password", "passwd", "token", "credential", "auth", "signature", "private_key", "access_key", "bearer",
+		"cvv", "cvv2", "cvc", "cvc2", "cid", "csc", "pin", "otp", "passcode", "security_code", "security_password", "security_pin", "one_time_code", "one_time_password", "one_time_pin", "transaction-pin",
+		"id", "ids", "uuid", "guid", "email", "account", "customer", "user", "order", "ref",
+		"name", "surname", "username", "nickname", "city", "street", "address", "dob", "birthdate", "birthday", "birth", "gender", "beneficiary", "sender", "recipient", "payee", "payer", "holder",
+		"phone", "mobile", "msisdn", "card", "pan", "iban", "bvn", "nin", "ssn", "expiry", "expiration", "exp_month", "exp_year", "valid_thru", "valid_until",
+		"status", "state", "mode", "result", "phase", "kind", "type", "region",
+	}
+	values := []string{"pending", "on_hold", "abc", "a.b/c", "x-y"}
+	for _, key := range keys {
+		for _, value := range values {
+			t.Run(key+"/"+value, func(t *testing.T) {
+				got := Classify(key, value, false)
+				want := classifySlow(key, value)
+				if got != want {
+					t.Fatalf("Classify(%q, %q) = %s, classifySlow = %s", key, value, got, want)
+				}
+			})
+		}
+	}
+}
