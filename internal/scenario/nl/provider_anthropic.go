@@ -15,7 +15,7 @@ import (
 const (
 	anthropicProviderName = "anthropic"
 	anthropicBaseURL      = "https://api.anthropic.com"
-	anthropicDefaultModel = "claude-3-5-haiku-20241022"
+	anthropicDefaultModel = "claude-haiku-4-5-20251001"
 	anthropicAPIVersion   = "2023-06-01"
 )
 

@@ -407,7 +407,7 @@ Bring your own key. pikopod never ships a key and never proxies your requests
 through anyone else. The registered providers are `openrouter`, `openai`, and
 `anthropic`. OpenRouter defaults to `openai/gpt-4o-mini`; OpenAI defaults to
 `gpt-4o-mini`; Anthropic defaults to the pinned
-`claude-3-5-haiku-20241022` model.
+`claude-haiku-4-5-20251001` model.
 The `Provider` boundary is the extension point for additional providers.
 
 Adding one is two edits: a name and its key environment variables in
