@@ -119,22 +119,10 @@ shasum -a 256 -c SHA256SUMS
 ```
 
 Verify that the checksum file was signed by this repository's tagged release
-workflow:
-
-```bash
-cosign verify-blob \
-  --certificate SHA256SUMS.pem \
-  --signature SHA256SUMS.sig \
-  SHA256SUMS \
-  --certificate-identity-regexp '^https://github.com/Pikopod/pikopod/\.github/workflows/release\.yml@refs/tags/' \
-  --certificate-oidc-issuer https://token.actions.githubusercontent.com
-```
-
-The identity expression is intentionally anchored to the capitalised
-`Pikopod` organisation, this repository's release workflow, and a tag ref.
-The same canonical verification command is maintained in
-[`docs/security.md`](docs/security.md#verifying-a-release); update that page
-and this runbook together if the signing workflow changes.
+workflow. Confirm that the certificate identity refers to the capitalised
+`Pikopod` organisation, this repository's release workflow, and a tag ref; the
+canonical verification command is maintained in
+[`docs/security.md`](docs/security.md#verifying-a-release).
 
 ## If the workflow fails
 
