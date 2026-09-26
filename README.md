@@ -1,5 +1,13 @@
 # pikopod
 
+[![CI](https://github.com/Pikopod/pikopod/actions/workflows/ci.yml/badge.svg)](https://github.com/Pikopod/pikopod/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/Pikopod/pikopod)](https://github.com/Pikopod/pikopod/releases)
+[![Go Reference](https://pkg.go.dev/badge/github.com/pikopod/pikopod.svg)](https://pkg.go.dev/github.com/pikopod/pikopod)
+[![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
+
+A sandbox for the third-party APIs you depend on. Built from the provider's
+spec, it fails on purpose, and it replays the exact failure production hit.
+
 **Their sandbox only knows how to succeed.** It has never declined a charge in
 a way you didn't ask for, never timed out halfway through, never delivered the
 same webhook twice. So the first time your retry path runs for real, it runs
@@ -81,6 +89,29 @@ provider. See [Spec diff](https://docs.pikopod.com/gate/spec-diff) and
 curl -fsSL -o examplepay.spec.json https://raw.githubusercontent.com/pikopod/pikopod/main/docs/demo/examplepay.spec.json
 pikopod init
 pikopod import examplepay --spec ./examplepay.spec.json
+pikopod scenario list examplepay
+```
+
+```
+archetypes vs examplepay (4 endpoints):
+  ✓ happy_path                 Happy path  (1 candidate binding(s))
+  ✓ unauthorized               Unauthorized  (4 candidate binding(s))
+  ✓ invalid_request            Invalid request  (1 candidate binding(s))
+  ✗ duplicate_delivery         Duplicate delivery
+      no webhookEvent matching {} for role 'emittedEvent'
+  ✓ rate_limit_backoff         Rate limit and backoff  (4 candidate binding(s))
+  ✓ state_transition_sequence  State transition sequence  (1 candidate binding(s))
+  ✓ retry_storm                Retry storm with recovery  (1 candidate binding(s))
+  ✓ declines                   Declines  (1 candidate binding(s))
+  ✓ timeouts                   Timeouts  (1 candidate binding(s))
+  ✓ partial_failure            Partial failure  (1 candidate binding(s))
+  ✓ downtime_recovery          Downtime and recovery  (1 candidate binding(s))
+```
+
+Ten stories bound to four endpoints with nothing authored. The one that did
+not says which fact the spec is missing.
+
+```bash
 pikopod scenario run examplepay declines retry_storm
 ```
 
