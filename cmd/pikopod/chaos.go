@@ -62,7 +62,7 @@ func newChaosCmd() *cobra.Command {
 					return err
 				}
 				defer resp.Body.Close()
-				return chaosRelay(resp, out, "standing faults")
+				return chaosList(resp, out)
 			}
 
 			method, _ := cmd.Flags().GetString("method")
@@ -158,6 +158,27 @@ func chaosRelay(resp *http.Response, out io.Writer, verb string) error {
 		return errfmt.New("the sandbox server refused", fmt.Sprintf("%d: %s", resp.StatusCode, bytes.TrimSpace(raw)), "check the sandbox name (`pikopod sandbox list`) and flags", "")
 	}
 	fmt.Fprintf(out, "%s: %s\n", verb, bytes.TrimSpace(raw))
+	return nil
+}
+
+func chaosList(resp *http.Response, out io.Writer) error {
+	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if resp.StatusCode >= 400 {
+		return errfmt.New("the sandbox server refused", fmt.Sprintf("%d: %s", resp.StatusCode, bytes.TrimSpace(raw)), "check the sandbox name (`pikopod sandbox list`) and flags", "")
+	}
+	var list struct {
+		Faults []sandbox.FaultRule `json:"faults"`
+	}
+	if err := json.Unmarshal(raw, &list); err != nil {
+		return errfmt.Newf("the sandbox server answered with something unreadable", "check that `pikopod up` from this same pikopod build is what is listening on the sandbox port", "docs/config-reference.md#ports", "%v", err)
+	}
+	if len(list.Faults) == 0 {
+		fmt.Fprintln(out, "no standing faults")
+		return nil
+	}
+	for i := range list.Faults {
+		fmt.Fprintf(out, "armed   %s\n", list.Faults[i].Describe())
+	}
 	return nil
 }
 

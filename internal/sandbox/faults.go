@@ -122,6 +122,29 @@ func isWebhookFaultKind(kind string) bool {
 
 func IsWebhookFaultKind(kind string) bool { return isWebhookFaultKind(kind) }
 
+func (f *FaultRule) Describe() string {
+	target := f.Method + " " + f.Path
+	if IsWebhookFaultKind(f.Kind) {
+		target = f.Event
+		if target == "" {
+			target = "any event"
+		}
+	}
+	line := f.Kind
+	if f.Status != 0 {
+		line += " " + strconv.Itoa(f.Status)
+	}
+	line += " on " + target
+	if f.Times > 0 {
+		line += fmt.Sprintf(" (first %d", f.Times)
+		if f.Per != "" {
+			line += " per " + f.Per
+		}
+		line += ")"
+	}
+	return line
+}
+
 var faultKinds = []string{
 	"error", "latency", "hang", "slow_body", "rate_limit",
 	FaultConnectionReset, FaultMalformedResponse, FaultEmptyResponse, FaultRandomDataThenClose, FaultWrongContentLength,

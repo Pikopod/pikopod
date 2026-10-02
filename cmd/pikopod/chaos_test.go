@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -144,5 +145,76 @@ func TestChaosAdminSurface(t *testing.T) {
 	}
 	if resp := post(srv.URL+"/_pikopod/other", `{}`); resp.StatusCode != 404 {
 		t.Fatalf("unknown admin route must 404, got %d", resp.StatusCode)
+	}
+}
+
+func TestChaosListRendersOneLinePerFault(t *testing.T) {
+	admin := chaosTestAdmin(t, "chaos-list-1")
+	armedFault(t, admin, `{"method":"POST","path":"/widgets","kind":"error","status":503,"times":2,"per":"idempotency-key"}`)
+	got := chaosListOutput(t, admin)
+
+	if got != "armed   error 503 on POST /widgets (first 2 per idempotency-key)\n" {
+		t.Fatalf("list must render one line per fault, got %q", got)
+	}
+	if strings.ContainsAny(got, "{}") {
+		t.Fatalf("list output must carry no JSON, got %q", got)
+	}
+}
+
+func TestChaosListRendersWebhookFaultsByEvent(t *testing.T) {
+	admin := chaosTestAdmin(t, "chaos-list-2")
+	armedFault(t, admin, `{"kind":"drop_webhook","event":"widget.created"}`)
+	got := chaosListOutput(t, admin)
+	if got != "armed   drop_webhook on widget.created\n" {
+		t.Fatalf("a webhook fault must show its event, got %q", got)
+	}
+}
+
+func TestChaosListSaysWhenNothingIsArmed(t *testing.T) {
+	admin := chaosTestAdmin(t, "chaos-list-3")
+	if got := chaosListOutput(t, admin); strings.TrimSpace(got) != "no standing faults" {
+		t.Fatalf("an empty list must say so, got %q", got)
+	}
+}
+
+func chaosTestAdmin(t *testing.T, seed string) string {
+	t.Helper()
+	cfg := testConfig(t, "https://example.invalid")
+	if err := sandboxAdd(cfg, "widgets", widgetsSpecPath, seed, "", "", false, io.Discard); err != nil {
+		t.Fatalf("add: %v", err)
+	}
+	sbx, err := newSandboxServer(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { sbx.Close() })
+	srv := httptest.NewServer(sbx)
+	t.Cleanup(srv.Close)
+	return srv.URL + "/_pikopod/sandboxes/widgets/faults"
+}
+
+func chaosListOutput(t *testing.T, admin string) string {
+	t.Helper()
+	resp, err := http.Get(admin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	var buf bytes.Buffer
+	if err := chaosList(resp, &buf); err != nil {
+		t.Fatal(err)
+	}
+	return buf.String()
+}
+
+func armedFault(t *testing.T, admin, body string) {
+	t.Helper()
+	resp, err := http.Post(admin, "application/json", strings.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != 201 {
+		t.Fatalf("arming should 201, got %d", resp.StatusCode)
 	}
 }

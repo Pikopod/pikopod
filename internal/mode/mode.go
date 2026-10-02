@@ -149,26 +149,7 @@ func (s *Spec) Describe() string {
 		out += fmt.Sprintf("  seeded  %s\n", seed.Type)
 	}
 	for _, f := range s.Faults {
-		target := f.Method + " " + f.Path
-		if sandbox.IsWebhookFaultKind(f.Kind) {
-			target = f.Event
-			if target == "" {
-				target = "any event"
-			}
-		}
-		line := fmt.Sprintf("  armed   %s", f.Kind)
-		if f.Status != 0 {
-			line += " " + strconv.Itoa(f.Status)
-		}
-		line += " on " + target
-		if f.Times > 0 {
-			line += fmt.Sprintf(" (first %d", f.Times)
-			if f.Per != "" {
-				line += " per " + f.Per
-			}
-			line += ")"
-		}
-		out += line + "\n"
+		out += "  armed   " + f.Describe() + "\n"
 	}
 	if s.Verify != nil {
 		out += fmt.Sprintf("  verify  %d step(s) with `pikopod mode verify` after your tests run\n", len(s.Verify.Steps))
