@@ -156,6 +156,65 @@ sandbox_port: 4600   # sandbox
 `pikopod up` serves both. The sandbox answers at `/<provider>/`, the agent at
 the `listen` prefix you configured for each upstream.
 
+### Importing a sandbox
+
+Register a sandbox before starting `pikopod up`:
+
+```bash
+pikopod import examplepay --spec ./examplepay.spec.json
+```
+
+`pikopod sandbox add examplepay --spec ./examplepay.spec.json` also registers
+a sandbox. The name must be non-empty and contain no slashes, backslashes,
+spaces or tabs; it becomes the route prefix `/examplepay/` on the sandbox port.
+
+`--spec` is required. It accepts a local file or an HTTP(S) URL. A raw spec URL
+must return HTTP 200 with the complete document; check the URL and retry if
+the server returns another status or the connection drops during download.
+OpenAPI, Swagger 2.0, Postman and GraphQL imports are supported. Documentation
+URLs can also be imported.
+
+### Updating a sandbox
+
+`--update` refreshes an existing import and accepts the declared changes:
+
+```bash
+pikopod import examplepay --update --spec ./examplepay.spec.json
+```
+
+Import the sandbox without `--update` first if its name is not registered.
+When `--spec` is omitted during an update, pikopod reuses the recorded source.
+If no source was recorded, supply `--spec <file-or-url>`. Restart `pikopod up`
+after updating to serve the refreshed contract.
+
+### Listing and resetting sandboxes
+
+```bash
+pikopod sandbox list
+pikopod sandbox reset examplepay
+```
+
+The registry lives under `data_dir`. If it is empty, import a sandbox or use
+`pikopod sandbox add examplepay --spec ./examplepay.spec.json`. Use a name
+shown by `sandbox list` when resetting. Adding an already registered name is
+refused: choose another name, reset its stored state, or refresh its contract
+with `pikopod import examplepay --update`.
+
+A reset clears stored state while keeping the registration and seed, so the
+same seed can replay identically.
+
+### Request journal
+
+```bash
+pikopod sandbox requests examplepay --last 20
+```
+
+The journal reads requests received by the running sandbox. Start `pikopod up`
+first and use a registered name from `pikopod sandbox list`. If the journal is
+unavailable, check the name and the server's reported HTTP error. The command
+uses the configured sandbox port and listener token. `--reset` clears the
+journal.
+
 ## data_dir
 
 ```yaml

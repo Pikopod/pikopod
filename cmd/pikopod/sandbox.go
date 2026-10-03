@@ -122,7 +122,7 @@ func loadSpec(cfg *config.Config, source string, out io.Writer) ([]byte, string,
 	if isURL && (strings.Contains(head, "<!doctype html") || strings.Contains(head, "<html")) {
 		var llm *nl.Client
 		if cfg != nil && cfg.LLM.APIKey != "" {
-			llm = newLLMClient(cfg, "")
+			llm = newLLMClient(cfg, cfg.LLM.Model)
 		}
 		res, err := docimport.FromDocsURL(source, raw, loadSpecOnce, llm)
 		if err != nil {
@@ -219,11 +219,11 @@ func loadSpecOnce(source string) ([]byte, error) {
 		}
 		defer resp.Body.Close()
 		if resp.StatusCode != http.StatusOK {
-			return nil, errfmt.New("cannot fetch the spec", fmt.Sprintf("%s answered %d", source, resp.StatusCode), "check the URL serves the raw OpenAPI document", "")
+			return nil, errfmt.New("cannot fetch the spec", fmt.Sprintf("%s answered %d", source, resp.StatusCode), "check the URL serves the raw OpenAPI document", "docs/config-reference.md#importing-a-sandbox")
 		}
 		raw, err := io.ReadAll(io.LimitReader(resp.Body, 32<<20))
 		if err != nil {
-			return nil, errfmt.Newf("cannot read the spec response", "retry; the connection dropped mid-download", "", "%v", err)
+			return nil, errfmt.Newf("cannot read the spec response", "retry; the connection dropped mid-download", "docs/config-reference.md#importing-a-sandbox", "%v", err)
 		}
 		return raw, nil
 	}
@@ -245,7 +245,7 @@ func sandboxAdd(cfg *config.Config, name, specSource, seed, webhookURL, upstream
 func sandboxAddOpts(cfg *config.Config, name string, o addOptions, out io.Writer) error {
 	specSource, seed, webhookURL, upstreamLink := o.SpecSource, o.Seed, o.WebhookURL, o.UpstreamLink
 	if strings.ContainsAny(name, "/\\ \t") || name == "" {
-		return errfmt.New("invalid sandbox name", fmt.Sprintf("%q cannot contain slashes or whitespace", name), "pick a short slug like `payments` — it becomes the route /<name>/ on the sandbox server", "")
+		return errfmt.New("invalid sandbox name", fmt.Sprintf("%q cannot contain slashes or whitespace", name), "pick a short slug like `payments` — it becomes the route /<name>/ on the sandbox server", "docs/config-reference.md#importing-a-sandbox")
 	}
 	if webhookURL != "" && !strings.HasPrefix(webhookURL, "http://") && !strings.HasPrefix(webhookURL, "https://") {
 		return errfmt.New("invalid webhook URL", fmt.Sprintf("%q is not an http(s) URL", webhookURL), "pass --webhook-url http://localhost:<port>/<path> — the endpoint your app listens on", "docs/config-reference.md")
@@ -255,7 +255,7 @@ func sandboxAddOpts(cfg *config.Config, name string, o addOptions, out io.Writer
 		return err
 	}
 	if findEntry(entries, name) != nil {
-		return errfmt.New("sandbox already exists", fmt.Sprintf("%q is already registered", name), "use `pikopod sandbox reset "+name+"` to clear its state, or pick another name", "")
+		return errfmt.New("sandbox already exists", fmt.Sprintf("%q is already registered", name), "use `pikopod sandbox reset "+name+"` to clear its state, or pick another name", "docs/config-reference.md#listing-and-resetting-sandboxes")
 	}
 	raw, origin, err := loadSpec(cfg, specSource, out)
 	if err != nil {
@@ -354,13 +354,13 @@ func sandboxUpdateOpts(cfg *config.Config, name, specSource, recordings string, 
 	}
 	entry := findEntry(entries, name)
 	if entry == nil {
-		return errfmt.New("no such sandbox", fmt.Sprintf("%q is not registered — --update refreshes an existing import", name), "run `pikopod import "+name+" --spec …` (without --update) first", "")
+		return errfmt.New("no such sandbox", fmt.Sprintf("%q is not registered — --update refreshes an existing import", name), "run `pikopod import "+name+" --spec …` (without --update) first", "docs/config-reference.md#updating-a-sandbox")
 	}
 	if specSource == "" {
 		specSource = entry.SpecSource
 	}
 	if specSource == "" {
-		return errfmt.New("no spec source", "the sandbox was registered without a recorded source", "pass --spec <file-or-url>", "")
+		return errfmt.New("no spec source", "the sandbox was registered without a recorded source", "pass --spec <file-or-url>", "docs/config-reference.md#updating-a-sandbox")
 	}
 	raw, origin, err := loadSpec(cfg, specSource, out)
 	if err != nil {
@@ -435,7 +435,7 @@ func sandboxList(cfg *config.Config, out io.Writer) error {
 		return err
 	}
 	if len(entries) == 0 {
-		return errfmt.New("no sandboxes registered", "the registry under "+cfg.DataDir+" is empty", "add one with `pikopod sandbox add <name> --spec <file-or-url>`", "")
+		return errfmt.New("no sandboxes registered", "the registry under "+cfg.DataDir+" is empty", "add one with `pikopod sandbox add <name> --spec <file-or-url>`", "docs/config-reference.md#listing-and-resetting-sandboxes")
 	}
 	for _, e := range entries {
 		marking := ""
@@ -486,7 +486,7 @@ func sandboxReset(cfg *config.Config, name string, out io.Writer) error {
 	}
 	entry := findEntry(entries, name)
 	if entry == nil {
-		return errfmt.New("unknown sandbox", fmt.Sprintf("%q is not registered", name), "see `pikopod sandbox list`; add it with `pikopod sandbox add`", "")
+		return errfmt.New("unknown sandbox", fmt.Sprintf("%q is not registered", name), "see `pikopod sandbox list`; add it with `pikopod sandbox add`", "docs/config-reference.md#listing-and-resetting-sandboxes")
 	}
 	st, err := sandbox.OpenStore(cfg.DataDir)
 	if err != nil {
@@ -816,7 +816,7 @@ func newSandboxAddCmd() *cobra.Command {
 			}
 			spec, _ := cmd.Flags().GetString("spec")
 			if spec == "" {
-				return errfmt.New("no spec given", "sandbox add needs the provider's OpenAPI document", "pass --spec <file-or-url>", "")
+				return errfmt.New("no spec given", "sandbox add needs the provider's OpenAPI document", "pass --spec <file-or-url>", "docs/config-reference.md#importing-a-sandbox")
 			}
 			return sandboxAddOpts(cfg, args[0], addOptionsFrom(cmd, spec), cmd.OutOrStdout())
 		}}
@@ -897,7 +897,7 @@ func newSandboxRequestsCmd() *cobra.Command {
 			defer resp.Body.Close()
 			if resp.StatusCode != 200 {
 				raw, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-				return errfmt.Newf("sandbox journal unavailable", "check the sandbox name with `pikopod sandbox list`", "", "the server answered %s: %s", resp.Status, raw)
+				return errfmt.Newf("sandbox journal unavailable", "check the sandbox name with `pikopod sandbox list`", "docs/config-reference.md#request-journal", "the server answered %s: %s", resp.Status, raw)
 			}
 			out := cmd.OutOrStdout()
 			if reset {
