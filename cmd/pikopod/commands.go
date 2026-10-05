@@ -469,6 +469,20 @@ func newDoctorCmd() *cobra.Command {
 				}
 				return nil
 			}())
+			sbxAddr := net.JoinHostPort(cfg.Listen, fmt.Sprint(cfg.SandboxPort))
+			check("sandbox port free or sandbox already running", func() error {
+				conn, dErr := net.DialTimeout("tcp", sbxAddr, 300*time.Millisecond)
+				if dErr == nil {
+					conn.Close()
+					resp, hErr := cfg.LocalClient(2 * time.Second).Get(cfg.Scheme() + "://" + sbxAddr + "/healthz")
+					if hErr == nil {
+						resp.Body.Close()
+						return nil
+					}
+					return fmt.Errorf("port %s is taken by something that is not pikopod", sbxAddr)
+				}
+				return nil
+			}())
 			for _, name := range cfg.UpstreamNames() {
 				target := cfg.Upstreams[name].Target
 				check("upstream "+name+" reachable ("+target+")", func() error {
