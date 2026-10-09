@@ -42,10 +42,10 @@ const maxPackBytes = 1 << 20
 func LoadPack(path string) (*Pack, error) {
 	raw, err := os.ReadFile(path)
 	if err != nil {
-		return nil, errfmt.Newf("cannot read scenario pack", "check the path and permissions", "", "%v", err)
+		return nil, errfmt.Newf("cannot read scenario pack", "check the path and permissions", "scenarios/README.md#where-packs-come-from", "%v", err)
 	}
 	if len(raw) > maxPackBytes {
-		return nil, errfmt.New("scenario pack is too large", fmt.Sprintf("%s is %d bytes; packs are capped at 1 MiB", path, len(raw)), "split the scenario, or trim seed data", "scenarios/README.md")
+		return nil, errfmt.New("scenario pack is too large", fmt.Sprintf("%s is %d bytes; packs are capped at 1 MiB", path, len(raw)), "split the scenario, or trim seed data", "scenarios/README.md#limits")
 	}
 	return ParsePack(raw, path)
 }
@@ -53,26 +53,26 @@ func LoadPack(path string) (*Pack, error) {
 func ParsePack(raw []byte, path string) (*Pack, error) {
 	var doc any
 	if err := yaml.Unmarshal(raw, &doc); err != nil {
-		return nil, errfmt.Newf("scenario pack is not valid YAML", "fix the syntax error and retry", "", "%s: %v", path, err)
+		return nil, errfmt.Newf("scenario pack is not valid YAML", "fix the syntax error and retry", "scenarios/README.md#writing-a-pack-by-hand", "%s: %v", path, err)
 	}
 	jsonDoc, err := jsonify(doc)
 	if err != nil {
-		return nil, errfmt.Newf("scenario pack is not JSON-shaped", "packs must contain only plain maps, lists, and scalars", "", "%s: %v", path, err)
+		return nil, errfmt.Newf("scenario pack is not JSON-shaped", "packs must contain only plain maps, lists, and scalars", "scenarios/README.md#writing-a-pack-by-hand", "%s: %v", path, err)
 	}
 	obj, ok := jsonDoc.(map[string]any)
 	if !ok {
-		return nil, errfmt.New("scenario pack is not a mapping", path+" does not contain a YAML mapping at the top level", "a pack is {name, provider, description, definition}", "")
+		return nil, errfmt.New("scenario pack is not a mapping", path+" does not contain a YAML mapping at the top level", "a pack is {name, provider, description, definition}", "scenarios/README.md#writing-a-pack-by-hand")
 	}
 	pack := &Pack{Path: path}
 	if s, ok := obj["name"].(string); ok && s != "" {
 		pack.Name = s
 	} else {
-		return nil, errfmt.New("scenario pack is missing 'name'", path+" has no non-empty name field", "add `name: <slug>` to the pack", "")
+		return nil, errfmt.New("scenario pack is missing 'name'", path+" has no non-empty name field", "add `name: <slug>` to the pack", "scenarios/README.md#writing-a-pack-by-hand")
 	}
 	if s, ok := obj["provider"].(string); ok && s != "" {
 		pack.Provider = s
 	} else {
-		return nil, errfmt.New("scenario pack is missing 'provider'", path+" has no non-empty provider field", "add `provider: <sandbox-name>` to the pack", "")
+		return nil, errfmt.New("scenario pack is missing 'provider'", path+" has no non-empty provider field", "add `provider: <sandbox-name>` to the pack", "scenarios/README.md#writing-a-pack-by-hand")
 	}
 	if s, ok := obj["description"].(string); ok {
 		pack.Description = s
@@ -82,12 +82,12 @@ func ParsePack(raw []byte, path string) (*Pack, error) {
 	}
 	defRaw, has := obj["definition"]
 	if !has {
-		return nil, errfmt.New("scenario pack is missing 'definition'", path+" has no definition field", "add a `definition:` block with steps", "")
+		return nil, errfmt.New("scenario pack is missing 'definition'", path+" has no definition field", "add a `definition:` block with steps", "scenarios/README.md#writing-a-pack-by-hand")
 	}
 	pack.RawDefinition = defRaw
 	def, errs := ParseDefinition(defRaw)
 	if len(errs) > 0 {
-		return nil, errfmt.New("scenario pack definition is invalid", fmt.Sprintf("%s: %s (at %s)", path, errs[0].Message, errs[0].Pointer), "fix the definition to match schema/scenario-pack.schema.json", "")
+		return nil, errfmt.New("scenario pack definition is invalid", fmt.Sprintf("%s: %s (at %s)", path, errs[0].Message, errs[0].Pointer), "fix the definition to match schema/scenario-pack.schema.json", "scenarios/README.md#writing-a-pack-by-hand")
 	}
 	pack.Definition = def
 	return pack, nil
