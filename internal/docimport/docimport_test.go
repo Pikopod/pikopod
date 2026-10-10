@@ -107,6 +107,30 @@ func TestLadderNoLLMKeyFailsLoudly(t *testing.T) {
 	}
 }
 
+func TestFromDocsURLMissingLLMErrorNamesSupportedConfiguration(t *testing.T) {
+	pageURL := "https://docs.x.test/guide"
+	prose := []byte(`<html><body>API docs</body></html>`)
+
+	_, err := FromDocsURL(pageURL, prose, fetcherFor(nil), nil)
+	if err == nil {
+		t.Fatal("expected an error when no LLM client is configured")
+	}
+
+	message := err.Error()
+
+	for _, want := range []string{"llm.api_key", "PIKOPOD_LLM_KEY"} {
+		if !strings.Contains(message, want) {
+			t.Errorf("error message %q does not contain %q", message, want)
+		}
+	}
+
+	for _, unwanted := range []string{"OPENROUTER_API_KEY", "OPENAI_API_KEY"} {
+		if strings.Contains(message, unwanted) {
+			t.Errorf("error message %q does not contain %q", message, unwanted)
+		}
+	}
+}
+
 func keysOf(m map[string]any) []string {
 	out := make([]string, 0, len(m))
 	for k := range m {
