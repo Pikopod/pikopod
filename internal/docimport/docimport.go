@@ -102,7 +102,7 @@ func FromDocsURL(pageURL string, html []byte, fetch Fetcher, llm *nl.Client) (*R
 		return nil, errfmt.New(
 			"this documentation page needs model-assisted extraction",
 			pageURL+" embeds no machine-readable spec pikopod recognizes",
-			"set llm.api_key (or OPENROUTER_API_KEY / OPENAI_API_KEY) to enable Tier-C extraction, or point --spec at a spec/collection directly",
+			"set llm.api_key (or PIKOPOD_LLM_KEY) to enable Tier-C extraction, or point --spec at a spec/collection directly",
 			"docs/config-reference.md#llm")
 	}
 	return llmExtract(pageURL, html, fetch, llm)
