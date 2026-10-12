@@ -52,6 +52,37 @@ first line it reports `Invalid formula`. Or download a signed binary from
 and arm64, static, zero dependencies. Every release ships `SHA256SUMS`, cosign-signed,
 with SLSA provenance; the verification command is in [Installation](https://docs.pikopod.com/getting-started/installation).
 
+### Shell completion
+
+Run the one-liner for your shell to enable completion in the current session:
+
+Bash:
+
+```bash
+source <(pikopod completion bash)
+```
+
+Zsh (run `autoload -Uz compinit && compinit` first if completion is not initialized):
+
+```zsh
+source <(pikopod completion zsh)
+```
+
+Fish:
+
+```fish
+pikopod completion fish | source
+```
+
+PowerShell:
+
+```powershell
+pikopod completion powershell | Out-String | Invoke-Expression
+```
+
+To enable completion in future sessions, add the line to `~/.bashrc`,
+`~/.zshrc`, `~/.config/fish/config.fish`, or your PowerShell `$PROFILE`, respectively.
+
 ## Try it in ten seconds
 
 ```bash
