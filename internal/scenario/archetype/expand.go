@@ -25,7 +25,7 @@ func resolveBindings(a *Archetype, bindings map[string]string, apiDef *ir.ApiDef
 	for _, req := range a.Requires {
 		ref, has := bindings[req.Role]
 		if !has || ref == "" {
-			return nil, errfmt.New("scenario expansion failed", fmt.Sprintf("binding for role '%s' is missing", req.Role), "supply a binding for every role the archetype requires", "")
+			return nil, errfmt.New("scenario expansion failed", fmt.Sprintf("binding for role '%s' is missing", req.Role), "supply a binding for every role the archetype requires", "scenarios/README.md#archetypes-start-here")
 		}
 		if req.Bind == "webhookEvent" {
 			found := false
@@ -36,7 +36,7 @@ func resolveBindings(a *Archetype, bindings map[string]string, apiDef *ir.ApiDef
 				}
 			}
 			if !found {
-				return nil, errfmt.New("scenario expansion failed", fmt.Sprintf("webhook event '%s' is not in this API version", ref), "bind the role to an event the imported spec declares", "")
+				return nil, errfmt.New("scenario expansion failed", fmt.Sprintf("webhook event '%s' is not in this API version", ref), "bind the role to an event the imported spec declares", "scenarios/README.md#archetypes-start-here")
 			}
 			resolved[req.Role] = resolvedRole{event: ref, isEvent: true}
 		} else {
@@ -53,7 +53,7 @@ func resolveBindings(a *Archetype, bindings map[string]string, apiDef *ir.ApiDef
 				}
 			}
 			if ep == nil {
-				return nil, errfmt.New("scenario expansion failed", fmt.Sprintf("operation '%s' is not in this API version", ref), "bind the role to an operation the imported spec declares", "")
+				return nil, errfmt.New("scenario expansion failed", fmt.Sprintf("operation '%s' is not in this API version", ref), "bind the role to an operation the imported spec declares", "scenarios/README.md#archetypes-start-here")
 			}
 			resolved[req.Role] = resolvedRole{method: strings.ToUpper(ep.Method.Value), collectionPath: scenario.ResourceTypeOf(ep)}
 		}
@@ -65,11 +65,11 @@ func tokenValue(token string, resolved map[string]resolvedRole) (string, error) 
 	role, field, hasField := strings.Cut(token, ".")
 	r, has := resolved[role]
 	if !has {
-		return "", errfmt.New("scenario expansion failed", fmt.Sprintf("unknown role token '%s'", token), "the archetype's step templates may only reference declared roles", "")
+		return "", errfmt.New("scenario expansion failed", fmt.Sprintf("unknown role token '%s'", token), "the archetype's step templates may only reference declared roles", "scenarios/README.md#archetypes-start-here")
 	}
 	if r.isEvent {
 		if hasField && field != "" {
-			return "", errfmt.New("scenario expansion failed", fmt.Sprintf("webhook role '%s' has no field '%s'", role, field), "reference the event role bare: <<role>>", "")
+			return "", errfmt.New("scenario expansion failed", fmt.Sprintf("webhook role '%s' has no field '%s'", role, field), "reference the event role bare: <<role>>", "scenarios/README.md#archetypes-start-here")
 		}
 		return r.event, nil
 	}
@@ -79,7 +79,7 @@ func tokenValue(token string, resolved map[string]resolvedRole) (string, error) 
 	if field == "collectionPath" {
 		return r.collectionPath, nil
 	}
-	return "", errfmt.New("scenario expansion failed", fmt.Sprintf("unknown operation field '%s' on role '%s'", field, role), "operation roles expose <<role.method>> and <<role.collectionPath>>", "")
+	return "", errfmt.New("scenario expansion failed", fmt.Sprintf("unknown operation field '%s' on role '%s'", field, role), "operation roles expose <<role.method>> and <<role.collectionPath>>", "scenarios/README.md#archetypes-start-here")
 }
 
 func substitute(value any, resolved map[string]resolvedRole) (any, error) {
