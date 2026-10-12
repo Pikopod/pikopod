@@ -48,12 +48,13 @@ func TestAFailureOnAnExcludedPathStillFiresWithoutARecording(t *testing.T) {
 	if !endpoints["/health"] || !endpoints["/charges"] {
 		t.Fatalf("the 5xx on the excluded path is still an incident, like the recorded one: %+v", evs)
 	}
-	raw, _ := os.ReadFile(filepath.Join(dir, "recordings", "examplepay.ndjson"))
+	var raw []byte
+	waitFor(t, func() bool {
+		raw, _ = os.ReadFile(filepath.Join(dir, "recordings", "examplepay.ndjson"))
+		return strings.Contains(string(raw), "/charges")
+	})
 	if strings.Contains(string(raw), "health") || strings.Contains(string(raw), "HEALTHCANARY") {
 		t.Fatalf("the excluded exchange never reached disk:\n%s", raw)
-	}
-	if !strings.Contains(string(raw), "/charges") {
-		t.Fatalf("the included exchange is recorded as usual:\n%s", raw)
 	}
 	rec := httptest.NewRecorder()
 	a.healthz(rec, httptest.NewRequest(http.MethodGet, "/healthz", nil))
