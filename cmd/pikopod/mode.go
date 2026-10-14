@@ -130,6 +130,10 @@ never a provider. Binding a non-loopback address requires a token.`}
 
 	show := &cobra.Command{Use: "show <sandbox>", Short: "Show the standing state, if any", Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			format, _ := cmd.Flags().GetString("format")
+			if format != "text" && format != "json" {
+				return errfmt.New("unknown --format", fmt.Sprintf("%q is not text or json", format), "pass --format text or --format json", "scenarios/README.md")
+			}
 			cfg, err := loadConfig(cmd)
 			if err != nil {
 				return err
@@ -143,6 +147,11 @@ never a provider. Binding a non-loopback address requires a token.`}
 			if err != nil {
 				return err
 			}
+			if format == "json" {
+				enc := json.NewEncoder(cmd.OutOrStdout())
+				enc.SetIndent("", "  ")
+				return enc.Encode(spec)
+			}
 			if spec == nil {
 				fmt.Fprintln(cmd.OutOrStdout(), "no mode set")
 				return nil
@@ -150,6 +159,7 @@ never a provider. Binding a non-loopback address requires a token.`}
 			fmt.Fprint(cmd.OutOrStdout(), spec.Describe())
 			return nil
 		}}
+	show.Flags().String("format", "text", "output format: text | json")
 
 	clear := &cobra.Command{Use: "clear <sandbox>", Short: "Leave the standing state", Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {

@@ -12,6 +12,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/pikopod/pikopod/internal/mode"
 )
 
 func modeServer(t *testing.T, seed string) *httptest.Server {
@@ -180,4 +182,71 @@ func clearCLI(t *testing.T, srv *httptest.Server) (string, error) {
 		t.Fatal(err)
 	}
 	return runCLI(t, newModeCmd(), "clear", "widgets")
+}
+
+func showCLI(t *testing.T, srv *httptest.Server, args ...string) (string, error) {
+	t.Helper()
+	dir := cliDir(t)
+	u, _ := url.Parse(srv.URL)
+	yaml := fmt.Sprintf("listen: 127.0.0.1\nsandbox_port: %s\ndata_dir: %s\nupstreams:\n  widgets:\n    target: https://api.example.invalid\n", u.Port(), filepath.Join(dir, "data"))
+	if err := os.WriteFile(filepath.Join(dir, "pikopod.yaml"), []byte(yaml), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	allArgs := append([]string{"show", "widgets"}, args...)
+	return runCLI(t, newModeCmd(), allArgs...)
+}
+
+func TestModeShowFormatJSON(t *testing.T) {
+	srv := modeServer(t, "mode-show-json-1")
+
+	freshText, err := showCLI(t, srv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if freshText != "no mode set\n" {
+		t.Fatalf("fresh mode show = %q, want %q", freshText, "no mode set\n")
+	}
+
+	freshJSON, err := showCLI(t, srv, "--format", "json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if freshJSON != "null\n" {
+		t.Fatalf("fresh mode show --format json = %q, want %q", freshJSON, "null\n")
+	}
+
+	if res := setMode(t, srv, `{"name":"declines"}`); res.StatusCode != http.StatusCreated {
+		t.Fatalf("mode set = %d", res.StatusCode)
+	}
+
+	textOut, err := showCLI(t, srv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	explicitTextOut, err := showCLI(t, srv, "--format", "text")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if textOut != explicitTextOut {
+		t.Fatalf("default format must match --format text: %q vs %q", textOut, explicitTextOut)
+	}
+
+	jsonOut, err := showCLI(t, srv, "--format", "json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var spec mode.Spec
+	if err := json.Unmarshal([]byte(jsonOut), &spec); err != nil {
+		t.Fatalf("mode show --format json is not valid json: %v\n%s", err, jsonOut)
+	}
+	if spec.Name != "declines" {
+		t.Fatalf("spec name = %q, want declines", spec.Name)
+	}
+	if len(spec.Faults) == 0 {
+		t.Fatal("declines spec must have faults")
+	}
+
+	if _, err := showCLI(t, srv, "--format", "yaml"); err == nil {
+		t.Fatal("unknown format must error")
+	}
 }
