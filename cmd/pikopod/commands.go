@@ -84,10 +84,11 @@ llm:
 `
 
 func newInitCmd() *cobra.Command {
-	return &cobra.Command{Use: "init", Short: "Scaffold pikopod.yaml (providers, Slack webhook, optional BYOK LLM key)",
+	c := &cobra.Command{Use: "init", Short: "Scaffold pikopod.yaml (providers, Slack webhook, optional BYOK LLM key)",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if _, err := os.Stat("pikopod.yaml"); err == nil {
-				return errfmt.New("pikopod.yaml already exists", "refusing to overwrite your configuration", "edit it directly, or remove it first to re-scaffold", "docs/config-reference.md")
+			force, _ := cmd.Flags().GetBool("force")
+			if _, err := os.Stat("pikopod.yaml"); err == nil && !force {
+				return errfmt.New("pikopod.yaml already exists", "refusing to overwrite your configuration", "edit it directly, or re-run with `--force` to overwrite it", "docs/config-reference.md")
 			}
 			if err := os.WriteFile("pikopod.yaml", []byte(initTemplate), 0o600); err != nil {
 				return errfmt.Newf("cannot write pikopod.yaml", "check directory permissions", "docs/config-reference.md", "%v", err)
@@ -95,6 +96,8 @@ func newInitCmd() *cobra.Command {
 			fmt.Fprintln(cmd.OutOrStdout(), "wrote pikopod.yaml — edit the upstreams block, then: pikopod doctor && pikopod up")
 			return nil
 		}}
+	c.Flags().Bool("force", false, "overwrite an existing pikopod.yaml")
+	return c
 }
 
 func newImportCmd() *cobra.Command {
