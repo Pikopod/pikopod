@@ -147,6 +147,10 @@ func New(cfg *config.Config, m *Metrics, captureDepth int) (*Server, error) {
 					pr.Out.URL.RawQuery = recv.RawQuery
 					pr.Out.Host = recv.Host
 				},
+				ModifyResponse: func(res *http.Response) error {
+					res.Body = &upstreamBody{rc: res.Body, m: m}
+					return nil
+				},
 				ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
 					m.UpstreamErrors.Add(1)
 					w.Header().Set("X-Pikopod-Error", "receiver-unreachable")
