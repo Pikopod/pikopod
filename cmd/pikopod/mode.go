@@ -8,13 +8,13 @@ import (
 	"net"
 	"net/http"
 	"net/url"
-	"os"
 	"strings"
 	"time"
 
 	"github.com/pikopod/pikopod/internal/config"
 	"github.com/pikopod/pikopod/internal/errfmt"
 	"github.com/pikopod/pikopod/internal/mode"
+	"github.com/pikopod/pikopod/internal/report"
 	"github.com/pikopod/pikopod/internal/scenario"
 	"github.com/spf13/cobra"
 )
@@ -183,6 +183,11 @@ never a provider. Binding a non-loopback address requires a token.`}
 				return err
 			}
 			scope, _ := cmd.Flags().GetString("scope")
+			formatFlag, _ := cmd.Flags().GetString("format")
+			format, err := report.ParseFormat(formatFlag)
+			if err != nil {
+				return err
+			}
 			subpath := "mode/verify"
 			if scope != "" {
 				subpath += "?scope=" + url.QueryEscape(scope)
@@ -215,21 +220,41 @@ never a provider. Binding a non-loopback address requires a token.`}
 				return errfmt.Newf("the sandbox answered strangely", "retry", "", "%v", err)
 			}
 			out := cmd.OutOrStdout()
-			if scope != "" {
-				fmt.Fprintf(out, "scope %q: judging only the requests sent with X-Pikopod-Scope: %s\n", scope, scope)
+			notes := out
+			if format != report.FormatText {
+				notes = cmd.ErrOrStderr()
 			}
-			writeRunResult(out, body.Mode, &body.Result)
+			if scope != "" {
+				fmt.Fprintf(notes, "scope %q: judging only the requests sent with X-Pikopod-Scope: %s\n", scope, scope)
+			}
+			doc := &report.Document{}
+			doc.Add(body.Mode, "", &body.Result)
+			switch format {
+			case report.FormatText:
+				writeRunResult(out, body.Mode, &body.Result)
+			case report.FormatJSON:
+				if err := doc.WriteJSON(out); err != nil {
+					return err
+				}
+			case report.FormatJUnit:
+				if err := doc.WriteJUnit(out); err != nil {
+					return err
+				}
+			case report.FormatGitHubActions:
+				doc.WriteGitHubActions(out)
+			}
 			switch body.Result.Status {
 			case scenario.RunErrored:
 				return errfmt.New("mode verify errored", "a verification step could not run (see the ! line above)", "fix the scenario or sandbox and retry", "docs/exit-codes.md")
 			case scenario.RunFailed:
-				fmt.Fprintln(out, "\nyour client did not do what the scenario expects — exit 1")
-				os.Exit(1)
+				fmt.Fprintln(notes, "\nyour client did not do what the scenario expects — exit 1")
+				exit(1)
 			}
 			return nil
 		}}
 
 	verify.Flags().String("scope", "", "judge only the requests sent with this X-Pikopod-Scope header")
+	verify.Flags().String("format", "text", "output format: text | json | junit | githubactions")
 	c.AddCommand(set, show, clear, verify)
 	return c
 }

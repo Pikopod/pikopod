@@ -23,6 +23,7 @@ import (
 	"github.com/pikopod/pikopod/internal/errfmt"
 	"github.com/pikopod/pikopod/internal/ir"
 	"github.com/pikopod/pikopod/internal/proxy"
+	"github.com/pikopod/pikopod/internal/report"
 	"github.com/pikopod/pikopod/internal/sandbox"
 	"github.com/pikopod/pikopod/internal/sanitize/specrules"
 	"github.com/pikopod/pikopod/internal/scenario/nl"
@@ -32,6 +33,8 @@ import (
 	"github.com/pikopod/pikopod/internal/volatile"
 	"github.com/spf13/cobra"
 )
+
+var exit = os.Exit
 
 func loadConfig(cmd *cobra.Command) (*config.Config, error) {
 	path, _ := cmd.Flags().GetString("config")
@@ -337,6 +340,7 @@ func newScenarioCmd() *cobra.Command {
 	run.Flags().StringArray("bind", nil, "override a role binding as role=operationId (repeatable)")
 	run.Flags().String("target", "", "run against a REAL endpoint (base URL) instead of the local sandbox — REQUEST/NOTE steps only")
 	run.Flags().StringArray("target-header", nil, "header sent on every remote request as 'Name:value' (repeatable; e.g. Authorization)")
+	run.Flags().String("format", "text", "output format: text | json | junit | githubactions")
 
 	create := &cobra.Command{Use: "create <sandbox> <description...>", Short: "Compile a plain-English scenario, grounded against your API (BYOK LLM)", Args: cobra.MinimumNArgs(2),
 		RunE: scenarioCreate}
@@ -388,6 +392,10 @@ func newReportCmd() *cobra.Command {
 				return err
 			}
 			out := cmd.OutOrStdout()
+			events, err := loadEvents(cfg.DataDir)
+			if err != nil {
+				return err
+			}
 			found := false
 			for _, name := range cfg.UpstreamNames() {
 				raw, err := os.ReadFile(filepath.Join(cfg.DataDir, "baselines", name+".json"))
@@ -418,9 +426,13 @@ func newReportCmd() *cobra.Command {
 					fmt.Fprintf(out, "  %-6s %-45s %s  %4d samples  %d fields  [%s]\n", f.Method, f.Template, f.StatusClass, f.Samples, len(f.Fields), state)
 				}
 			}
-			if !found {
+			if !found && len(events) == 0 {
 				return errfmt.New("no baselines yet", "the agent has not observed traffic (or data_dir differs)", "run `pikopod up` and point traffic at it; the report is worth reading after ~48h", "docs/config-reference.md#baselines")
 			}
+			if found {
+				fmt.Fprintln(out)
+			}
+			fmt.Fprintln(out, report.ComputeOutcome(events, cfg.DataDir, ".").Line())
 			return nil
 		}}
 }

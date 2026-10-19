@@ -14,6 +14,7 @@ import (
 	"github.com/pikopod/pikopod/internal/config"
 	"github.com/pikopod/pikopod/internal/errfmt"
 	"github.com/pikopod/pikopod/internal/ir"
+	"github.com/pikopod/pikopod/internal/report"
 	"github.com/pikopod/pikopod/internal/sandbox"
 	"github.com/pikopod/pikopod/internal/scenario"
 	"github.com/pikopod/pikopod/internal/scenario/archetype"
@@ -233,7 +234,17 @@ func scenarioRun(cmd *cobra.Command, args []string) error {
 		}
 		bindOverrides[k] = v
 	}
+	formatFlag, _ := cmd.Flags().GetString("format")
+	format, err := report.ParseFormat(formatFlag)
+	if err != nil {
+		return err
+	}
 	out := cmd.OutOrStdout()
+	notes := out
+	if format != report.FormatText {
+		notes = cmd.ErrOrStderr()
+	}
+	doc := &report.Document{}
 
 	targetURL, _ := cmd.Flags().GetString("target")
 	targetHeaderKVs, _ := cmd.Flags().GetStringArray("target-header")
@@ -251,7 +262,7 @@ func scenarioRun(cmd *cobra.Command, args []string) error {
 		if err != nil {
 			return err
 		}
-		fmt.Fprintf(out, "running against REAL endpoint %s — only REQUEST/NOTE/SNAPSHOT steps; conditioning and state assertions are refused\n", targetURL)
+		fmt.Fprintf(notes, "running against REAL endpoint %s — only REQUEST/NOTE/SNAPSHOT steps; conditioning and state assertions are refused\n", targetURL)
 	}
 
 	failed, errored := 0, 0
@@ -261,7 +272,11 @@ func scenarioRun(cmd *cobra.Command, args []string) error {
 			return err
 		}
 		if note := info.Note(); note != "" {
-			fmt.Fprintf(out, "note: %s %s\n", name, note)
+			fmt.Fprintf(notes, "note: %s %s\n", name, note)
+		}
+		file := ""
+		if pk := packFor(cfg, name); pk != nil {
+			file = pk.Path
 		}
 		inputs, err := coerceInputs(parsed, inputKVs)
 		if err != nil {
@@ -297,11 +312,14 @@ func scenarioRun(cmd *cobra.Command, args []string) error {
 			}
 		}
 
-		writeRunResult(out, name, res)
+		doc.Add(name, file, res)
+		if format == report.FormatText {
+			writeRunResult(out, name, res)
+		}
 		if sink != nil {
-			fmt.Fprintf(out, "    sink: %d delivered, %d failed to %s\n", sink.Delivered, sink.Failed, entry.WebhookURL)
+			fmt.Fprintf(notes, "    sink: %d delivered, %d failed to %s\n", sink.Delivered, sink.Failed, entry.WebhookURL)
 			if sink.LastError != "" {
-				fmt.Fprintf(out, "    last sink failure: %s\n", sink.LastError)
+				fmt.Fprintf(notes, "    last sink failure: %s\n", sink.LastError)
 			}
 		}
 		switch res.Status {
@@ -311,13 +329,28 @@ func scenarioRun(cmd *cobra.Command, args []string) error {
 			errored++
 		}
 	}
+	doc.Exercise(def)
+	switch format {
+	case report.FormatText:
+		fmt.Fprintln(out, doc.ExercisedLine())
+	case report.FormatJSON:
+		if err := doc.WriteJSON(out); err != nil {
+			return err
+		}
+	case report.FormatJUnit:
+		if err := doc.WriteJUnit(out); err != nil {
+			return err
+		}
+	case report.FormatGitHubActions:
+		doc.WriteGitHubActions(out)
+	}
 
 	if errored > 0 {
 		return errfmt.New("scenario check errored", "a step could not execute (see the ! run above)", "fix the scenario or sandbox and retry", "docs/exit-codes.md")
 	}
 	if failed > 0 {
-		fmt.Fprintf(out, "\n%d scenario(s) failed — exit 1\n", failed)
-		os.Exit(1)
+		fmt.Fprintf(notes, "\n%d scenario(s) failed — exit 1\n", failed)
+		exit(1)
 	}
 	return nil
 }

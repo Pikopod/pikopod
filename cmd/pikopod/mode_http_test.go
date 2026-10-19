@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"encoding/xml"
 	"fmt"
 	"io"
 	"net/http"
@@ -248,5 +249,35 @@ func TestModeShowFormatJSON(t *testing.T) {
 
 	if _, err := showCLI(t, srv, "--format", "yaml"); err == nil {
 		t.Fatal("unknown format must error")
+	}
+}
+
+func TestModeVerifyFormatJUnit(t *testing.T) {
+	srv := modeServer(t, "mode-verify-junit-1")
+	if res := setMode(t, srv, `{"name":"retry_storm"}`); res.StatusCode != http.StatusCreated {
+		t.Fatalf("mode set = %d", res.StatusCode)
+	}
+	for range 3 {
+		postWidget(t, srv, "k-junit")
+	}
+	dir := cliDir(t)
+	u, _ := url.Parse(srv.URL)
+	yaml := fmt.Sprintf("listen: 127.0.0.1\nsandbox_port: %s\ndata_dir: %s\nupstreams:\n  widgets:\n    target: https://api.example.invalid\n", u.Port(), filepath.Join(dir, "data"))
+	if err := os.WriteFile(filepath.Join(dir, "pikopod.yaml"), []byte(yaml), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	out, err := runCLI(t, newModeCmd(), "verify", "widgets", "--format", "junit")
+	if err != nil {
+		t.Fatalf("verify: %v\n%s", err, out)
+	}
+	var suites junitSuites
+	if err := xml.Unmarshal([]byte(out), &suites); err != nil {
+		t.Fatalf("junit output must parse: %v\n%s", err, out)
+	}
+	if len(suites.Suites) != 1 || suites.Suites[0].Name != "retry_storm" || suites.Suites[0].Failures != 0 || len(suites.Suites[0].Cases) != 1 || suites.Suites[0].Cases[0].Name != "storm-shape" {
+		t.Fatalf("one suite for the mode, one case per verification step: %+v", suites.Suites)
+	}
+	if _, err := runCLI(t, newModeCmd(), "verify", "widgets", "--format", "yaml"); err == nil || !strings.Contains(err.Error(), "text, json, junit or githubactions") {
+		t.Fatalf("an unknown format is refused with the choices: %v", err)
 	}
 }
