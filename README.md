@@ -183,6 +183,7 @@ pikopod scenario check examplepay declines retry_storm
     PASSED         attempt2         POST /charges → 503
     PASSED         attempt3         POST /charges → 201
     PASSED         storm-shape      3 matcher(s) matched in order
+exercised 1 of 4 declared operations (unexercised: GET /charges, GET /charges/{id}, PATCH /charges/{id})
 ```
 
 That proves the sandbox fails the way the story says. To prove your own code
