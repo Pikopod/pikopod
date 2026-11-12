@@ -975,6 +975,10 @@ func newSandboxResetCmd() *cobra.Command {
 func newSandboxRequestsCmd() *cobra.Command {
 	c := &cobra.Command{Use: "requests <name>", Short: "Show the requests a running sandbox has received (the client-behavior journal)", Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			format, _ := cmd.Flags().GetString("format")
+			if format != "text" && format != "json" {
+				return errfmt.New("unknown --format", fmt.Sprintf("%q is not text or json", format), "pass --format text or --format json", "docs/config-reference.md#request-journal")
+			}
 			cfg, err := loadConfig(cmd)
 			if err != nil {
 				return err
@@ -1008,6 +1012,13 @@ func newSandboxRequestsCmd() *cobra.Command {
 			}
 			out := cmd.OutOrStdout()
 			if reset {
+				if format == "json" {
+					result := map[string]any{"reset": true}
+					if cmd.Flags().Changed("scope") {
+						result["scope"] = scope
+					}
+					return json.NewEncoder(out).Encode(result)
+				}
 				if cmd.Flags().Changed("scope") {
 					fmt.Fprintf(out, "journal reset for scope %q\n", scope)
 					return nil
@@ -1025,6 +1036,9 @@ func newSandboxRequestsCmd() *cobra.Command {
 			}
 			if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
 				return err
+			}
+			if format == "json" {
+				return json.NewEncoder(out).Encode(payload.Requests)
 			}
 			for _, e := range payload.Requests {
 				line := fmt.Sprintf("#%-4d %-6s %-40s → %d", e.Seq, e.Method, e.Path, e.Status)
@@ -1052,6 +1066,7 @@ func newSandboxRequestsCmd() *cobra.Command {
 	c.Flags().Int("last", 50, "number of most recent requests to show")
 	c.Flags().Bool("reset", false, "clear the journal (and its eviction taint)")
 	c.Flags().String("scope", "", "show or reset one partition: the requests sent with this X-Pikopod-Scope header")
+	c.Flags().String("format", "text", "output format: text | json")
 	return c
 }
 
